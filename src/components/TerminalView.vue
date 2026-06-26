@@ -55,14 +55,16 @@ onUnmounted(()=>{ul?.();ro?.disconnect();term?.dispose();invoke('stop_command',{
   </div>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
+@use "@/styles/mixins.scss" as *;
 .tw { flex:1; display:flex; flex-direction:column; overflow:hidden; }
-.to { flex:1; overflow:hidden; padding:4px; margin:4px; border:1px solid #3e3e42; background:#1e1e1e; }
-.to:deep(.xterm){height:100%}
-.to:deep(.xterm-viewport){scrollbar-width:thin}
-.tb { display:flex; align-items:center; gap:6px; padding:6px 12px; background:#2d2d30; border-top:1px solid #3e3e42; }
-.p { color:#4ec9b0; font-family:'Cascadia Code',Consolas,monospace; font-size:13px; font-weight:700; }
-.ti { flex:1; background:#3c3c3c; border:1px solid #555; color:#ccc; font-family:'Cascadia Code',Consolas,monospace; font-size:13px; padding:3px 8px; }
-.ti:focus { border-color:#007acc; outline:none; }
-.ti::placeholder { color:#858585; }
+.to { flex:1; overflow:hidden; padding:4px; margin:4px; border:1px solid var(--jc-border-default); background:var(--jc-term-bg);
+  &:deep(.xterm) { height:100%; }
+  &:deep(.xterm-viewport) { scrollbar-width:thin; }
+}
+.tb { display:flex; align-items:center; gap:6px; padding:6px 12px; background:var(--jc-bg-elevated); border-top:1px solid var(--jc-border-default); }
+.p { color:var(--jc-color-success); font-family:'Cascadia Code',Consolas,monospace; font-size:13px; font-weight:700; }
+.ti { flex:1; @include input-base; font-family:'Cascadia Code',Consolas,monospace; font-size:13px; padding:3px 8px;
+  &:focus { border-color:var(--jc-color-accent); outline:none; }
+}
 </style>

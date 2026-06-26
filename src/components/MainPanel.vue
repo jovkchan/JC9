@@ -68,29 +68,28 @@ document.addEventListener('click',closeCtx)
   </div>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
+@use "@/styles/mixins.scss" as *;
 .panel { flex:1; display:flex; flex-direction:column; overflow:hidden; min-width:0; }
-.tabs { display:flex; background:#2d2d30; overflow-x:auto; flex-shrink:0; }
-.tab { display:flex; align-items:center; gap:4px; padding:6px 12px; font-size:12px; cursor:pointer; color:#858585; border-right:1px solid #3e3e42; white-space:nowrap; }
-.tab:hover { color:#ccc; background:#2a2d2e; }
-.tab.on { color:#e0e0e0; background:#1e1e1e; }
-.tdot { width:6px; height:6px; border-radius:50%; background:#555; flex-shrink:0; }
-.tdot.live { background:#4ec9b0; }
+.tabs { display:flex; background:var(--jc-bg-elevated); overflow-x:auto; flex-shrink:0; }
+.tab { display:flex; align-items:center; gap:4px; padding:6px 12px; font-size:12px; cursor:pointer; color:var(--jc-text-secondary); border-right:1px solid var(--jc-border-default); white-space:nowrap;
+  &:hover { color:var(--jc-text-primary); background:var(--jc-bg-hover); }
+  &.on { color:var(--jc-text-highlight); background:var(--jc-bg-app); }
+}
+.tdot { @include dot; }
 .tl { max-width:160px; overflow:hidden; text-overflow:ellipsis; }
-.tx { background:none; color:#858585; font-size:14px; padding:0 4px; cursor:pointer; }
-.tx:hover { color:#f44747; }
+.tx { background:none; color:var(--jc-text-secondary); font-size:14px; padding:0 4px; cursor:pointer;
+  &:hover { color:var(--jc-color-error); }
+}
 .content { flex:1; display:flex; flex-direction:column; overflow:hidden; }
-.bar { display:flex; justify-content:space-between; align-items:center; padding:6px 12px; background:#2d2d30; border-bottom:1px solid #3e3e42; flex-shrink:0; gap:8px; }
-.cmdtext { font-size:11px; color:#4ec9b0; font-family:'Cascadia Code',Consolas,monospace; }
+.bar { @include bar; }
+.cmdtext { font-size:11px; color:var(--jc-color-success); font-family:'Cascadia Code',Consolas,monospace; }
 .acts { display:flex; gap:6px; }
-.btn { background:#3c3c3c; color:#ccc; padding:3px 12px; font-size:11px; }
-.btn:hover { background:#4c4c4c; }
-.btn.pri { background:#007acc; color:#fff; }
-.btn.pri:hover { background:#1a8ad4; }
-.empty { flex:1; display:flex; align-items:center; justify-content:center; color:#858585; font-size:13px; }
-.term-area { flex:1; display:flex; overflow:hidden; position:relative; }
-.doc-body { flex:1; overflow-y:auto; padding:12px; font-family:'Cascadia Code',Consolas,monospace; font-size:12px; color:#ccc; white-space:pre-wrap; background:#1e1e1e; }
-.ctx { position:fixed; z-index:9999; background:#2d2d30; border:1px solid #555; padding:4px 0; min-width:130px; box-shadow:0 4px 12px rgba(0,0,0,.5); }
-.ci { padding:5px 14px; font-size:12px; cursor:pointer; color:#ccc; }
-.ci:hover { background:#094771; }
+.btn { @include btn-base; font-size:11px; }
+.btn.pri { @include btn-primary; }
+.empty { flex:1; display:flex; align-items:center; justify-content:center; color:var(--jc-text-secondary); font-size:13px; }
+.term-area { flex:1; display:flex; overflow:hidden; }
+.doc-body { flex:1; overflow-y:auto; padding:12px; font-family:'Cascadia Code',Consolas,monospace; font-size:12px; color:var(--jc-text-primary); white-space:pre-wrap; background:var(--jc-bg-app); }
+.ctx { @include ctx-menu; min-width:130px; }
+.ci { @include ctx-item; }
 </style>

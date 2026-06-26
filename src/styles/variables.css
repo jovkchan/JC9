@@ -1,0 +1,142 @@
+/* ══════════════════════════════════════════════════════════════
+   jc9 Design Tokens — CSS Custom Properties
+   Dark theme (VS Code-inspired) + Light theme
+   ══════════════════════════════════════════════════════════════ */
+
+:root,
+[data-theme="dark"] {
+  /* ── Backgrounds ── */
+  --bg-app:            #1e1e1e;
+  --bg-panel:          #252526;
+  --bg-elevated:       #2d2d30;
+  --bg-hover:          #2a2d2e;
+  --bg-selected:       #37373d;
+  --bg-input:          #3c3c3c;
+  --bg-btn:            #3c3c3c;
+  --bg-btn-hover:      #4c4c4c;
+  --bg-overlay:        rgba(0,0,0,.5);
+  --bg-scrollbar:      #1e1e1e;
+  --bg-scrollbar-thumb:#424242;
+  --bg-scrollbar-hover:#555;
+
+  /* ── Accent ── */
+  --accent:            #007acc;
+  --accent-hover:      #1a8ad4;
+  --accent-selection:  #264f78;
+  --accent-purple:     #8a58ff;
+
+  /* ── Text ── */
+  --text-primary:      #ccc;
+  --text-secondary:    #858585;
+  --text-highlight:    #e0e0e0;
+  --text-white:        #fff;
+
+  /* ── Status colors ── */
+  --color-success:     #4ec9b0;
+  --color-error:       #f44747;
+  --color-warning:     #d7ba7d;
+  --color-favorite:    #f0c040;
+
+  /* ── Borders ── */
+  --border-default:    #3e3e42;
+  --border-strong:     #555;
+  --border-accent:     #007acc;
+
+  /* ── Shadows ── */
+  --shadow-menu:       0 4px 12px rgba(0,0,0,.5);
+  --shadow-modal:      0 8px 24px rgba(0,0,0,.6);
+
+  /* ── Sidebar ── */
+  --sidebar-head-bg:   #7a7af7;
+
+  /* ── Terminal ── */
+  --term-bg:           #1e1e1e;
+  --term-fg:           #ccc;
+  --term-cursor:       #ccc;
+  --term-selection:    #264f78;
+}
+
+/* ── Light theme ── */
+[data-theme="light"] {
+  --bg-app:            #f3f3f3;
+  --bg-panel:          #ececec;
+  --bg-elevated:       #e0e0e0;
+  --bg-hover:          #dcdcdc;
+  --bg-selected:       #d0d0d0;
+  --bg-input:          #fff;
+  --bg-btn:            #e0e0e0;
+  --bg-btn-hover:      #d0d0d0;
+  --bg-overlay:        rgba(0,0,0,.2);
+  --bg-scrollbar:      #f3f3f3;
+  --bg-scrollbar-thumb:#c0c0c0;
+  --bg-scrollbar-hover:#a0a0a0;
+
+  --accent:            #0078d4;
+  --accent-hover:      #106ebe;
+  --accent-selection:  #add6ff;
+  --accent-purple:     #8a58ff;
+
+  --text-primary:      #333;
+  --text-secondary:    #888;
+  --text-highlight:    #1a1a1a;
+  --text-white:        #fff;
+
+  --color-success:     #388e3c;
+  --color-error:       #d32f2f;
+  --color-warning:     #f57c00;
+  --color-favorite:    #f0c040;
+
+  --border-default:    #d4d4d4;
+  --border-strong:     #b0b0b0;
+  --border-accent:     #0078d4;
+
+  --shadow-menu:       0 4px 12px rgba(0,0,0,.15);
+  --shadow-modal:      0 8px 24px rgba(0,0,0,.2);
+
+  --sidebar-head-bg:   #7a7af7;
+
+  --term-bg:           #fff;
+  --term-fg:           #333;
+  --term-cursor:       #333;
+  --term-selection:    #add6ff;
+}
+
+/* ── System preference auto-switch ── */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]):not([data-theme="light"]) {
+    --bg-app:            #f3f3f3;
+    --bg-panel:          #ececec;
+    --bg-elevated:       #e0e0e0;
+    --bg-hover:          #dcdcdc;
+    --bg-selected:       #d0d0d0;
+    --bg-input:          #fff;
+    --bg-btn:            #e0e0e0;
+    --bg-btn-hover:      #d0d0d0;
+    --bg-overlay:        rgba(0,0,0,.2);
+    --bg-scrollbar:      #f3f3f3;
+    --bg-scrollbar-thumb:#c0c0c0;
+    --bg-scrollbar-hover:#a0a0a0;
+    --accent:            #0078d4;
+    --accent-hover:      #106ebe;
+    --accent-selection:  #add6ff;
+    --accent-purple:     #8a58ff;
+    --text-primary:      #333;
+    --text-secondary:    #888;
+    --text-highlight:    #1a1a1a;
+    --text-white:        #fff;
+    --color-success:     #388e3c;
+    --color-error:       #d32f2f;
+    --color-warning:     #f57c00;
+    --color-favorite:    #f0c040;
+    --border-default:    #d4d4d4;
+    --border-strong:     #b0b0b0;
+    --border-accent:     #0078d4;
+    --shadow-menu:       0 4px 12px rgba(0,0,0,.15);
+    --shadow-modal:      0 8px 24px rgba(0,0,0,.2);
+    --sidebar-head-bg:   #7a7af7;
+    --term-bg:           #fff;
+    --term-fg:           #333;
+    --term-cursor:       #333;
+    --term-selection:    #add6ff;
+  }
+}

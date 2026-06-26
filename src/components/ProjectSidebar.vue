@@ -203,66 +203,67 @@ document.addEventListener('click',()=>{closeScCtx()})
   </aside>
 </template>
 
-<style scoped>
-.side { width:210px; min-width:210px; height:100%; background:#252526; display:flex; flex-direction:column; overflow:hidden; user-select:none; }
-.side-head { padding:1 10px; height: 2px; letter-spacing:.5px; color:#e0e0e0; border-bottom:1px solid #3e3e42; background: #7a7af7;}
+<style scoped lang="scss">
+@use "@/styles/mixins.scss" as *;
+.side { width:210px; min-width:210px; height:100%; background:var(--jc-bg-panel); display:flex; flex-direction:column; overflow:hidden; user-select:none; }
+.side-head { height:2px; background:var(--jc-color-head-bg); }
 .tabs { display:flex; }
-.tab { flex:1; text-align:center; padding:6px 0; font-size:12px; cursor:pointer; color:#858585; border-bottom:2px solid transparent; }
-.tab:hover { color:#ccc; }
-.tab.on { color:#e0e0e0; border-bottom-color:#007acc; }
-.panel { flex:1; display:flex; flex-direction:column; overflow:hidden; }
-.bar { padding:6px 10px; border-bottom:1px solid #3e3e42; }
-.btn { background:#3c3c3c; color:#ccc; padding:3px 12px; font-size:12px; }
-.btn:hover { background:#4c4c4c; }
-.btn.pri { background:#007acc; color:#fff; }
-.btn.pri:hover { background:#1a8ad4; }
+.tab { @include tab-base; }
+.panel { @include flex-panel; }
+.bar { padding:6px 10px; border-bottom:1px solid var(--jc-border-default); }
+.btn { @include btn-base; }
+.btn.pri { @include btn-primary; }
 .btn:disabled { opacity:.5; }
-.add-panel { padding:8px 10px; display:flex; flex-direction:column; gap:5px; border-bottom:1px solid #3e3e42; }
-.add-panel input { background:#3c3c3c; border:1px solid #555; padding:4px 8px; color:#ccc; }
-.add-panel input:focus { border-color:#007acc; }
+.add-panel { padding:8px 10px; display:flex; flex-direction:column; gap:5px; border-bottom:1px solid var(--jc-border-default);
+  input { @include input-base; }
+}
 .row { display:flex; gap:4px; }
 .tree { flex:1; overflow-y:auto; padding:4px 0; }
-.proj { display:flex; align-items:center; gap:4px; padding:4px 10px; cursor:pointer; font-size:12px; }
-.proj:hover { background:#2a2d2e; }
-.proj.sel { background:#37373d; }
-.arrow { font-size:9px; color:#858585; width:12px; flex-shrink:0; }
+.proj { display:flex; align-items:center; gap:4px; padding:4px 10px; cursor:pointer; font-size:12px;
+  &:hover { background:var(--jc-bg-hover); }
+  &.sel { background:var(--jc-bg-selected); }
+}
+.arrow { font-size:9px; color:var(--jc-text-secondary); width:12px; flex-shrink:0; }
 .pn { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.pc { font-size:10px; color:#858585; background:#3c3c3c; padding:0 4px; border-radius:3px; }
-.del { display:none; background:none; color:#858585; font-size:12px; padding:0 4px; cursor:pointer; }
-.del:hover { color:#f44747; }
+.pc { font-size:10px; color:var(--jc-text-secondary); background:var(--jc-bg-btn); padding:0 4px; border-radius:3px; }
+.del { display:none; background:none; color:var(--jc-text-secondary); font-size:12px; padding:0 4px; cursor:pointer;
+  &:hover { color:var(--jc-color-error); }
+}
 .proj:hover .del,.cmd:hover .del { display:inline; }
 .cmds { padding-left:12px; }
-.cmd { display:flex; align-items:center; gap:4px; padding:3px 10px; font-size:12px; }
-.cmd:hover { background:#2a2d2e; }
-.cmd.on { background:#37373d; }
-.dot { width:6px; height:6px; border-radius:50%; background:#555; flex-shrink:0; }
-.dot.live { background:#4ec9b0; }
-.cn { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:pointer; }
-.cn:hover { color:#4ec9b0; }
-.stop { background:none; color:#f44747; font-size:10px; padding:0 3px; cursor:pointer; }
-.addc { display:block; width:100%; text-align:left; background:none; border:none; color:#858585; font-size:11px; padding:3px 10px; cursor:pointer; }
-.addc:hover { color:#4ec9b0; }
-.empty { padding:20px; text-align:center; font-size:11px; color:#858585; }
-input { background:#3c3c3c; border:1px solid #555; padding:4px 8px; color:#ccc; }
-input:focus { border-color:#007acc; }
-.ctx { position:fixed; z-index:9999; background:#2d2d30; border:1px solid #555; padding:4px 0; min-width:120px; box-shadow:0 4px 12px rgba(0,0,0,.5); }
-.ci { padding:5px 14px; font-size:12px; cursor:pointer; color:#ccc; }
-.ci:hover { background:#094771; }
-.proj-edit-input, .cmd-edit-input { background:#3c3c3c; border:1px solid #007acc; color:#ccc; padding:1px 4px; font-size:12px; width:100%; outline:none; }
-.scat { padding:6px 10px; font-size:11px; font-weight:600; color:#e0e0e0; cursor:pointer; background:#2d2d30; }
-.scat:hover { background:#37373d; }
-.sc { padding:4px 10px 4px 20px; font-size:11px; cursor:pointer; color:#858585; display:flex; align-items:center; }
-.sc:hover { background:#2a2d2e; color:#4ec9b0; }
+.cmd { display:flex; align-items:center; gap:4px; padding:3px 10px; font-size:12px;
+  &:hover { background:var(--jc-bg-hover); }
+  &.on { background:var(--jc-bg-selected); }
+}
+.dot { @include dot; }
+.cn { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:pointer;
+  &:hover { color:var(--jc-color-success); }
+}
+.stop { background:none; color:var(--jc-color-error); font-size:10px; padding:0 3px; cursor:pointer; }
+.addc { display:block; width:100%; text-align:left; background:none; border:none; color:var(--jc-text-secondary); font-size:11px; padding:3px 10px; cursor:pointer;
+  &:hover { color:var(--jc-color-success); }
+}
+.empty { padding:20px; text-align:center; font-size:11px; color:var(--jc-text-secondary); }
+input { @include input-base; }
+.ctx { @include ctx-menu; }
+.ci { @include ctx-item; }
+.proj-edit-input, .cmd-edit-input { background:var(--jc-bg-input); border:1px solid var(--jc-color-accent); color:var(--jc-text-primary); padding:1px 4px; font-size:12px; width:100%; outline:none; }
+.scat { padding:6px 10px; font-size:11px; font-weight:600; color:var(--jc-text-highlight); cursor:pointer; background:var(--jc-bg-elevated);
+  &:hover { background:var(--jc-bg-selected); }
+}
+.sc { padding:4px 10px 4px 20px; font-size:11px; cursor:pointer; color:var(--jc-text-secondary); display:flex; align-items:center;
+  &:hover { background:var(--jc-bg-hover); color:var(--jc-color-success); }
+}
 .scc { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:'Cascadia Code',Consolas,monospace; }
-.scd { font-size:9px; color:#858585; margin-left:4px; white-space:nowrap; }
-.fav-star { color:#f0c040; margin-right:2px; font-size:10px; }
-.mbg { position:fixed; inset:0; background:rgba(0,0,0,.5); display:flex; align-items:center; justify-content:center; z-index:1000; }
-.mw { background:#2d2d30; border:1px solid #555; min-width:400px; box-shadow:0 8px 24px rgba(0,0,0,.6); }
-.mt { background:#252526; padding:10px 16px; font-size:14px; font-weight:600; color:#e0e0e0; border-bottom:1px solid #3e3e42; }
+.scd { font-size:9px; color:var(--jc-text-secondary); margin-left:4px; white-space:nowrap; }
+.fav-star { color:var(--jc-color-favorite); margin-right:2px; font-size:10px; }
+.mbg { position:fixed; inset:0; background:var(--jc-bg-overlay); display:flex; align-items:center; justify-content:center; z-index:1000; }
+.mw { background:var(--jc-bg-elevated); border:1px solid var(--jc-border-strong); min-width:400px; box-shadow:var(--jc-shadow-modal); }
+.mt { background:var(--jc-bg-panel); padding:10px 16px; font-size:14px; font-weight:600; color:var(--jc-text-highlight); border-bottom:1px solid var(--jc-border-default); }
 .mb { padding:16px; display:flex; flex-direction:column; gap:12px; }
-.fld { display:flex; flex-direction:column; gap:4px; }
-.fld label { font-size:11px; color:#858585; text-transform:uppercase; letter-spacing:.5px; }
-.fld input { background:#3c3c3c; border:1px solid #555; padding:6px 10px; color:#ccc; font-size:13px; }
-.fld input:focus { border-color:#007acc; }
+.fld { display:flex; flex-direction:column; gap:4px;
+  label { font-size:11px; color:var(--jc-text-secondary); text-transform:uppercase; letter-spacing:.5px; }
+  input { @include input-base; padding:6px 10px; font-size:13px; }
+}
 .acts { display:flex; justify-content:flex-end; gap:8px; margin-top:4px; }
 </style>

@@ -1,0 +1,106 @@
+// ══════════════════════════════════════════════════════════════
+// jc9 Reusable SCSS Mixins
+// ══════════════════════════════════════════════════════════════
+
+// ── Button base ──
+@mixin btn-base {
+  background: var(--jc-bg-btn);
+  color: var(--jc-text-primary);
+  padding: 3px 12px;
+  font-size: 12px;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  &:hover { background: var(--jc-bg-btn-hover); }
+  &:disabled { opacity: .5; cursor: default; }
+}
+
+@mixin btn-primary {
+  @include btn-base;
+  background: var(--jc-color-accent);
+  color: var(--jc-color-white);
+  &:hover { background: var(--jc-color-accent-hover); }
+}
+
+// ── Input base ──
+@mixin input-base {
+  background: var(--jc-bg-input);
+  border: 1px solid var(--jc-border-strong);
+  padding: 4px 8px;
+  color: var(--jc-text-primary);
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+  &:focus { border-color: var(--jc-color-accent); }
+  &::placeholder { color: var(--jc-text-secondary); }
+}
+
+// ── Context menu ──
+@mixin ctx-menu {
+  position: fixed;
+  z-index: 9999;
+  background: var(--jc-bg-elevated);
+  border: 1px solid var(--jc-border-strong);
+  padding: 4px 0;
+  min-width: 120px;
+  box-shadow: var(--jc-shadow-menu);
+}
+
+@mixin ctx-item {
+  padding: 5px 14px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--jc-text-primary);
+  &:hover { background: var(--jc-color-accent-light); }
+}
+
+// ── Scrollbar ──
+@mixin scrollbar {
+  &::-webkit-scrollbar { width: 10px; height: 10px; }
+  &::-webkit-scrollbar-track { background: var(--jc-bg-scrollbar); }
+  &::-webkit-scrollbar-thumb { background: var(--jc-bg-scrollbar-thumb); border-radius: 5px; }
+  &::-webkit-scrollbar-thumb:hover { background: var(--jc-bg-scrollbar-hover); }
+}
+
+// ── Tab ──
+@mixin tab-base {
+  flex: 1;
+  text-align: center;
+  padding: 6px 0;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--jc-text-secondary);
+  border-bottom: 2px solid transparent;
+  &:hover { color: var(--jc-text-primary); }
+  &.on { color: var(--jc-text-highlight); border-bottom-color: var(--jc-color-accent); }
+}
+
+// ── Flex panel ──
+@mixin flex-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+// ── Flex bar ──
+@mixin bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+  background: var(--jc-bg-elevated);
+  border-bottom: 1px solid var(--jc-border-default);
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+// ── Dot indicator (running/stopped) ──
+@mixin dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--jc-border-strong);
+  flex-shrink: 0;
+  &.live { background: var(--jc-color-success); }
+}

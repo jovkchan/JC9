@@ -1,0 +1,171 @@
+// ══════════════════════════════════════════════════════════════
+// jc9 Design Tokens — SCSS Variables + CSS Custom Properties
+// Element Plus 风格设计系统
+// ══════════════════════════════════════════════════════════════
+@use 'sass:map';
+@use 'sass:color';
+
+// ── Color palette ──
+$colors: (
+  'white':        #fff,
+  'black':        #000,
+  'accent':       #007acc,
+  'accent-hover': #1a8ad4,
+  'accent-light': #264f78,
+  'purple':       #8a58ff,
+  'success':      #4ec9b0,
+  'error':        #f44747,
+  'warning':      #d7ba7d,
+  'favorite':     #f0c040,
+  'head-bg':      #7a7af7,
+);
+
+// ── Generate color levels (light variants) ──
+// 用法：--jc-color-accent-light-1 到 light-9，从浅到深
+$color-levels: 9;
+@function tint($color, $percent) {
+  @return color.mix(white, $color, $percent);
+}
+@function shade($color, $percent) {
+  @return mix(black, $color, $percent);
+}
+
+// ── Dark theme tokens ──
+$dark: (
+  // Backgrounds
+  'bg-app':            #1e1e1e,
+  'bg-panel':          #252526,
+  'bg-elevated':       #2d2d30,
+  'bg-hover':          #2a2d2e,
+  'bg-selected':       #37373d,
+  'bg-input':          #3c3c3c,
+  'bg-btn':            #3c3c3c,
+  'bg-btn-hover':      #4c4c4c,
+  'bg-overlay':        rgba(0,0,0,.5),
+  'bg-scrollbar':      #1e1e1e,
+  'bg-scrollbar-thumb':#424242,
+  'bg-scrollbar-hover':#555,
+  // Text
+  'text-primary':      #ccc,
+  'text-secondary':    #858585,
+  'text-highlight':    #e0e0e0,
+  // Borders
+  'border-default':    #3e3e42,
+  'border-strong':     #555,
+  // Shadows
+  'shadow-menu':       0 4px 12px rgba(0,0,0,.5),
+  'shadow-modal':      0 8px 24px rgba(0,0,0,.6),
+  // Terminal
+  'term-bg':           #1e1e1e,
+  'term-fg':           #ccc,
+  'term-cursor':       #ccc,
+  'term-selection':    #264f78,
+  // TitleBar
+  'titlebar-bg':       #1e1e1e,
+  'titlebar-btn-hover':#3c3c3c,
+  'titlebar-close-hover':#e81123,
+);
+
+// ── Light theme tokens ──
+$light: (
+  'bg-app':            #f3f3f3,
+  'bg-panel':          #ececec,
+  'bg-elevated':       #e0e0e0,
+  'bg-hover':          #dcdcdc,
+  'bg-selected':       #d0d0d0,
+  'bg-input':          #fff,
+  'bg-btn':            #e0e0e0,
+  'bg-btn-hover':      #d0d0d0,
+  'bg-overlay':        rgba(0,0,0,.2),
+  'bg-scrollbar':      #f3f3f3,
+  'bg-scrollbar-thumb':#c0c0c0,
+  'bg-scrollbar-hover':#a0a0a0,
+  'text-primary':      #333,
+  'text-secondary':    #888,
+  'text-highlight':    #1a1a1a,
+  'border-default':    #d4d4d4,
+  'border-strong':     #b0b0b0,
+  'shadow-menu':       0 4px 12px rgba(0,0,0,.15),
+  'shadow-modal':      0 8px 24px rgba(0,0,0,.2),
+  'term-bg':           #fff,
+  'term-fg':           #333,
+  'term-cursor':       #333,
+  'term-selection':    #add6ff,
+  'titlebar-bg':       #e8e8e8,
+  'titlebar-btn-hover':#d0d0d0,
+  'titlebar-close-hover':#e81123,
+);
+
+// ── Generate CSS custom properties from a map ──
+@mixin define-css-vars($map, $prefix: 'jc') {
+  @each $key, $val in $map {
+    --#{$prefix}-#{$key}: #{$val};
+  }
+}
+
+// ── Expose color palette as CSS vars ──
+:root {
+  @each $key, $val in $colors {
+    --jc-color-#{$key}: #{$val};
+  }
+  // Color levels (light variants for accent, success, error, warning)
+  @each $color-name in ('accent', 'success', 'error', 'warning') {
+    $base: map.get($colors, $color-name);
+    @for $i from 1 through $color-levels {
+      --jc-color-#{$color-name}-light-#{$i}: #{tint($base, $i * 10%)};
+    }
+  }
+  // Background levels (bg-app to bg-elevated are already semantic, add bg-level-1..5)
+  --jc-bg-level-1: #1e1e1e;
+  --jc-bg-level-2: #252526;
+  --jc-bg-level-3: #2d2d30;
+  --jc-bg-level-4: #37373d;
+  --jc-bg-level-5: #3c3c3c;
+  // Text levels
+  --jc-text-level-1: #e0e0e0;
+  --jc-text-level-2: #ccc;
+  --jc-text-level-3: #858585;
+  --jc-text-level-4: #5a5a5a;
+  // Border levels
+  --jc-border-level-1: #3e3e42;
+  --jc-border-level-2: #555;
+  --jc-border-level-3: #666;
+  // Dark theme tokens
+  @include define-css-vars($dark);
+}
+
+// ── Light theme override ──
+[data-theme="light"] {
+  @include define-css-vars($light);
+  --jc-bg-level-1: #f3f3f3;
+  --jc-bg-level-2: #ececec;
+  --jc-bg-level-3: #e0e0e0;
+  --jc-bg-level-4: #d0d0d0;
+  --jc-bg-level-5: #c0c0c0;
+  --jc-text-level-1: #1a1a1a;
+  --jc-text-level-2: #333;
+  --jc-text-level-3: #888;
+  --jc-text-level-4: #aaa;
+  --jc-border-level-1: #d4d4d4;
+  --jc-border-level-2: #b0b0b0;
+  --jc-border-level-3: #999;
+}
+
+// ── System preference auto ──
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]):not([data-theme="light"]) {
+    @include define-css-vars($light);
+    --jc-bg-level-1: #f3f3f3;
+    --jc-bg-level-2: #ececec;
+    --jc-bg-level-3: #e0e0e0;
+    --jc-bg-level-4: #d0d0d0;
+    --jc-bg-level-5: #c0c0c0;
+    --jc-text-level-1: #1a1a1a;
+    --jc-text-level-2: #333;
+    --jc-text-level-3: #888;
+    --jc-text-level-4: #aaa;
+    --jc-border-level-1: #d4d4d4;
+    --jc-border-level-2: #b0b0b0;
+    --jc-border-level-3: #999;
+  }
+}
