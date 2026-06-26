@@ -20,7 +20,9 @@
         "decorations": false,
         "transparent": true,
         "center": true,
-        "alwaysOnTop": true
+        "alwaysOnTop": true,
+        "visible": false,
+        "shadow": false
       },
       {
         "label": "main",

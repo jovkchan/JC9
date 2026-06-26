@@ -85,7 +85,21 @@ impl ProcessManager {
         }
         Ok(())
     }
-    pub fn resize(&self, _i: &str, _r: u16, _c: u16) -> Result<(), String> { Ok(()) }
+    pub fn resize(&self, id: &str, rows: u16, cols: u16) -> Result<(), String> {
+        let s = self.sessions.lock().map_err(|e| e.to_string())?;
+        if let Some(session) = s.get(id) {
+            session
+                ._master
+                .resize(PtySize {
+                    rows,
+                    cols,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                })
+                .map_err(|e| format!("重设 PTY 尺寸失败: {e}"))?;
+        }
+        Ok(())
+    }
     pub fn stop(&self, id: &str) -> Result<(), String> {
         let mut s = self.sessions.lock().map_err(|e| e.to_string())?;
         if let Some(mut session) = s.remove(id) { let _ = session.child.kill(); let _ = session.child.wait(); }

@@ -11,11 +11,11 @@ const props = defineProps<{ processId: string; active: boolean }>()
 const store = useProjectStore()
 const container = ref<HTMLDivElement>()
 const input = ref(''); const inputRef = ref<HTMLInputElement>()
-function focusTerm(){setTimeout(()=>{const ta=container.value?.querySelector<HTMLElement>('.xterm-helper-textarea');ta?.focus()},50)}
+function focusTerm(){ term?.focus() }
 const history: string[] = []; let hi = -1
 let term: Terminal|null=null; let fit: FitAddon|null=null; let ul: (()=>void)|null=null; let ro: ResizeObserver|null=null
 
-function doFit(){setTimeout(()=>{try{fit?.fit();if(fit && term){const r=term.rows??30;const c=term.cols??120;invoke('pty_resize',{processId:props.processId,rows:r,cols:c}).catch(()=>{})}}catch{}},30)}
+function doFit(){setTimeout(()=>{if(!container.value||container.value.clientWidth===0||container.value.clientHeight===0)return;try{fit?.fit();if(fit && term){const r=term.rows??24;const c=term.cols??80;invoke('pty_resize',{processId:props.processId,rows:r,cols:c}).catch(()=>{})}}catch(e){}},30)}
 function send(d:string){invoke('pty_write',{processId:props.processId,data:Array.from(new TextEncoder().encode(d))}).catch(()=>{})}
 function sendLine(){const t=input.value;if(!t)return;send(t+'\r\n');if(history.length===0||history[history.length-1]!==t)history.push(t);hi=history.length;input.value=''}
 function onKd(e:KeyboardEvent){
@@ -29,23 +29,22 @@ onMounted(async()=>{
   term=new Terminal({cursorBlink:true,fontSize:13,disableStdin:false,fontFamily:"'Microsoft YaHei Mono','Cascadia Code','Consolas',monospace",theme:{
     background: cs.getPropertyValue('--jc-term-bg').trim() || '#1e1e1e',
     foreground: cs.getPropertyValue('--jc-term-fg').trim() || '#ccc',
-    cursor: cs.getPropertyValue('--jc-term-cursor').trim() || '#ccc',
+    cursor: cs.getPropertyValue('--jc-color-accent').trim() || '#8a58ff',
     selectionBackground: cs.getPropertyValue('--jc-term-selection').trim() || '#264f78',
   }})
   fit=new FitAddon();term.loadAddon(fit);term.open(container.value)
   if(props.active)doFit()
-  const buf=store.getOutput(props.processId);if(buf.length>0){term.write(new Uint8Array(buf));term.write('\u001b[999B');term.scrollToBottom()}
-  ul=await listen<{processId:string;data:number[]}>('pty-output',e=>{if(e.payload.processId!==props.processId)return;if(e.payload.data.length>0){term?.scrollToBottom();term?.write('\u001b[999B');term?.write(new Uint8Array(e.payload.data));term?.scrollToBottom()}})
+  const buf=store.getOutput(props.processId);if(buf.length>0){term.write(new Uint8Array(buf));term.scrollToBottom()}
+  ul=await listen<{processId:string;data:number[]}>('pty-output',e=>{if(e.payload.processId!==props.processId)return;if(e.payload.data.length>0){term?.write(new Uint8Array(e.payload.data));term?.scrollToBottom()}})
   ro=new ResizeObserver(()=>doFit());ro.observe(container.value)
   // Direct keyboard -> PTY
   term.onData(data => send(data))
-  // Focus the terminal's hidden textarea directly
+  // Focus the terminal directly
   setTimeout(()=>{
-    const ta = container.value?.querySelector<HTMLElement>('.xterm-helper-textarea')
-    ta?.focus()
+    term?.focus()
   }, 200)
 })
-watch(()=>props.active,v=>{if(v){doFit();setTimeout(()=>{const ta=container.value?.querySelector<HTMLElement>('.xterm-helper-textarea');ta?.focus()},100)}})
+watch(()=>props.active,v=>{if(v){doFit();setTimeout(()=>{term?.focus()},100)}})
 watch(()=>store.clearTermSignal,()=>{term?.scrollToBottom();term?.write('\u001b[2J\u001b[3J\u001b[H');term?.scrollToBottom()})
 watch(()=>store.pendingInput,v=>{if(v){input.value=v;store.pendingInput='';nextTick(()=>inputRef.value?.focus())}})
 onUnmounted(()=>{ul?.();ro?.disconnect();term?.dispose();invoke('stop_command',{processId:props.processId}).catch(()=>{})})
