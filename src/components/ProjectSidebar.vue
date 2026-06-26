@@ -42,8 +42,21 @@ function confirmRenameCmd(){const [pid,cid]=editingCmdId.value.split('::');const
 const editingCmdId=ref('');const editCmdName=ref('')
 function ctxDelCmd(){store.removeCommand(cmdCtxPid.value,cmdCtxCmd.value!.id);closeCmdCtx()}
 
-const portInput=ref('');const portResult=ref('');const portWorking=ref(false)
-async function killPort(){const p=parseInt(portInput.value);if(!p||p<1){portResult.value='请输入有效端口号';return};portWorking.value=true;portResult.value='';try{portResult.value=await invoke<string>('kill_port',{port:p})}catch(e:any){portResult.value=typeof e==='string'?e:(e?.message||String(e))};portWorking.value=false}
+// ── Tools ──
+const activeTool = ref('')
+const toolPort = ref('')
+const toolMsg = ref('')
+const toolBusy = ref(false)
+async function runTool() {
+  if (activeTool.value === 'port') {
+    const p = parseInt(toolPort.value)
+    if (!p || p < 1) { toolMsg.value = '请输入有效端口号'; return }
+    toolBusy.value = true; toolMsg.value = ''
+    try { toolMsg.value = await invoke<string>('kill_port', { port: p }) }
+    catch (e: any) { toolMsg.value = typeof e === 'string' ? e : (e?.message || String(e)) }
+    toolBusy.value = false
+  }
+}
 
 // ---- Shortcuts ----
 const showScDlg=ref(false);const newScName=ref('');const newScCmd=ref('');const newScDesc=ref('');const newScCat=ref('')
@@ -157,12 +170,38 @@ document.addEventListener('click',()=>{closeScCtx()})
     </div>
 
     <!-- Tools -->
-    <div v-show="activeTab==='tools'" class="panel" style="padding:10px;display:flex;flex-direction:column;gap:10px">
-      <div style="font-size:13px;font-weight:600">端口杀手</div>
-      <input v-model="portInput" placeholder="端口号" @keyup.enter="killPort" type="number" />
-      <button class="btn pri" @click="killPort" :disabled="portWorking">{{ portWorking?'查找中...':'杀掉进程' }}</button>
-      <div v-if="portResult" :style="{fontSize:'11px',color:portResult.includes('已杀掉')?'#4ec9b0':'#f44747',wordBreak:'break-all'}">{{ portResult }}</div>
+    <div v-show="activeTab==='tools'" class="panel" style="padding:8px;display:flex;flex-direction:column;gap:4px">
+      <div style="font-size:12px;font-weight:600;color:var(--jc-text-highlight);padding:4px 4px 8px">工具箱</div>
+      <div class="tool-grid">
+        <button class="tool-card" @click="activeTool='port';toolPort='';toolMsg=''" title="杀掉指定端口的进程">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>
+          </svg>
+          <span>端口杀手</span>
+        </button>
+        <!-- 后续工具在此追加 -->
+      </div>
     </div>
+
+    <!-- Tool Dialog -->
+    <Teleport to="body">
+      <div v-if="activeTool==='port'" class="mbg" @click.self="activeTool=''">
+        <div class="mw" style="min-width:360px">
+          <div class="mt">端口杀手</div>
+          <div class="mb">
+            <div class="fld">
+              <label>端口号</label>
+              <input v-model="toolPort" placeholder="如: 8080" type="number" @keyup.enter="runTool" />
+            </div>
+            <div v-if="toolMsg" :style="{fontSize:'12px',color:toolMsg.includes('已杀掉')?'var(--jc-color-success)':'var(--jc-color-error)',wordBreak:'break-all',padding:'4px 0'}">{{ toolMsg }}</div>
+            <div class="acts">
+              <button class="btn" @click="activeTool=''">取消</button>
+              <button class="btn pri" @click="runTool" :disabled="toolBusy">{{ toolBusy?'处理中...':'执行' }}</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <Teleport to="body">
       <div v-if="projCtxShow" class="ctx" :style="{left:projCtxPos.x+'px',top:projCtxPos.y+'px'}" @click.stop>
@@ -266,4 +305,8 @@ input { @include input-base; }
   input { @include input-base; padding:6px 10px; font-size:13px; }
 }
 .acts { display:flex; justify-content:flex-end; gap:8px; margin-top:4px; }
+.tool-grid { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+.tool-card { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; padding:12px 4px; background:var(--jc-bg-elevated); border:1px solid var(--jc-border-default); border-radius:6px; cursor:pointer; color:var(--jc-text-secondary); font-size:11px; transition:all 80ms;
+  &:hover { background:var(--jc-bg-hover); color:var(--jc-color-accent); border-color:var(--jc-color-accent); }
+}
 </style>
