@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { useProjectStore } from '@/stores/project'
 import TerminalView from '@/components/TerminalView.vue'
+import LogPanel from '@/components/LogPanel.vue'
 const store = useProjectStore()
 const ctxShow=ref(false);const ctxPos=ref({x:0,y:0});const ctxIdx=ref(-1)
 function openCtx(e:MouseEvent,i:number){e.preventDefault();ctxPos.value={x:e.clientX,y:e.clientY};ctxIdx.value=i;ctxShow.value=true}
@@ -42,7 +43,10 @@ document.addEventListener('click',closeCtx)
           <button class="btn" @click="store.clearOutput(t.projectId,t.commandId)">清屏</button>
         </div>
       </div>
-      <TerminalView :process-id="store.cmdKey(t.projectId,t.commandId)" :active="store.activeTabType==='term'&&i===store.activeTabIndex" />
+      <div class="term-area">
+        <TerminalView :process-id="store.cmdKey(t.projectId,t.commandId)" :active="store.activeTabType==='term'&&i===store.activeTabIndex" />
+        <LogPanel :process-id="store.cmdKey(t.projectId,t.commandId)" />
+      </div>
     </div>
 
     <!-- Doc content -->
@@ -84,6 +88,7 @@ document.addEventListener('click',closeCtx)
 .btn.pri { background:#007acc; color:#fff; }
 .btn.pri:hover { background:#1a8ad4; }
 .empty { flex:1; display:flex; align-items:center; justify-content:center; color:#858585; font-size:13px; }
+.term-area { flex:1; display:flex; overflow:hidden; position:relative; }
 .doc-body { flex:1; overflow-y:auto; padding:12px; font-family:'Cascadia Code',Consolas,monospace; font-size:12px; color:#ccc; white-space:pre-wrap; background:#1e1e1e; }
 .ctx { position:fixed; z-index:9999; background:#2d2d30; border:1px solid #555; padding:4px 0; min-width:130px; box-shadow:0 4px 12px rgba(0,0,0,.5); }
 .ci { padding:5px 14px; font-size:12px; cursor:pointer; color:#ccc; }

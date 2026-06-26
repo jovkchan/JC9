@@ -9,6 +9,7 @@ function genId() { return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random(
 export interface RunningTab { projectId: string; projectName: string; commandId: string; commandName: string; command: string }
 export interface DocTab { id: string; title: string; command: string; content: string; loading: boolean }
 export interface ShortcutItem { id: string; name: string; command: string; category: string; description: string; favorite?: boolean; useCount?: number }
+export interface LogStats { error: number; warn: number; info: number; debug: number }
 
 export const useProjectStore = defineStore('project', () => {
   const projects = ref<Project[]>([])
@@ -95,11 +96,32 @@ export const useProjectStore = defineStore('project', () => {
     }
   }
 
+  function openDocFromText(pid: string, title: string, content: string) {
+    docTabs.value.push({ id: genId(), title, command: `日志: ${pid}`, content, loading: false })
+    activeDocIndex.value = docTabs.value.length - 1; activeTabType.value = 'doc'
+  }
+
   function bufferPtyOutput(pid: string, data: number[]) {
     if (!outputMap.value[pid]) outputMap.value[pid] = []
     for (const b of data) outputMap.value[pid]!.push(b)
     if (outputMap.value[pid]!.length > 200000) outputMap.value[pid] = outputMap.value[pid]!.slice(-100000)
+    // Parse log levels
+    parseLogLevels(pid, data)
   }
+
+  const logStatsMap = ref<Record<string, LogStats>>({})
+  function parseLogLevels(pid: string, data: number[]) {
+    const text = new TextDecoder('utf-8', { fatal: false }).decode(new Uint8Array(data))
+    if (!logStatsMap.value[pid]) logStatsMap.value[pid] = { error: 0, warn: 0, info: 0, debug: 0 }
+    const s = logStatsMap.value[pid]!
+    // Simple pattern matching per chunk
+    const upper = text.toUpperCase()
+    if (/\bERROR\b|\bFATAL\b|\bPANIC\b/.test(upper)) s.error += (upper.match(/\bERROR\b/g)?.length||0) + (upper.match(/\bFATAL\b/g)?.length||0) + (upper.match(/\bPANIC\b/g)?.length||0)
+    if (/\bWARN(ING)?\b/.test(upper)) s.warn += (upper.match(/\bWARN(ING)?\b/g)?.length||0)
+    if (/\bDEBUG\b/.test(upper)) s.debug += (upper.match(/\bDEBUG\b/g)?.length||0)
+    if (/\bINFO\b|\bTRACE\b/.test(upper)) s.info += (upper.match(/\bINFO\b/g)?.length||0) + (upper.match(/\bTRACE\b/g)?.length||0)
+  }
+  function clearLogStats(pid: string) { logStatsMap.value[pid] = { error: 0, warn: 0, info: 0, debug: 0 } }
   function clearOutput(projectId: string, commandId: string) { outputMap.value[cmdKey(projectId, commandId)] = [] }
   function getOutput(pid: string): number[] { return outputMap.value[pid] ?? [] }
 
@@ -124,5 +146,5 @@ export const useProjectStore = defineStore('project', () => {
   }
   function destroyListeners() { _unlistenExit?.(); _unlistenPty?.() }
 
-  return { projects, selectedProjectId, runningMap, outputMap, runningTabs, docTabs, activeTabIndex, activeDocIndex, activeTabType, shortcuts, pendingInput, frequentShortcuts, favShortcuts, loadProjects, saveProjects, addProject, removeProject, updateProjectName, addCommand, removeCommand, updateCommand, startCommand, stopCommand, restartCommand, closeTab, closeDocTab, openDoc, clearOutput, getOutput, initListeners, destroyListeners, cmdKey, detectProject, bufferPtyOutput, loadShortcuts, addShortcut, removeShortcut, updateShortcut, isBuiltin, useShortcut, toggleFav, startDefaultTerminal }
+  return { projects, selectedProjectId, runningMap, outputMap, logStatsMap, runningTabs, docTabs, activeTabIndex, activeDocIndex, activeTabType, shortcuts, pendingInput, frequentShortcuts, favShortcuts, loadProjects, saveProjects, addProject, removeProject, updateProjectName, addCommand, removeCommand, updateCommand, startCommand, stopCommand, restartCommand, closeTab, closeDocTab, openDoc, openDocFromText, clearOutput, clearLogStats, getOutput, initListeners, destroyListeners, cmdKey, detectProject, bufferPtyOutput, loadShortcuts, addShortcut, removeShortcut, updateShortcut, isBuiltin, useShortcut, toggleFav, startDefaultTerminal }
 })
