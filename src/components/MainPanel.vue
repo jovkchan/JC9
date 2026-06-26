@@ -5,7 +5,9 @@ import TerminalView from '@/components/TerminalView.vue'
 import LogPanel from '@/components/LogPanel.vue'
 const store = useProjectStore()
 const ctxShow=ref(false);const ctxPos=ref({x:0,y:0});const ctxIdx=ref(-1)
+const showLogPid = ref('')
 function openCtx(e:MouseEvent,i:number){e.preventDefault();ctxPos.value={x:e.clientX,y:e.clientY};ctxIdx.value=i;ctxShow.value=true}
+function toggleLog(pid:string){showLogPid.value = showLogPid.value === pid ? '' : pid}
 function closeCtx(){ctxShow.value=false}
 function ctxRestart(){const t=store.runningTabs[ctxIdx.value];const c=store.projects.find(p=>p.id===t.projectId)?.commands.find(c=>c.id===t.commandId);if(t&&c)store.restartCommand(t.projectId,c);closeCtx()}
 function ctxStop(){const t=store.runningTabs[ctxIdx.value];if(t){store.stopCommand(t.projectId,t.commandId);store.closeTab(ctxIdx.value)};closeCtx()}
@@ -27,7 +29,7 @@ document.addEventListener('click',closeCtx)
       <div v-for="(t,i) in store.docTabs" :key="'d'+t.id"
         :class="['tab',{on:store.activeTabType==='doc'&&i===store.activeDocIndex}]"
         @click="store.activeTabType='doc';store.activeDocIndex=i">
-        <span class="tl">📖 {{ t.title }}</span>
+        <span class="tl">{{ t.title }}</span>
         <button class="tx" @click.stop="store.closeDocTab(i)">✕</button>
       </div>
     </div>
@@ -41,11 +43,12 @@ document.addEventListener('click',closeCtx)
           <button v-if="store.runningMap[store.cmdKey(t.projectId,t.commandId)]==='running'" class="btn" @click="store.stopCommand(t.projectId,t.commandId)">停止</button>
           <button v-if="store.runningMap[store.cmdKey(t.projectId,t.commandId)]==='running'" class="btn" @click="()=>{const c=store.projects.find(p=>p.id===t.projectId)?.commands.find(c=>c.id===t.commandId);if(c)store.restartCommand(t.projectId,c)}">重启</button>
           <button class="btn" @click="store.clearOutput(t.projectId,t.commandId)">清屏</button>
+          <button class="btn" :class="{on:showLogPid===store.cmdKey(t.projectId,t.commandId)}" @click="toggleLog(store.cmdKey(t.projectId,t.commandId))">日志</button>
         </div>
       </div>
       <div class="term-area">
         <TerminalView :process-id="store.cmdKey(t.projectId,t.commandId)" :active="store.activeTabType==='term'&&i===store.activeTabIndex" />
-        <LogPanel :process-id="store.cmdKey(t.projectId,t.commandId)" />
+        <LogPanel v-if="showLogPid===store.cmdKey(t.projectId,t.commandId)" :process-id="store.cmdKey(t.projectId,t.commandId)" />
       </div>
     </div>
 
@@ -87,6 +90,7 @@ document.addEventListener('click',closeCtx)
 .acts { display:flex; gap:6px; }
 .btn { @include btn-base; font-size:11px; }
 .btn.pri { @include btn-primary; }
+.btn.on { background:var(--jc-color-accent); color:var(--jc-color-white); }
 .empty { flex:1; display:flex; align-items:center; justify-content:center; color:var(--jc-text-secondary); font-size:13px; }
 .term-area { flex:1; display:flex; overflow:hidden; }
 .doc-body { flex:1; overflow-y:auto; padding:12px; font-family:'Cascadia Code',Consolas,monospace; font-size:12px; color:var(--jc-text-primary); white-space:pre-wrap; background:var(--jc-bg-app); }

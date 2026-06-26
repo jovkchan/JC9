@@ -38,19 +38,18 @@ defineExpose({openDialog})
   </Teleport>
 </template>
 
-<style scoped>
-.mbg { position:fixed; inset:0; background:rgba(0,0,0,.5); display:flex; align-items:center; justify-content:center; z-index:1000; }
-.mw { background:#2d2d30; border:1px solid #555; min-width:440px; box-shadow:0 8px 24px rgba(0,0,0,.6); }
-.mt { background:#252526; padding:10px 16px; font-size:14px; font-weight:600; color:#e0e0e0; border-bottom:1px solid #3e3e42; }
+<style scoped lang="scss">
+@use "@/styles/mixins.scss" as *;
+.mbg { position:fixed; inset:0; background:var(--jc-bg-overlay); display:flex; align-items:center; justify-content:center; z-index:1000; }
+.mw { background:var(--jc-bg-elevated); border:1px solid var(--jc-border-strong); min-width:440px; box-shadow:var(--jc-shadow-modal); }
+.mt { background:var(--jc-bg-panel); padding:10px 16px; font-size:14px; font-weight:600; color:var(--jc-text-highlight); border-bottom:1px solid var(--jc-border-default); }
 .mb { padding:16px; display:flex; flex-direction:column; gap:12px; }
-.fld { display:flex; flex-direction:column; gap:4px; }
-.fld label { font-size:11px; color:#858585; text-transform:uppercase; letter-spacing:.5px; }
-.fld input { background:#3c3c3c; border:1px solid #555; padding:6px 10px; color:#ccc; font-size:13px; }
-.fld input:focus { border-color:#007acc; }
+.fld { display:flex; flex-direction:column; gap:4px;
+  label { font-size:11px; color:var(--jc-text-secondary); text-transform:uppercase; letter-spacing:.5px; }
+  input { @include input-base; padding:6px 10px; font-size:13px; }
+}
 .row { display:flex; gap:6px; }
-.btn { background:#3c3c3c; color:#ccc; padding:5px 16px; font-size:12px; }
-.btn:hover { background:#4c4c4c; }
-.btn.pri { background:#007acc; color:#fff; }
-.btn.pri:hover { background:#1a8ad4; }
+.btn { @include btn-base; padding:5px 16px; }
+.btn.pri { @include btn-primary; padding:5px 16px; }
 .acts { display:flex; justify-content:flex-end; gap:8px; margin-top:4px; }
 </style>

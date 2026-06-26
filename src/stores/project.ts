@@ -68,6 +68,7 @@ export const useProjectStore = defineStore('project', () => {
     const processId = cmdKey(projectId, cmd.id)
     const project = projects.value.find(p => p.id === projectId)
     outputMap.value[processId] = []
+    logStatsMap.value[processId] = { error: 0, warn: 0, info: 0, debug: 0 }
     runningMap.value[processId] = 'running'
     const existing = runningTabs.value.findIndex(t => t.projectId === projectId && t.commandId === cmd.id)
     if (existing >= 0) { activeTabIndex.value = existing; activeTabType.value = 'term' }
@@ -127,6 +128,7 @@ export const useProjectStore = defineStore('project', () => {
   function clearOutput(projectId: string, commandId: string) {
     const pid = cmdKey(projectId, commandId)
     outputMap.value[pid] = []
+    clearLogStats(pid)
     clearTermSignal.value++
   }
   function getOutput(pid: string): number[] { return outputMap.value[pid] ?? [] }

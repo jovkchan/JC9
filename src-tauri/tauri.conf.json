@@ -13,12 +13,24 @@
     "withGlobalTauri": true,
     "windows": [
       {
+        "label": "splash",
+        "title": "",
+        "width": 300,
+        "height": 300,
+        "decorations": false,
+        "transparent": true,
+        "center": true,
+        "alwaysOnTop": true
+      },
+      {
+        "label": "main",
         "title": "jc9",
         "width": 1100,
         "height": 700,
         "minWidth": 800,
         "minHeight": 500,
-        "decorations": false
+        "decorations": false,
+        "visible": false
       }
     ],
     "security": {

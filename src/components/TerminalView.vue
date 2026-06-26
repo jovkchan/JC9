@@ -25,7 +25,13 @@ function onKd(e:KeyboardEvent){
 
 onMounted(async()=>{
   if(!container.value)return
-  term=new Terminal({cursorBlink:true,fontSize:13,disableStdin:false,fontFamily:"'Microsoft YaHei Mono','Cascadia Code','Consolas',monospace",theme:{background:'#1e1e1e',foreground:'#ccc',cursor:'#ccc',selectionBackground:'#264f78'}})
+  const cs = getComputedStyle(document.documentElement)
+  term=new Terminal({cursorBlink:true,fontSize:13,disableStdin:false,fontFamily:"'Microsoft YaHei Mono','Cascadia Code','Consolas',monospace",theme:{
+    background: cs.getPropertyValue('--jc-term-bg').trim() || '#1e1e1e',
+    foreground: cs.getPropertyValue('--jc-term-fg').trim() || '#ccc',
+    cursor: cs.getPropertyValue('--jc-term-cursor').trim() || '#ccc',
+    selectionBackground: cs.getPropertyValue('--jc-term-selection').trim() || '#264f78',
+  }})
   fit=new FitAddon();term.loadAddon(fit);term.open(container.value)
   if(props.active)doFit()
   const buf=store.getOutput(props.processId);if(buf.length>0){term.write(new Uint8Array(buf));term.write('\u001b[999B');term.scrollToBottom()}

@@ -100,7 +100,7 @@ document.addEventListener('click',()=>{closeScCtx()})
       <div v-if="showAdd" class="add-panel">
         <input v-model="newName" placeholder="项目名称" @keyup.enter="handleAdd" />
         <div class="row"><input v-model="newDir" placeholder="项目目录" style="flex:1;min-width:0" /><button class="btn" @click="pickDir">...</button></div>
-        <div v-if="detectedLang" style="font-size:11px;color:#4ec9b0">识别: {{ detectedLang }} · {{ detectedCmds.length }} 命令</div>
+        <div v-if="detectedLang" style="font-size:11px;color:var(--jc-color-success)">识别: {{ detectedLang }} · {{ detectedCmds.length }} 命令</div>
         <button class="btn pri" @click="handleAdd">添加</button>
       </div>
       <div class="tree">
@@ -144,7 +144,7 @@ document.addEventListener('click',()=>{closeScCtx()})
       </div>
       <div style="flex:1;overflow-y:auto">
           <!-- All: accordion single-expand -->
-          <div v-if="scTab==='all'" v-for="cat in filteredCats" :key="cat" style="border-bottom:1px solid #3e3e42">
+          <div v-if="scTab==='all'" v-for="cat in filteredCats" :key="cat" style="border-bottom:1px solid var(--jc-border-default)">
           <div class="scat" @click="expandedCat = expandedCat===cat?'':cat">{{ expandedCat===cat?'▾':'▸'}} {{ cat }} ({{ shortcutsByCat(cat).length }})</div>
           <div v-if="expandedCat===cat">
             <div v-for="s in shortcutsByCat(cat)" :key="s.id" class="sc" @click="store.useShortcut(s)" @contextmenu="openScCtx($event,s)" :title="s.command + '\n' + s.description">
@@ -164,7 +164,7 @@ document.addEventListener('click',()=>{closeScCtx()})
           <span class="scc">{{ s.command }}</span>
         </div>
       </div>
-      <div style="padding:4px 6px;border-top:1px solid #3e3e42;flex-shrink:0">
+      <div style="padding:4px 6px;border-top:1px solid var(--jc-border-default);flex-shrink:0">
         <input v-model="scSearch" placeholder="搜索命令..." style="width:100%;font-size:11px;padding:3px 6px" />
       </div>
     </div>
@@ -207,14 +207,14 @@ document.addEventListener('click',()=>{closeScCtx()})
       <div v-if="projCtxShow" class="ctx" :style="{left:projCtxPos.x+'px',top:projCtxPos.y+'px'}" @click.stop>
         <div class="ci" @click="ctxRenameProj">重命名</div>
         <div class="ci" @click="ctxAddCmd">新增命令</div>
-        <div class="ci" style="color:#f44747" @click="ctxDelProj">删除项目</div>
+        <div class="ci" style="color:var(--jc-color-error)" @click="ctxDelProj">删除项目</div>
       </div>
     </Teleport>
     <Teleport to="body">
       <div v-if="cmdCtxShow" class="ctx" :style="{left:cmdCtxPos.x+'px',top:cmdCtxPos.y+'px'}" @click.stop>
         <div class="ci" @click="ctxEditCmd">编辑</div>
         <div class="ci" @click="ctxRenameCmd">重命名</div>
-        <div class="ci" style="color:#f44747" @click="ctxDelCmd">删除</div>
+        <div class="ci" style="color:var(--jc-color-error)" @click="ctxDelCmd">删除</div>
       </div>
     </Teleport>
     <Teleport to="body">
@@ -236,7 +236,7 @@ document.addEventListener('click',()=>{closeScCtx()})
         <div class="ci" @click="scCtxEdit">编辑</div>
         <div class="ci" @click="scCtxFav">{{ scCtxItem?.favorite?'取消收藏':'收藏' }}</div>
         <div class="ci" @click="scCtxDoc">查看文档</div>
-        <div class="ci" style="color:#f44747" @click="scCtxDel">删除</div>
+        <div class="ci" style="color:var(--jc-color-error)" @click="scCtxDel">删除</div>
       </div>
     </Teleport>
   </aside>
@@ -245,7 +245,7 @@ document.addEventListener('click',()=>{closeScCtx()})
 <style scoped lang="scss">
 @use "@/styles/mixins.scss" as *;
 .side { width:210px; min-width:210px; height:100%; background:var(--jc-bg-panel); display:flex; flex-direction:column; overflow:hidden; user-select:none; }
-.side-head { height:2px; background:var(--jc-color-head-bg); }
+.side-head { height:2px; background:var(--jc-color-accent); }
 .tabs { display:flex; }
 .tab { @include tab-base; }
 .panel { @include flex-panel; }
