@@ -1,0 +1,128 @@
+import { defineStore } from 'pinia'
+import { ref, computed } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
+import type { Command, Project, RunningStatus } from '@/types'
+
+function genId() { return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 9)}` }
+
+export interface RunningTab { projectId: string; projectName: string; commandId: string; commandName: string; command: string }
+export interface DocTab { id: string; title: string; command: string; content: string; loading: boolean }
+export interface ShortcutItem { id: string; name: string; command: string; category: string; description: string; favorite?: boolean; useCount?: number }
+
+export const useProjectStore = defineStore('project', () => {
+  const projects = ref<Project[]>([])
+  const selectedProjectId = ref<string | null>(null)
+  const runningMap = ref<Record<string, RunningStatus>>({})
+  const outputMap = ref<Record<string, number[]>>({})
+  const runningTabs = ref<RunningTab[]>([])
+  const docTabs = ref<DocTab[]>([])
+  const activeTabIndex = ref(0)
+  const activeDocIndex = ref(-1)
+  const activeTabType = ref<'term'|'doc'>('term')
+  const shortcuts = ref<ShortcutItem[]>([])
+  const pendingInput = ref('')
+
+  async function loadShortcuts() { try { shortcuts.value = await invoke<ShortcutItem[]>('get_shortcuts') } catch (e) { console.error(e) } }
+  async function saveShortcuts(userOnly: ShortcutItem[]) { try { await invoke('save_shortcuts', { shortcuts: userOnly }) } catch (e) { console.error(e) } }
+  function addShortcut(s: Omit<ShortcutItem, 'id'>) { const item: ShortcutItem = { ...s, id: genId() }; shortcuts.value.push(item); saveShortcuts(shortcuts.value.filter(x => !isBuiltin(x.id))) }
+  function removeShortcut(id: string) { shortcuts.value = shortcuts.value.filter(s => s.id !== id); saveShortcuts(shortcuts.value.filter(x => !isBuiltin(x.id))) }
+  function isBuiltin(id: string) { return id.startsWith('go-') || id.startsWith('npm-') || id.startsWith('yarn-') || id.startsWith('npx-') || id.startsWith('git-') }
+  function useShortcut(s: ShortcutItem) { s.useCount = (s.useCount||0) + 1; if (!isBuiltin(s.id)) saveShortcuts(shortcuts.value.filter(x => !isBuiltin(x.id))); pendingInput.value = s.command }
+  function toggleFav(id: string) { const s = shortcuts.value.find(x=>x.id===id); if(s){s.favorite=!s.favorite; if(!isBuiltin(id)) saveShortcuts(shortcuts.value.filter(x=>!isBuiltin(x.id)))} }
+  function updateShortcut(id: string, data: Partial<ShortcutItem>) { const s = shortcuts.value.find(x=>x.id===id); if(s){ Object.assign(s, data); if(!isBuiltin(id)) saveShortcuts(shortcuts.value.filter(x=>!isBuiltin(x.id))) } }
+  const frequentShortcuts = computed(() => [...shortcuts.value].filter(s=>(s.useCount||0)>0).sort((a,b)=>(b.useCount||0)-(a.useCount||0)))
+  const favShortcuts = computed(() => shortcuts.value.filter(s=>s.favorite))
+
+  let _defaultTerminalStarted = false
+  function startDefaultTerminal() {
+    if (_defaultTerminalStarted || runningTabs.value.length > 0) return; _defaultTerminalStarted = true
+    if (projects.value.length === 0) addProject('默认终端')
+    const p = projects.value[0]; if (p.commands.length === 0) addCommand(p.id, { name: '终端', command: '', workingDir: '' })
+    startCommand(p.id, p.commands[0])
+  }
+
+  async function loadProjects() { try { projects.value = await invoke<Project[]>('get_projects') } catch (e) { console.error(e) } }
+  async function saveProjects() { try { await invoke('save_all_projects', { projects: JSON.parse(JSON.stringify(projects.value)) }) } catch (e) { console.error(e) } }
+
+  function addProject(name: string) {
+    const p: Project = { id: genId(), name, commands: [], createdAt: new Date().toISOString() }
+    projects.value.push(p); selectedProjectId.value = p.id; saveProjects()
+  }
+  function removeProject(id: string) {
+    projects.value.find(p => p.id === id)?.commands.forEach(c => stopCommand(id, c.id))
+    projects.value = projects.value.filter(p => p.id !== id)
+    if (selectedProjectId.value === id) selectedProjectId.value = projects.value[0]?.id ?? null
+    saveProjects()
+  }
+  function updateProjectName(id: string, name: string) { const p = projects.value.find(p => p.id === id); if (p) { p.name = name; saveProjects() } }
+
+  function addCommand(projectId: string, c: Omit<Command, 'id'>) { const p = projects.value.find(p => p.id === projectId); if (p) { p.commands.push({ ...c, id: genId() }); saveProjects() } }
+  function removeCommand(projectId: string, commandId: string) { stopCommand(projectId, commandId); const p = projects.value.find(p => p.id === projectId); if (p) { p.commands = p.commands.filter(c => c.id !== commandId); saveProjects() } }
+  function updateCommand(projectId: string, u: Command) { const p = projects.value.find(p => p.id === projectId); if (p) { const i = p.commands.findIndex(c => c.id === u.id); if (i !== -1) { p.commands[i] = u; saveProjects() } } }
+
+  function cmdKey(projectId: string, commandId: string) { return `${projectId}::${commandId}` }
+
+  async function startCommand(projectId: string, cmd: Command) {
+    const processId = cmdKey(projectId, cmd.id)
+    const project = projects.value.find(p => p.id === projectId)
+    outputMap.value[processId] = []
+    runningMap.value[processId] = 'running'
+    const existing = runningTabs.value.findIndex(t => t.projectId === projectId && t.commandId === cmd.id)
+    if (existing >= 0) { activeTabIndex.value = existing; activeTabType.value = 'term' }
+    else { runningTabs.value.push({ projectId, projectName: project?.name ?? '', commandId: cmd.id, commandName: cmd.name, command: cmd.command }); activeTabIndex.value = runningTabs.value.length - 1; activeTabType.value = 'term' }
+    try { await invoke('start_command', { processId, projectId, commandId: cmd.id, workingDir: cmd.workingDir, command: cmd.command }) }
+    catch (e) { runningMap.value[processId] = 'stopped'; bufferPtyOutput(processId, [...new TextEncoder().encode(`[启动失败] ${e}`)]) }
+  }
+
+  async function stopCommand(projectId: string, commandId: string) { const processId = cmdKey(projectId, commandId); try { await invoke('stop_command_by_ids', { projectId, commandId }) } catch { /* */ }; runningMap.value[processId] = 'stopped' }
+  async function restartCommand(projectId: string, cmd: Command) { await stopCommand(projectId, cmd.id); await new Promise(r => setTimeout(r, 500)); await startCommand(projectId, cmd) }
+
+  function closeTab(index: number) { const tab = runningTabs.value[index]; if (tab) stopCommand(tab.projectId, tab.commandId); runningTabs.value.splice(index, 1); if (activeTabIndex.value >= runningTabs.value.length) activeTabIndex.value = Math.max(0, runningTabs.value.length - 1) }
+  function closeDocTab(index: number) { docTabs.value.splice(index, 1); if (activeDocIndex.value >= docTabs.value.length) activeDocIndex.value = Math.max(-1, docTabs.value.length - 1) }
+
+  async function openDoc(command: string, title: string) {
+    const id = genId()
+    const tab: DocTab = { id, title, command, content: '', loading: true }
+    docTabs.value.push(tab); activeDocIndex.value = docTabs.value.length - 1; activeTabType.value = 'doc'
+    try {
+      const text = await invoke<string>('fetch_doc', { command })
+      const existing = docTabs.value.find(t => t.id === id)
+      if (existing) { existing.content = text; existing.loading = false }
+    } catch {
+      const existing = docTabs.value.find(t => t.id === id)
+      if (existing) { existing.content = '获取文档失败，请检查网络。'; existing.loading = false }
+    }
+  }
+
+  function bufferPtyOutput(pid: string, data: number[]) {
+    if (!outputMap.value[pid]) outputMap.value[pid] = []
+    for (const b of data) outputMap.value[pid]!.push(b)
+    if (outputMap.value[pid]!.length > 200000) outputMap.value[pid] = outputMap.value[pid]!.slice(-100000)
+  }
+  function clearOutput(projectId: string, commandId: string) { outputMap.value[cmdKey(projectId, commandId)] = [] }
+  function getOutput(pid: string): number[] { return outputMap.value[pid] ?? [] }
+
+  // Smart project detection via Rust backend
+  async function detectProject(dir: string) {
+    try {
+      const info = await invoke<{ name: string; language: string; suggest_commands: { name: string; command: string; working_dir: string }[] }>('detect_project', { dir })
+      return { name: info.name, lang: info.language, suggestCommands: info.suggest_commands.map(c => ({ name: c.name, command: c.command, workingDir: c.working_dir })) }
+    } catch (e) { console.error(e); return null }
+  }
+
+  let _unlistenExit: (() => void) | null = null
+  let _unlistenPty: (() => void) | null = null
+  async function initListeners() {
+    _unlistenExit = await listen<{ processId: string }>('process-exited', (e) => {
+      runningMap.value[e.payload.processId] = 'stopped'
+    })
+    _unlistenPty = await listen<{ processId: string; data: number[] }>('pty-output', (e) => {
+      bufferPtyOutput(e.payload.processId, e.payload.data)
+    })
+    await loadShortcuts()
+  }
+  function destroyListeners() { _unlistenExit?.(); _unlistenPty?.() }
+
+  return { projects, selectedProjectId, runningMap, outputMap, runningTabs, docTabs, activeTabIndex, activeDocIndex, activeTabType, shortcuts, pendingInput, frequentShortcuts, favShortcuts, loadProjects, saveProjects, addProject, removeProject, updateProjectName, addCommand, removeCommand, updateCommand, startCommand, stopCommand, restartCommand, closeTab, closeDocTab, openDoc, clearOutput, getOutput, initListeners, destroyListeners, cmdKey, detectProject, bufferPtyOutput, loadShortcuts, addShortcut, removeShortcut, updateShortcut, isBuiltin, useShortcut, toggleFav, startDefaultTerminal }
+})

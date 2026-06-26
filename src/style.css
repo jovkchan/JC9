@@ -1,0 +1,8 @@
+* { margin:0; padding:0; box-sizing:border-box; }
+html,body,#app { height:100%; font-family:'Segoe UI',system-ui,sans-serif; font-size:13px; background:#1e1e1e; color:#ccc; overflow:hidden; }
+button { font-family:inherit; font-size:12px; cursor:pointer; border:none; outline:none; }
+input,textarea { font-family:inherit; font-size:12px; outline:none; color:#ccc; }
+::-webkit-scrollbar { width:10px; height:10px; }
+::-webkit-scrollbar-track { background:#1e1e1e; }
+::-webkit-scrollbar-thumb { background:#424242; border-radius:5px; }
+::-webkit-scrollbar-thumb:hover { background:#555; }
