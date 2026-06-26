@@ -56,10 +56,17 @@
 
 // ── Scrollbar ──
 @mixin scrollbar {
-  &::-webkit-scrollbar { width: 10px; height: 10px; }
-  &::-webkit-scrollbar-track { background: var(--jc-bg-scrollbar); }
-  &::-webkit-scrollbar-thumb { background: var(--jc-bg-scrollbar-thumb); border-radius: 5px; }
+  &::-webkit-scrollbar { width: 4px; height: 4px; }
+  &::-webkit-scrollbar-track { background: transparent; }
+  &::-webkit-scrollbar-thumb {
+    background: var(--jc-bg-scrollbar-thumb);
+    border-radius: 2px;
+    transition: background 120ms ease;
+  }
   &::-webkit-scrollbar-thumb:hover { background: var(--jc-bg-scrollbar-hover); }
+  &::-webkit-scrollbar-corner { background: transparent; }
+  scrollbar-width: thin;
+  scrollbar-color: var(--jc-bg-scrollbar-thumb) transparent;
 }
 
 // ── Tab ──

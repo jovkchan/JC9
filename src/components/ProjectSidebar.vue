@@ -323,9 +323,30 @@ const allTools = [
   { type: 'regex', name: '正则测试器', desc: '正则表达式实时高亮测试', category: 'code', icon: 'regex' },
   { type: 'base64', name: 'Base64 转换', desc: 'Base64 字符串编码解码', category: 'code', icon: 'base64' },
   { type: 'uuid', name: 'UUID 生成器', desc: '批量生成 UUID v4', category: 'code', icon: 'uuid' },
+  { type: 'url', name: 'URL 编解码', desc: 'URL encode / decode 转换', category: 'code', icon: 'base64' },
+  { type: 'unicode', name: 'Unicode 转换', desc: 'Unicode / ASCII 互转查询', category: 'code', icon: 'base64' },
+  { type: 'jwt', name: 'JWT 解码器', desc: '解析 JWT Token Header & Payload', category: 'code', icon: 'json' },
+  { type: 'hash', name: '哈希计算', desc: 'MD5 / SHA 系列散列值计算', category: 'code', icon: 'uuid' },
+  { type: 'html', name: 'HTML 转义', desc: '实体编码 &lt; &gt; &amp; 互转', category: 'code', icon: 'base64' },
+  { type: 'sql', name: 'SQL 格式/压缩', desc: 'SQL 语句一键美化缩进与压缩', category: 'code', icon: 'json' },
+  { type: 'diff', name: '代码对比 (Diff)', desc: '文本/配置文件双栏差异对比', category: 'code', icon: 'diff' },
+  { type: 'color', name: '颜色转换器', desc: 'HEX/RGB/HSL 互转与取色预览', category: 'code', icon: 'color' },
+  { type: 'img-base64', name: '图片转 Base64', desc: '本地图片与 Base64 互转及还原', category: 'code', icon: 'base64' },
+  { type: 'qr', name: '二维码工具', desc: '指定内容生成与上传图片解析', category: 'code', icon: 'qr' },
   { type: 'port', name: '端口释放器', desc: '精准释放指定端口占用的进程', category: 'network', icon: 'network' },
+  { type: 'dns', name: 'DNS 解析查询', desc: '域名 A/CNAME/AAAA/MX/TXT 解析 dig 查询', category: 'network', icon: 'network' },
   { type: 'env', name: '环境变量查看', desc: '查看系统所有环境变量并过滤', category: 'system', icon: 'system' },
   { type: 'timestamp', name: '时间戳转换', desc: 'Unix时间戳与本地日期互转', category: 'system', icon: 'timestamp' },
+  { type: 'time-calc', name: '时间计算器', desc: '工作日偏移及日期时间差计算', category: 'system', icon: 'timestamp' },
+  { type: 'cron', name: 'Cron 表达式生成', desc: '可视化 Cron 表达式点选生成与直白中文解析', category: 'system', icon: 'timestamp' },
+  { type: 'radix', name: '进制转换', desc: '二/八/十/十六进制高精度转换', category: 'code', icon: 'uuid' },
+  { type: 'case', name: '命名风格转换', desc: '下划线/驼峰/帕斯卡/烤串/常量命名互转', category: 'code', icon: 'base64' },
+  { type: 'lorem', name: '占位假文生成', desc: '一键生成中英文假文段落填充UI', category: 'code', icon: 'json' },
+  { type: 'lines', name: '文本行操作器', desc: '多行文本排序、去重、拆分与合并', category: 'code', icon: 'diff' },
+  { type: 'aes-des', name: '对称加解密 (AES/DES)', desc: 'AES/DES 在线加解密与编码转换', category: 'code', icon: 'key' },
+  { type: 'rsa', name: '非对称加密 (RSA)', desc: 'RSA 密钥对生成、加解密与签名验签', category: 'code', icon: 'cert' },
+  { type: 'css', name: 'CSS 单位换算', desc: 'PX、REM、EM、VW、VH 实时联动转换', category: 'code', icon: 'color' },
+  { type: 'svg', name: 'SVG 预览与优化', desc: 'SVG 实时图形渲染预览与源码精简压缩', category: 'code', icon: 'color' },
   { type: 'ssh', name: 'SSH 密钥生成', desc: '生成安全多算法 SSH 密钥对', category: 'system', icon: 'key' },
   { type: 'ssl', name: 'SSL 证书生成', desc: '生成开发测试用自签名 SSL 证书对', category: 'system', icon: 'cert' }
 ]
@@ -489,6 +510,9 @@ onUnmounted(() => {
                 <svg v-else-if="t.icon === 'regex'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m5 5 14 14"/></svg>
                 <svg v-else-if="t.icon === 'base64'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 3 4 4-4 4M21 7H3M7 21l-4-4 4-4M3 17h18"/></svg>
                 <svg v-else-if="t.icon === 'uuid'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 21V3M17 21V3M3 12h18"/></svg>
+                <svg v-else-if="t.icon === 'diff'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"/><path d="M9 7v10M5 12h8"/></svg>
+                <svg v-else-if="t.icon === 'color'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                <svg v-else-if="t.icon === 'qr'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="8" x="3" y="3" rx="1"/><rect width="8" height="8" x="13" y="3" rx="1"/><rect width="8" height="8" x="3" y="13" rx="1"/><path d="M13 13h1v1h-1zM18 13h3v3h-3zM13 18h3v3h-3zM18 18h1v1h-1z"/></svg>
                 <svg v-else-if="t.icon === 'network'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
                 <svg v-else-if="t.icon === 'system'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8M12 17v4M6 8l4 4-4 4"/></svg>
                 <svg v-else-if="t.icon === 'timestamp'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
@@ -513,6 +537,9 @@ onUnmounted(() => {
                   <svg v-else-if="t.icon === 'regex'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m5 5 14 14"/></svg>
                   <svg v-else-if="t.icon === 'base64'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 3 4 4-4 4M21 7H3M7 21l-4-4 4-4M3 17h18"/></svg>
                   <svg v-else-if="t.icon === 'uuid'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 21V3M17 21V3M3 12h18"/></svg>
+                  <svg v-else-if="t.icon === 'diff'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"/><path d="M9 7v10M5 12h8"/></svg>
+                  <svg v-else-if="t.icon === 'color'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                  <svg v-else-if="t.icon === 'qr'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="8" x="3" y="3" rx="1"/><rect width="8" height="8" x="13" y="3" rx="1"/><rect width="8" height="8" x="3" y="13" rx="1"/><path d="M13 13h1v1h-1zM18 13h3v3h-3zM13 18h3v3h-3zM18 18h1v1h-1z"/></svg>
                 </span>
                 <div class="tool-text-wrap">
                   <div class="tool-name">{{ t.name }}</div>

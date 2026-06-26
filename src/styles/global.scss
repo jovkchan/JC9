@@ -30,5 +30,7 @@ input, textarea {
   color: var(--jc-text-primary);
 }
 
-// ── Scrollbar ──
-@include scrollbar;
+// ── Scrollbar ── 全局统一滚动条样式
+* {
+  @include scrollbar;
+}

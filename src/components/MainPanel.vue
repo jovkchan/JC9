@@ -12,6 +12,29 @@ import PortKiller from '@/components/tools/PortKiller.vue'
 import UuidGenerator from '@/components/tools/UuidGenerator.vue'
 import SshKeyGenerator from '@/components/tools/SshKeyGenerator.vue'
 import SslCertGenerator from '@/components/tools/SslCertGenerator.vue'
+import UrlTool from '@/components/tools/UrlTool.vue'
+import UnicodeTool from '@/components/tools/UnicodeTool.vue'
+import JwtDecoder from '@/components/tools/JwtDecoder.vue'
+import HashTool from '@/components/tools/HashTool.vue'
+import HtmlEscapeTool from '@/components/tools/HtmlEscapeTool.vue'
+import SqlFormatter from '@/components/tools/SqlFormatter.vue'
+import DiffViewer from '@/components/tools/DiffViewer.vue'
+import ColorConverter from '@/components/tools/ColorConverter.vue'
+import ImageBase64 from '@/components/tools/ImageBase64.vue'
+import QrTool from '@/components/tools/QrTool.vue'
+import TimeCalculator from '@/components/tools/TimeCalculator.vue'
+import RadixConverter from '@/components/tools/RadixConverter.vue'
+import DnsResolver from '@/components/tools/DnsResolver.vue'
+import CronGenerator from '@/components/tools/CronGenerator.vue'
+import CaseConverter from '@/components/tools/CaseConverter.vue'
+import LoremIpsum from '@/components/tools/LoremIpsum.vue'
+import TextLines from '@/components/tools/TextLines.vue'
+import SymmetricCrypto from '@/components/tools/SymmetricCrypto.vue'
+import RsaCrypto from '@/components/tools/RsaCrypto.vue'
+import CssUnits from '@/components/tools/CssUnits.vue'
+import SvgHelper from '@/components/tools/SvgHelper.vue'
+
+
 
 const store = useProjectStore()
 const ctxShow = ref(false)
@@ -152,6 +175,27 @@ onUnmounted(() => {
         <UuidGenerator v-else-if="t.toolType === 'uuid'" />
         <SshKeyGenerator v-else-if="t.toolType === 'ssh'" />
         <SslCertGenerator v-else-if="t.toolType === 'ssl'" />
+        <UrlTool v-else-if="t.toolType === 'url'" />
+        <UnicodeTool v-else-if="t.toolType === 'unicode'" />
+        <JwtDecoder v-else-if="t.toolType === 'jwt'" />
+        <HashTool v-else-if="t.toolType === 'hash'" />
+        <HtmlEscapeTool v-else-if="t.toolType === 'html'" />
+        <SqlFormatter v-else-if="t.toolType === 'sql'" />
+        <DiffViewer v-else-if="t.toolType === 'diff'" />
+        <ColorConverter v-else-if="t.toolType === 'color'" />
+        <ImageBase64 v-else-if="t.toolType === 'img-base64'" />
+        <QrTool v-else-if="t.toolType === 'qr'" />
+        <TimeCalculator v-else-if="t.toolType === 'time-calc'" />
+        <RadixConverter v-else-if="t.toolType === 'radix'" />
+        <DnsResolver v-else-if="t.toolType === 'dns'" />
+        <CronGenerator v-else-if="t.toolType === 'cron'" />
+        <CaseConverter v-else-if="t.toolType === 'case'" />
+        <LoremIpsum v-else-if="t.toolType === 'lorem'" />
+        <TextLines v-else-if="t.toolType === 'lines'" />
+        <SymmetricCrypto v-else-if="t.toolType === 'aes-des'" />
+        <RsaCrypto v-else-if="t.toolType === 'rsa'" />
+        <CssUnits v-else-if="t.toolType === 'css'" />
+        <SvgHelper v-else-if="t.toolType === 'svg'" />
       </div>
     </div>
 
