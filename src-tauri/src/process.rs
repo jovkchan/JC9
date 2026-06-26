@@ -33,7 +33,7 @@ impl ProcessManager {
             let mut c = CommandBuilder::new("powershell");
             let full_cmd;
             let args: Vec<&str> = if cmd.is_empty() {
-                vec!["-NoLogo"]
+                vec!["-NoLogo", "-NoExit"]
             } else {
                 full_cmd = format!("[Console]::OutputEncoding=[Text.Encoding]::UTF8; {}", cmd);
                 vec!["-NoLogo", "-NoExit", "-Command", &full_cmd]

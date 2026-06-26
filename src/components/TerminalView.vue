@@ -28,8 +28,8 @@ onMounted(async()=>{
   term=new Terminal({cursorBlink:true,fontSize:13,disableStdin:false,fontFamily:"'Microsoft YaHei Mono','Cascadia Code','Consolas',monospace",theme:{background:'#1e1e1e',foreground:'#ccc',cursor:'#ccc',selectionBackground:'#264f78'}})
   fit=new FitAddon();term.loadAddon(fit);term.open(container.value)
   if(props.active)doFit()
-  const buf=store.getOutput(props.processId);if(buf.length>0)term.write(new Uint8Array(buf))
-  ul=await listen<{processId:string;data:number[]}>('pty-output',e=>{if(e.payload.processId!==props.processId)return;if(e.payload.data.length>0)term?.write(new Uint8Array(e.payload.data))})
+  const buf=store.getOutput(props.processId);if(buf.length>0){term.write(new Uint8Array(buf));term.write('\u001b[999B');term.scrollToBottom()}
+  ul=await listen<{processId:string;data:number[]}>('pty-output',e=>{if(e.payload.processId!==props.processId)return;if(e.payload.data.length>0){term?.scrollToBottom();term?.write('\u001b[999B');term?.write(new Uint8Array(e.payload.data));term?.scrollToBottom()}})
   ro=new ResizeObserver(()=>doFit());ro.observe(container.value)
   // Direct keyboard -> PTY
   term.onData(data => send(data))
@@ -40,6 +40,7 @@ onMounted(async()=>{
   }, 200)
 })
 watch(()=>props.active,v=>{if(v){doFit();setTimeout(()=>{const ta=container.value?.querySelector<HTMLElement>('.xterm-helper-textarea');ta?.focus()},100)}})
+watch(()=>store.clearTermSignal,()=>{term?.scrollToBottom();term?.write('\u001b[2J\u001b[3J\u001b[H');term?.scrollToBottom()})
 watch(()=>store.pendingInput,v=>{if(v){input.value=v;store.pendingInput='';nextTick(()=>inputRef.value?.focus())}})
 onUnmounted(()=>{ul?.();ro?.disconnect();term?.dispose();invoke('stop_command',{processId:props.processId}).catch(()=>{})})
 </script>

@@ -122,7 +122,13 @@ export const useProjectStore = defineStore('project', () => {
     if (/\bINFO\b|\bTRACE\b/.test(upper)) s.info += (upper.match(/\bINFO\b/g)?.length||0) + (upper.match(/\bTRACE\b/g)?.length||0)
   }
   function clearLogStats(pid: string) { logStatsMap.value[pid] = { error: 0, warn: 0, info: 0, debug: 0 } }
-  function clearOutput(projectId: string, commandId: string) { outputMap.value[cmdKey(projectId, commandId)] = [] }
+
+  const clearTermSignal = ref(0)
+  function clearOutput(projectId: string, commandId: string) {
+    const pid = cmdKey(projectId, commandId)
+    outputMap.value[pid] = []
+    clearTermSignal.value++
+  }
   function getOutput(pid: string): number[] { return outputMap.value[pid] ?? [] }
 
   // Smart project detection via Rust backend
@@ -146,5 +152,5 @@ export const useProjectStore = defineStore('project', () => {
   }
   function destroyListeners() { _unlistenExit?.(); _unlistenPty?.() }
 
-  return { projects, selectedProjectId, runningMap, outputMap, logStatsMap, runningTabs, docTabs, activeTabIndex, activeDocIndex, activeTabType, shortcuts, pendingInput, frequentShortcuts, favShortcuts, loadProjects, saveProjects, addProject, removeProject, updateProjectName, addCommand, removeCommand, updateCommand, startCommand, stopCommand, restartCommand, closeTab, closeDocTab, openDoc, openDocFromText, clearOutput, clearLogStats, getOutput, initListeners, destroyListeners, cmdKey, detectProject, bufferPtyOutput, loadShortcuts, addShortcut, removeShortcut, updateShortcut, isBuiltin, useShortcut, toggleFav, startDefaultTerminal }
+  return { projects, selectedProjectId, runningMap, outputMap, logStatsMap, runningTabs, docTabs, activeTabIndex, activeDocIndex, activeTabType, shortcuts, pendingInput, frequentShortcuts, favShortcuts, clearTermSignal, loadProjects, saveProjects, addProject, removeProject, updateProjectName, addCommand, removeCommand, updateCommand, startCommand, stopCommand, restartCommand, closeTab, closeDocTab, openDoc, openDocFromText, clearOutput, clearLogStats, getOutput, initListeners, destroyListeners, cmdKey, detectProject, bufferPtyOutput, loadShortcuts, addShortcut, removeShortcut, updateShortcut, isBuiltin, useShortcut, toggleFav, startDefaultTerminal }
 })

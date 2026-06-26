@@ -33,30 +33,35 @@ function openFilteredTab() {
 </script>
 
 <template>
-  <div class="log-panel" v-if="show">
-    <div class="lp-header">
-      <span class="lp-title">日志</span>
-      <button class="lp-close" @click="show=false">✕</button>
+  <div class="lp-root">
+    <div class="log-panel" v-if="show">
+      <div class="lp-header">
+        <span class="lp-title">日志</span>
+        <button class="lp-close" @click="show=false">✕</button>
+      </div>
+      <div class="lp-search">
+        <input v-model="searchText" placeholder="搜索..." class="lp-input" />
+      </div>
+      <div class="lp-stats">
+        <div :class="['lp-badge',{on:filterLevel==='all'}]" @click="filterBy('all')">全部 {{ total }}</div>
+        <div :class="['lp-badge','err',{on:filterLevel==='error'}]" @click="filterBy('error')">错误 {{ stats.error }}</div>
+        <div :class="['lp-badge','warn',{on:filterLevel==='warn'}]" @click="filterBy('warn')">警告 {{ stats.warn }}</div>
+        <div :class="['lp-badge','info',{on:filterLevel==='info'}]" @click="filterBy('info')">信息 {{ stats.info }}</div>
+        <div :class="['lp-badge','dbg',{on:filterLevel==='debug'}]" @click="filterBy('debug')">调试 {{ stats.debug }}</div>
+      </div>
+      <div style="padding:4px 8px;border-top:1px solid #3e3e42">
+        <button class="btn-sm" @click="openFilteredTab">📄 打开筛选结果</button>
+      </div>
     </div>
-    <div class="lp-search">
-      <input v-model="searchText" placeholder="搜索..." class="lp-input" />
-    </div>
-    <div class="lp-stats">
-      <div :class="['lp-badge',{on:filterLevel==='all'}]" @click="filterBy('all')">全部 {{ total }}</div>
-      <div :class="['lp-badge','err',{on:filterLevel==='error'}]" @click="filterBy('error')">错误 {{ stats.error }}</div>
-      <div :class="['lp-badge','warn',{on:filterLevel==='warn'}]" @click="filterBy('warn')">警告 {{ stats.warn }}</div>
-      <div :class="['lp-badge','info',{on:filterLevel==='info'}]" @click="filterBy('info')">信息 {{ stats.info }}</div>
-      <div :class="['lp-badge','dbg',{on:filterLevel==='debug'}]" @click="filterBy('debug')">调试 {{ stats.debug }}</div>
-    </div>
-    <div style="padding:4px 8px;border-top:1px solid #3e3e42">
-      <button class="btn-sm" @click="openFilteredTab">📄 打开筛选结果</button>
-    </div>
+    <div class="lp-collapsed" v-else @click="show=true" title="打开日志面板">📊</div>
   </div>
-  <button class="lp-toggle" @click="show=!show" :title="show?'收起日志':'打开日志'">{{ show?'▶':'📊' }}</button>
 </template>
 
 <style scoped>
-.log-panel { width:200px; min-width:200px; background:#252526; border-left:1px solid #3e3e42; display:flex; flex-direction:column; overflow:hidden; }
+.lp-root { display:flex; flex-shrink:0; }
+.log-panel { width:200px; background:#252526; border-left:1px solid #3e3e42; display:flex; flex-direction:column; overflow:hidden; }
+.lp-collapsed { width:24px; min-width:24px; background:#2d2d30; border-left:1px solid #3e3e42; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:13px; color:#858585; user-select:none; }
+.lp-collapsed:hover { background:#37373d; color:#ccc; }
 .lp-header { display:flex; justify-content:space-between; align-items:center; padding:6px 8px; border-bottom:1px solid #3e3e42; }
 .lp-title { font-size:12px; font-weight:600; }
 .lp-close { background:none; color:#858585; font-size:14px; padding:0 4px; cursor:pointer; }
@@ -74,6 +79,4 @@ function openFilteredTab() {
 .lp-badge.dbg { color:#858585; }
 .btn-sm { background:#3c3c3c; color:#ccc; padding:4px 10px; font-size:11px; width:100%; text-align:center; }
 .btn-sm:hover { background:#4c4c4c; }
-.lp-toggle { position:absolute; right:0; top:50%; transform:translateY(-50%); background:#2d2d30; border:1px solid #3e3e42; color:#858585; padding:4px 6px; font-size:14px; cursor:pointer; z-index:10; }
-.lp-toggle:hover { background:#37373d; color:#ccc; }
 </style>
