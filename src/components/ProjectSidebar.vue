@@ -130,8 +130,8 @@ document.addEventListener('click',()=>{closeScCtx()})
         <div :class="['tab',{on:scTab==='fav'}]" @click="scTab='fav'">收藏</div>
       </div>
       <div style="flex:1;overflow-y:auto">
-        <!-- All: accordion single-expand -->
-        <div v-if="scTab==='all'" v-for="cat in filteredCats" :key="cat" style="border-bottom:1px solid #3e3e42">
+          <!-- All: accordion single-expand -->
+          <div v-if="scTab==='all'" v-for="cat in filteredCats" :key="cat" style="border-bottom:1px solid #3e3e42">
           <div class="scat" @click="expandedCat = expandedCat===cat?'':cat">{{ expandedCat===cat?'▾':'▸'}} {{ cat }} ({{ shortcutsByCat(cat).length }})</div>
           <div v-if="expandedCat===cat">
             <div v-for="s in shortcutsByCat(cat)" :key="s.id" class="sc" @click="store.useShortcut(s)" @contextmenu="openScCtx($event,s)" :title="s.command + '\n' + s.description">
@@ -151,7 +151,7 @@ document.addEventListener('click',()=>{closeScCtx()})
           <span class="scc">{{ s.command }}</span>
         </div>
       </div>
-      <div style="padding:4px 6px;border-top:1px solid #3e3e42">
+      <div style="padding:4px 6px;border-top:1px solid #3e3e42;flex-shrink:0">
         <input v-model="scSearch" placeholder="搜索命令..." style="width:100%;font-size:11px;padding:3px 6px" />
       </div>
     </div>
@@ -204,7 +204,7 @@ document.addEventListener('click',()=>{closeScCtx()})
 </template>
 
 <style scoped>
-.side { width:210px; min-width:210px; background:#252526; display:flex; flex-direction:column; overflow:hidden; user-select:none; }
+.side { width:210px; min-width:210px; height:100%; background:#252526; display:flex; flex-direction:column; overflow:hidden; user-select:none; }
 .side-head { padding:1 10px; height: 2px; letter-spacing:.5px; color:#e0e0e0; border-bottom:1px solid #3e3e42; background: #7a7af7;}
 .tabs { display:flex; }
 .tab { flex:1; text-align:center; padding:6px 0; font-size:12px; cursor:pointer; color:#858585; border-bottom:2px solid transparent; }
