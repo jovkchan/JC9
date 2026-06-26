@@ -47,14 +47,14 @@ onMounted(async()=>{
 watch(()=>props.active,v=>{if(v){doFit();setTimeout(()=>{term?.focus()},100)}})
 watch(()=>store.clearTermSignal,()=>{term?.scrollToBottom();term?.write('\u001b[2J\u001b[3J\u001b[H');term?.scrollToBottom()})
 watch(()=>store.pendingInput,v=>{if(v){input.value=v;store.pendingInput='';nextTick(()=>inputRef.value?.focus())}})
-onUnmounted(()=>{ul?.();ro?.disconnect();term?.dispose();invoke('stop_command',{processId:props.processId}).catch(()=>{})})
+onUnmounted(()=>{ul?.();ro?.disconnect();term?.dispose();})
 </script>
 
 <template>
   <div class="tw">
     <div ref="container" class="to" @click="focusTerm" />
     <div class="tb">
-      <span class="p">&gt;</span>
+      <span class="p">>_</span>
       <input ref="inputRef" v-model="input" class="ti" placeholder="回车发送 | 点终端区域交互选择 ↑↓" @keyup.enter="sendLine" @keydown="onKd" spellcheck="false" />
     </div>
   </div>

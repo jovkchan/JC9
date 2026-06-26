@@ -1,97 +1,393 @@
 <script setup lang="ts">
-import { ref, nextTick, computed } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
+import { ref, nextTick, computed, onMounted, onUnmounted } from 'vue'
 import { useProjectStore } from '@/stores/project'
 import { open } from '@tauri-apps/plugin-dialog'
 import CommandDialog from '@/components/CommandDialog.vue'
 import type { Command } from '@/types'
 
 const store = useProjectStore()
-const activeTab = ref<'projects'|'shortcuts'|'tools'>('projects')
-const showAdd = ref(false); const newName = ref(''); const newDir = ref('')
-const expandedProjects = ref<Set<string>>(new Set()); const detectedLang = ref('')
-const detectedCmds = ref<{name:string;command:string;workingDir:string}[]>([])
-const dialogProjectId = ref(''); const editingCmd = ref<Command|null>(null)
+const activeTab = ref<'projects' | 'shortcuts' | 'tools'>('projects')
+const showAdd = ref(false)
+const newName = ref('')
+const newDir = ref('')
+const expandedProjects = ref<Set<string>>(new Set())
+const detectedLang = ref('')
+const detectedCmds = ref<{ name: string; command: string; workingDir: string }[]>([])
+const dialogProjectId = ref('')
+const editingCmd = ref<Command | null>(null)
 const cmdDialogRef = ref<InstanceType<typeof CommandDialog>>()
 
-function toggleExpand(id:string){expandedProjects.value.has(id)?expandedProjects.value.delete(id):expandedProjects.value.add(id)}
-async function pickDir(){const d=await open({directory:true,multiple:false,title:'选择项目目录'});if(d&&typeof d==='string'){newDir.value=d;newName.value=d.split(/[\\/]/).pop()||newName.value;const info=await store.detectProject(d);if(info){newName.value=info.name;detectedLang.value=info.lang;detectedCmds.value=info.suggestCommands}}}
-async function handleAdd(){const n=newName.value.trim()||'新项目';store.addProject(n);const pid=store.projects[store.projects.length-1].id;expandedProjects.value.add(pid);for(const c of detectedCmds.value)store.addCommand(pid,c);newName.value='';newDir.value='';detectedLang.value='';detectedCmds.value=[];showAdd.value=false}
-function addQuickCmd(id:string){editingCmd.value=null;dialogProjectId.value=id;cmdDialogRef.value?.openDialog()}
-function editCmd(pid:string,cmd:Command){editingCmd.value=cmd;dialogProjectId.value=pid;cmdDialogRef.value?.openDialog()}
-function isRunning(pid:string,cid:string){return store.runningMap[store.cmdKey(pid,cid)]==='running'}
-
-// ---- Project context menu ----
-const projCtxShow = ref(false); const projCtxPos = ref({x:0,y:0}); const projCtxId = ref('')
-function openProjCtx(e:MouseEvent, pid:string){e.preventDefault();projCtxPos.value={x:e.clientX,y:e.clientY};projCtxId.value=pid;projCtxShow.value=true}
-function closeProjCtx(){projCtxShow.value=false}
-function ctxRenameProj(){editingProjId.value=projCtxId.value;editProjName.value=store.projects.find(p=>p.id===projCtxId.value)?.name||'';closeProjCtx();nextTick(()=>{const el=document.querySelector<HTMLInputElement>('.proj-edit-input');el?.focus();el?.select()})}
-function confirmRenameProj(){const n=editProjName.value.trim();if(n){store.updateProjectName(editingProjId.value,n)};editingProjId.value=''}
-function ctxAddCmd(){dialogProjectId.value=projCtxId.value;editingCmd.value=null;cmdDialogRef.value?.openDialog();closeProjCtx()}
-function ctxDelProj(){store.removeProject(projCtxId.value);closeProjCtx()}
-const editingProjId=ref('');const editProjName=ref('')
-document.addEventListener('click',()=>{closeProjCtx();closeCmdCtx()})
-
-// ---- Command context menu ----
-const cmdCtxShow = ref(false); const cmdCtxPos = ref({x:0,y:0}); const cmdCtxPid = ref(''); const cmdCtxCmd = ref<Command|null>(null)
-function openCmdCtx(e:MouseEvent, pid:string, cmd:Command){e.preventDefault();e.stopPropagation();cmdCtxPos.value={x:e.clientX,y:e.clientY};cmdCtxPid.value=pid;cmdCtxCmd.value=cmd;cmdCtxShow.value=true}
-function closeCmdCtx(){cmdCtxShow.value=false}
-function ctxEditCmd(){if(cmdCtxCmd.value){dialogProjectId.value=cmdCtxPid.value;editingCmd.value=cmdCtxCmd.value;cmdDialogRef.value?.openDialog()};closeCmdCtx()}
-function ctxRenameCmd(){const c=cmdCtxCmd.value;if(c){editingCmdId.value=cmdCtxPid.value+'::'+c.id;editCmdName.value=c.name};closeCmdCtx();nextTick(()=>{const el=document.querySelector<HTMLInputElement>('.cmd-edit-input');el?.focus();el?.select()})}
-function confirmRenameCmd(){const [pid,cid]=editingCmdId.value.split('::');const n=editCmdName.value.trim();const p=store.projects.find(p=>p.id===pid);const c=p?.commands.find(c=>c.id===cid);if(n&&c)store.updateCommand(pid,{...c,name:n});editingCmdId.value=''}
-const editingCmdId=ref('');const editCmdName=ref('')
-function ctxDelCmd(){store.removeCommand(cmdCtxPid.value,cmdCtxCmd.value!.id);closeCmdCtx()}
-
-// ── Tools ──
-const activeTool = ref('')
-const toolPort = ref('')
-const toolMsg = ref('')
-const toolBusy = ref(false)
-async function runTool() {
-  if (activeTool.value === 'port') {
-    const p = parseInt(toolPort.value)
-    if (!p || p < 1) { toolMsg.value = '请输入有效端口号'; return }
-    toolBusy.value = true; toolMsg.value = ''
-    try { toolMsg.value = await invoke<string>('kill_port', { port: p }) }
-    catch (e: any) { toolMsg.value = typeof e === 'string' ? e : (e?.message || String(e)) }
-    toolBusy.value = false
+function toggleExpand(id: string) {
+  if (expandedProjects.value.has(id)) {
+    expandedProjects.value.delete(id)
+  } else {
+    expandedProjects.value.add(id)
   }
 }
 
+async function pickDir() {
+  const d = await open({
+    directory: true,
+    multiple: false,
+    title: '选择项目目录'
+  })
+  if (d && typeof d === 'string') {
+    newDir.value = d
+    newName.value = d.split(/[\\/]/).pop() || newName.value
+    const info = await store.detectProject(d)
+    if (info) {
+      newName.value = info.name
+      detectedLang.value = info.lang
+      detectedCmds.value = info.suggestCommands
+    }
+  }
+}
+
+async function handleAdd() {
+  const n = newName.value.trim() || '新项目'
+  store.addProject(n)
+  const pid = store.projects[store.projects.length - 1].id
+  expandedProjects.value.add(pid)
+  for (const c of detectedCmds.value) {
+    store.addCommand(pid, c)
+  }
+  newName.value = ''
+  newDir.value = ''
+  detectedLang.value = ''
+  detectedCmds.value = []
+  showAdd.value = false
+}
+
+function addQuickCmd(id: string) {
+  editingCmd.value = null
+  dialogProjectId.value = id
+  cmdDialogRef.value?.openDialog()
+}
+
+function editCmd(pid: string, cmd: Command) {
+  editingCmd.value = cmd
+  dialogProjectId.value = pid
+  cmdDialogRef.value?.openDialog()
+}
+
+function isRunning(pid: string, cid: string) {
+  return store.runningMap[store.cmdKey(pid, cid)] === 'running'
+}
+
+// ---- Project context menu ----
+const projCtxShow = ref(false)
+const projCtxPos = ref({ x: 0, y: 0 })
+const projCtxId = ref('')
+
+function openProjCtx(e: MouseEvent, pid: string) {
+  e.preventDefault()
+  projCtxPos.value = { x: e.clientX, y: e.clientY }
+  projCtxId.value = pid
+  projCtxShow.value = true
+}
+
+function closeProjCtx() {
+  projCtxShow.value = false
+}
+
+function ctxRenameProj() {
+  editingProjId.value = projCtxId.value
+  editProjName.value = store.projects.find(p => p.id === projCtxId.value)?.name || ''
+  closeProjCtx()
+  nextTick(() => {
+    const el = document.querySelector<HTMLInputElement>('.proj-edit-input')
+    el?.focus()
+    el?.select()
+  })
+}
+
+function confirmRenameProj() {
+  const n = editProjName.value.trim()
+  if (n) {
+    store.updateProjectName(editingProjId.value, n)
+  }
+  editingProjId.value = ''
+}
+
+// 新增快速命令
+function ctxAddCmd() {
+  dialogProjectId.value = projCtxId.value
+  editingCmd.value = null
+  cmdDialogRef.value?.openDialog()
+  closeProjCtx()
+}
+
+function ctxDelProj() {
+  store.removeProject(projCtxId.value)
+  closeProjCtx()
+}
+
+const editingProjId = ref('')
+const editProjName = ref('')
+
+// ---- Command context menu ----
+const cmdCtxShow = ref(false)
+const cmdCtxPos = ref({ x: 0, y: 0 })
+const cmdCtxPid = ref('')
+const cmdCtxCmd = ref<Command | null>(null)
+
+function openCmdCtx(e: MouseEvent, pid: string, cmd: Command) {
+  e.preventDefault()
+  e.stopPropagation()
+  cmdCtxPos.value = { x: e.clientX, y: e.clientY }
+  cmdCtxPid.value = pid
+  cmdCtxCmd.value = cmd
+  cmdCtxShow.value = true
+}
+
+function closeCmdCtx() {
+  cmdCtxShow.value = false
+}
+
+function ctxEditCmd() {
+  if (cmdCtxCmd.value) {
+    dialogProjectId.value = cmdCtxPid.value
+    editingCmd.value = cmdCtxCmd.value
+    cmdDialogRef.value?.openDialog()
+  }
+  closeCmdCtx()
+}
+
+function ctxRenameCmd() {
+  const c = cmdCtxCmd.value
+  if (c) {
+    editingCmdId.value = cmdCtxPid.value + '::' + c.id
+    editCmdName.value = c.name
+  }
+  closeCmdCtx()
+  nextTick(() => {
+    const el = document.querySelector<HTMLInputElement>('.cmd-edit-input')
+    el?.focus()
+    el?.select()
+  })
+}
+
+function confirmRenameCmd() {
+  const [pid, cid] = editingCmdId.value.split('::')
+  const n = editCmdName.value.trim()
+  const p = store.projects.find(p => p.id === pid)
+  const c = p?.commands.find(c => c.id === cid)
+  if (n && c) {
+    store.updateCommand(pid, { ...c, name: n })
+  }
+  editingCmdId.value = ''
+}
+
+const editingCmdId = ref('')
+const editCmdName = ref('')
+
+function ctxDelCmd() {
+  if (cmdCtxCmd.value) {
+    store.removeCommand(cmdCtxPid.value, cmdCtxCmd.value.id)
+  }
+  closeCmdCtx()
+}
+
 // ---- Shortcuts ----
-const showScDlg=ref(false);const newScName=ref('');const newScCmd=ref('');const newScDesc=ref('');const newScCat=ref('')
-function openScDlg(){showScDlg.value=true;newScName.value='';newScCmd.value='';newScDesc.value='';newScCat.value=''}
+const showScDlg = ref(false)
+const newScName = ref('')
+const newScCmd = ref('')
+const newScDesc = ref('')
+const newScCat = ref('')
+
+function openScDlg() {
+  showScDlg.value = true
+  newScName.value = ''
+  newScCmd.value = ''
+  newScDesc.value = ''
+  newScCat.value = ''
+}
+
 const expandedCat = ref('')
 const scSearch = ref('')
-const filteredCats = computed(() => shortcutCats.value.filter(c => shortcutsByCat(c).some(s => s.command.includes(scSearch.value) || s.description.includes(scSearch.value) || s.name.includes(scSearch.value))))
-const filteredFreq = computed(() => store.frequentShortcuts.filter(s => s.command.includes(scSearch.value) || s.description.includes(scSearch.value) || s.name.includes(scSearch.value)))
-const filteredFav = computed(() => store.favShortcuts.filter(s => s.command.includes(scSearch.value) || s.description.includes(scSearch.value) || s.name.includes(scSearch.value)))
-const shortcutCats=computed(()=>[...new Set(store.shortcuts.map(s=>s.category))])
-function shortcutsByCat(cat:string){return store.shortcuts.filter(s=>s.category===cat)}
-function addSc(){const n=newScName.value.trim();const c=newScCmd.value.trim();if(!n||!c)return
-  if(editingScId.value){store.updateShortcut(editingScId.value,{name:n,command:c,description:newScDesc.value.trim(),category:newScCat.value.trim()||'自定义'})}
-  else store.addShortcut({name:n,command:c,description:newScDesc.value.trim(),category:newScCat.value.trim()||'自定义'})
-  showScDlg.value=false;editingScId.value=''}
-const scTab = ref<'all'|'freq'|'fav'>('all')
+const filteredCats = computed(() => {
+  return shortcutCats.value.filter(c => {
+    return shortcutsByCat(c).some(s => {
+      return s.command.includes(scSearch.value) ||
+             s.description.includes(scSearch.value) ||
+             s.name.includes(scSearch.value)
+    })
+  })
+})
+
+const filteredFreq = computed(() => {
+  return store.frequentShortcuts.filter(s => {
+    return s.command.includes(scSearch.value) ||
+           s.description.includes(scSearch.value) ||
+           s.name.includes(scSearch.value)
+  })
+})
+
+const filteredFav = computed(() => {
+  return store.favShortcuts.filter(s => {
+    return s.command.includes(scSearch.value) ||
+           s.description.includes(scSearch.value) ||
+           s.name.includes(scSearch.value)
+  })
+})
+
+const shortcutCats = computed(() => {
+  return [...new Set(store.shortcuts.map(s => s.category))]
+})
+
+function shortcutsByCat(cat: string) {
+  return store.shortcuts.filter(s => s.category === cat)
+}
+
+function addSc() {
+  const n = newScName.value.trim()
+  const c = newScCmd.value.trim()
+  if (!n || !c) return
+  if (editingScId.value) {
+    store.updateShortcut(editingScId.value, {
+      name: n,
+      command: c,
+      description: newScDesc.value.trim(),
+      category: newScCat.value.trim() || '自定义'
+    })
+  } else {
+    store.addShortcut({
+      name: n,
+      command: c,
+      description: newScDesc.value.trim(),
+      category: newScCat.value.trim() || '自定义'
+    })
+  }
+  showScDlg.value = false
+  editingScId.value = ''
+}
+
+const scTab = ref<'all' | 'freq' | 'fav'>('all')
+
 // Shortcut context menu
-const scCtxShow=ref(false);const scCtxPos=ref({x:0,y:0});const scCtxItem=ref<import('@/stores/project').ShortcutItem|null>(null)
-function openScCtx(e:MouseEvent,s:import('@/stores/project').ShortcutItem){e.preventDefault();scCtxPos.value={x:e.clientX,y:e.clientY};scCtxItem.value=s;scCtxShow.value=true}
-function closeScCtx(){scCtxShow.value=false}
-function scCtxEdit(){const s=scCtxItem.value;if(s){newScName.value=s.name;newScCmd.value=s.command;newScDesc.value=s.description;newScCat.value=s.category;editingScId.value=s.id;showScDlg.value=true};closeScCtx()}
-function scCtxDel(){if(scCtxItem.value)store.removeShortcut(scCtxItem.value.id);closeScCtx()}
-function scCtxFav(){if(scCtxItem.value)store.toggleFav(scCtxItem.value.id);closeScCtx()}
-const editingScId=ref('')
-async function scCtxDoc(){const s=scCtxItem.value;if(!s){closeScCtx();return};closeScCtx();store.openDoc(s.command,s.command)}
-document.addEventListener('click',()=>{closeScCtx()})
+const scCtxShow = ref(false)
+const scCtxPos = ref({ x: 0, y: 0 })
+const scCtxItem = ref<import('@/stores/project').ShortcutItem | null>(null)
+
+function openScCtx(e: MouseEvent, s: import('@/stores/project').ShortcutItem) {
+  e.preventDefault()
+  scCtxPos.value = { x: e.clientX, y: e.clientY }
+  scCtxItem.value = s
+  scCtxShow.value = true
+}
+
+function closeScCtx() {
+  scCtxShow.value = false
+}
+
+function scCtxEdit() {
+  const s = scCtxItem.value
+  if (s) {
+    newScName.value = s.name
+    newScCmd.value = s.command
+    newScDesc.value = s.description
+    newScCat.value = s.category
+    editingScId.value = s.id
+    showScDlg.value = true
+  }
+  closeScCtx()
+}
+
+function scCtxDel() {
+  if (scCtxItem.value) {
+    store.removeShortcut(scCtxItem.value.id)
+  }
+  closeScCtx()
+}
+
+function scCtxFav() {
+  if (scCtxItem.value) {
+    store.toggleFav(scCtxItem.value.id)
+  }
+  closeScCtx()
+}
+
+const editingScId = ref('')
+
+async function scCtxDoc() {
+  const s = scCtxItem.value
+  if (!s) {
+    closeScCtx()
+    return
+  }
+  closeScCtx()
+  store.openDoc(s.command, s.command)
+}
+const allTools = [
+  { type: 'json', name: 'JSON 格式化', desc: 'JSON 美化/压缩与校验', category: 'code', icon: 'json' },
+  { type: 'regex', name: '正则测试器', desc: '正则表达式实时高亮测试', category: 'code', icon: 'regex' },
+  { type: 'base64', name: 'Base64 转换', desc: 'Base64 字符串编码解码', category: 'code', icon: 'base64' },
+  { type: 'uuid', name: 'UUID 生成器', desc: '批量生成 UUID v4', category: 'code', icon: 'uuid' },
+  { type: 'port', name: '端口释放器', desc: '精准释放指定端口占用的进程', category: 'network', icon: 'network' },
+  { type: 'env', name: '环境变量查看', desc: '查看系统所有环境变量并过滤', category: 'system', icon: 'system' },
+  { type: 'timestamp', name: '时间戳转换', desc: 'Unix时间戳与本地日期互转', category: 'system', icon: 'timestamp' },
+  { type: 'ssh', name: 'SSH 密钥生成', desc: '生成安全多算法 SSH 密钥对', category: 'system', icon: 'key' },
+  { type: 'ssl', name: 'SSL 证书生成', desc: '生成开发测试用自签名 SSL 证书对', category: 'system', icon: 'cert' }
+]
+
+const toolSearchQuery = ref('')
+
+const filteredTools = computed(() => {
+  const q = toolSearchQuery.value.trim().toLowerCase()
+  if (!q) return allTools
+  return allTools.filter(t => t.name.includes(q) || t.desc.includes(q))
+})
+
+const categorizedTools = computed(() => {
+  const map: Record<string, typeof allTools> = { code: [], network: [], system: [] }
+  filteredTools.value.forEach(t => {
+    if (map[t.category]) {
+      map[t.category].push(t)
+    }
+  })
+  return map
+})
+
+const recentUsedTools = computed(() => {
+  return store.recentTools.map(type => allTools.find(t => t.type === type)).filter(Boolean) as typeof allTools
+})
+
+function handleShortcutKeys(e: KeyboardEvent) {
+  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+  if (e.altKey && e.key >= '1' && e.key <= '9') {
+    e.preventDefault()
+    const idx = parseInt(e.key) - 1
+    if (idx >= 0 && idx < allTools.length) {
+      const tool = allTools[idx]
+      store.openTool(tool.type, tool.name)
+    }
+  }
+}
+
+function handleGlobalClick() {
+  closeProjCtx()
+  closeCmdCtx()
+  closeScCtx()
+}
+
+onMounted(() => {
+  document.addEventListener('click', handleGlobalClick)
+  document.addEventListener('keydown', handleShortcutKeys)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', handleGlobalClick)
+  document.removeEventListener('keydown', handleShortcutKeys)
+})
 </script>
 
 <template>
   <aside class="side">
     <div class="side-head"></div>
-    <div class="tabs">
-      <div :class="['tab',{on:activeTab==='projects'}]" @click="activeTab='projects'">项目</div>
-      <div :class="['tab',{on:activeTab==='shortcuts'}]" @click="activeTab='shortcuts'">快捷</div>
-      <div :class="['tab',{on:activeTab==='tools'}]" @click="activeTab='tools'">工具</div>
+    <div class="tabs" role="tablist">
+      <div :class="['tab',{on:activeTab==='projects'}]" role="tab" :aria-selected="activeTab==='projects'" tabindex="0" @click="activeTab='projects'" @keyup.enter="activeTab='projects'">项目</div>
+      <div :class="['tab',{on:activeTab==='shortcuts'}]" role="tab" :aria-selected="activeTab==='shortcuts'" tabindex="0" @click="activeTab='shortcuts'" @keyup.enter="activeTab='shortcuts'">快捷</div>
+      <div :class="['tab',{on:activeTab==='tools'}]" role="tab" :aria-selected="activeTab==='tools'" tabindex="0" @click="activeTab='tools'" @keyup.enter="activeTab='tools'">工具</div>
     </div>
 
     <!-- Projects -->
@@ -144,25 +440,31 @@ document.addEventListener('click',()=>{closeScCtx()})
       </div>
       <div style="flex:1;overflow-y:auto">
           <!-- All: accordion single-expand -->
-          <div v-if="scTab==='all'" v-for="cat in filteredCats" :key="cat" style="border-bottom:1px solid var(--jc-border-default)">
-          <div class="scat" @click="expandedCat = expandedCat===cat?'':cat">{{ expandedCat===cat?'▾':'▸'}} {{ cat }} ({{ shortcutsByCat(cat).length }})</div>
-          <div v-if="expandedCat===cat">
-            <div v-for="s in shortcutsByCat(cat)" :key="s.id" class="sc" @click="store.useShortcut(s)" @contextmenu="openScCtx($event,s)" :title="s.command + '\n' + s.description">
+          <template v-if="scTab==='all'">
+            <div v-for="cat in filteredCats" :key="cat" style="border-bottom:1px solid var(--jc-border-default)">
+              <div class="scat" @click="expandedCat = expandedCat===cat?'':cat">{{ expandedCat===cat?'▾':'▸'}} {{ cat }} ({{ shortcutsByCat(cat).length }})</div>
+              <div v-if="expandedCat===cat">
+                <div v-for="s in shortcutsByCat(cat)" :key="s.id" class="sc" @click="store.useShortcut(s)" @contextmenu="openScCtx($event,s)" :title="s.command + '\n' + s.description">
+                  <span class="fav-star" v-if="s.favorite">★</span>
+                  <span class="scc">{{ s.command }}</span>
+                </div>
+              </div>
+            </div>
+          </template>
+          <!-- Frequent -->
+          <template v-if="scTab==='freq'">
+            <div v-for="s in filteredFreq" :key="s.id" class="sc" @click="store.useShortcut(s)" @contextmenu="openScCtx($event,s)" :title="s.command + '\n' + s.description">
               <span class="fav-star" v-if="s.favorite">★</span>
+              <span class="scc">{{ s.command }}</span><span class="scd">{{ s.useCount }}次</span>
+            </div>
+          </template>
+          <!-- Favorites -->
+          <template v-if="scTab==='fav'">
+            <div v-for="s in filteredFav" :key="s.id" class="sc" @click="store.useShortcut(s)" @contextmenu="openScCtx($event,s)" :title="s.command + '\n' + s.description">
+              <span class="fav-star">★</span>
               <span class="scc">{{ s.command }}</span>
             </div>
-          </div>
-        </div>
-        <!-- Frequent -->
-        <div v-if="scTab==='freq'" v-for="s in filteredFreq" :key="s.id" class="sc" @click="store.useShortcut(s)" @contextmenu="openScCtx($event,s)" :title="s.command + '\n' + s.description">
-          <span class="fav-star" v-if="s.favorite">★</span>
-          <span class="scc">{{ s.command }}</span><span class="scd">{{ s.useCount }}次</span>
-        </div>
-        <!-- Favorites -->
-        <div v-if="scTab==='fav'" v-for="s in filteredFav" :key="s.id" class="sc" @click="store.useShortcut(s)" @contextmenu="openScCtx($event,s)" :title="s.command + '\n' + s.description">
-          <span class="fav-star">★</span>
-          <span class="scc">{{ s.command }}</span>
-        </div>
+          </template>
       </div>
       <div style="padding:4px 6px;border-top:1px solid var(--jc-border-default);flex-shrink:0">
         <input v-model="scSearch" placeholder="搜索命令..." style="width:100%;font-size:11px;padding:3px 6px" />
@@ -170,38 +472,100 @@ document.addEventListener('click',()=>{closeScCtx()})
     </div>
 
     <!-- Tools -->
-    <div v-show="activeTab==='tools'" class="panel" style="padding:8px;display:flex;flex-direction:column;gap:4px">
-      <div style="font-size:12px;font-weight:600;color:var(--jc-text-highlight);padding:4px 4px 8px">工具箱</div>
-      <div class="tool-grid">
-        <button class="tool-card" @click="activeTool='port';toolPort='';toolMsg=''" title="杀掉指定端口的进程">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>
-          </svg>
-          <span>端口杀手</span>
-        </button>
-        <!-- 后续工具在此追加 -->
+    <div v-show="activeTab==='tools'" class="panel" style="display:flex;flex-direction:column">
+      <!-- 搜索过滤 -->
+      <div class="search-bar">
+        <input v-model="toolSearchQuery" placeholder="搜索实用工具..." class="tool-search-input" />
       </div>
-    </div>
 
-    <!-- Tool Dialog -->
-    <Teleport to="body">
-      <div v-if="activeTool==='port'" class="mbg" @click.self="activeTool=''">
-        <div class="mw" style="min-width:360px">
-          <div class="mt">端口杀手</div>
-          <div class="mb">
-            <div class="fld">
-              <label>端口号</label>
-              <input v-model="toolPort" placeholder="如: 8080" type="number" @keyup.enter="runTool" />
-            </div>
-            <div v-if="toolMsg" :style="{fontSize:'12px',color:toolMsg.includes('已杀掉')?'var(--jc-color-success)':'var(--jc-color-error)',wordBreak:'break-all',padding:'4px 0'}">{{ toolMsg }}</div>
-            <div class="acts">
-              <button class="btn" @click="activeTool=''">取消</button>
-              <button class="btn pri" @click="runTool" :disabled="toolBusy">{{ toolBusy?'处理中...':'执行' }}</button>
-            </div>
+      <div class="tools-list-container">
+        <!-- 最近使用 -->
+        <div v-if="recentUsedTools.length > 0 && !toolSearchQuery" class="tools-section">
+          <div class="section-title">最近使用</div>
+          <div class="tools-row-grid">
+            <button v-for="t in recentUsedTools" :key="'rec-'+t.type" class="tool-item-card" @click="store.openTool(t.type, t.name)" :title="t.desc">
+              <span class="tool-icon">
+                <svg v-if="t.icon === 'json'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 19a1 1 0 0 1-1 1H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2a1 1 0 0 1 1 1"/><path d="M14 19a1 1 0 0 0 1 1h2a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2a1 1 0 0 0-1 1"/></svg>
+                <svg v-else-if="t.icon === 'regex'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m5 5 14 14"/></svg>
+                <svg v-else-if="t.icon === 'base64'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 3 4 4-4 4M21 7H3M7 21l-4-4 4-4M3 17h18"/></svg>
+                <svg v-else-if="t.icon === 'uuid'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 21V3M17 21V3M3 12h18"/></svg>
+                <svg v-else-if="t.icon === 'network'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+                <svg v-else-if="t.icon === 'system'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8M12 17v4M6 8l4 4-4 4"/></svg>
+                <svg v-else-if="t.icon === 'timestamp'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                <svg v-else-if="t.icon === 'key'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 1.5 1.5M15.5 7.5 14 6"/></svg>
+                <svg v-else-if="t.icon === 'cert'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              </span>
+              <div class="tool-info">
+                <div class="tool-name">{{ t.name }}</div>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        <!-- 编码工具 -->
+        <div v-if="categorizedTools.code.length > 0" class="tools-section">
+          <div class="section-title">编码工具 (CODE)</div>
+          <div class="tools-flex-list">
+            <button v-for="t in categorizedTools.code" :key="t.type" class="tool-item-line" @click="store.openTool(t.type, t.name)">
+              <div class="tool-meta-left">
+                <span class="tool-icon">
+                  <svg v-if="t.icon === 'json'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 19a1 1 0 0 1-1 1H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2a1 1 0 0 1 1 1"/><path d="M14 19a1 1 0 0 0 1 1h2a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2a1 1 0 0 0-1 1"/></svg>
+                  <svg v-else-if="t.icon === 'regex'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m5 5 14 14"/></svg>
+                  <svg v-else-if="t.icon === 'base64'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 3 4 4-4 4M21 7H3M7 21l-4-4 4-4M3 17h18"/></svg>
+                  <svg v-else-if="t.icon === 'uuid'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 21V3M17 21V3M3 12h18"/></svg>
+                </span>
+                <div class="tool-text-wrap">
+                  <div class="tool-name">{{ t.name }}</div>
+                  <div class="tool-desc">{{ t.desc }}</div>
+                </div>
+              </div>
+              <span class="tool-shortcut-tag">Alt+{{ allTools.findIndex(x => x.type === t.type) + 1 }}</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 网络工具 -->
+        <div v-if="categorizedTools.network.length > 0" class="tools-section">
+          <div class="section-title">网络工具 (NETWORK)</div>
+          <div class="tools-flex-list">
+            <button v-for="t in categorizedTools.network" :key="t.type" class="tool-item-line" @click="store.openTool(t.type, t.name)">
+              <div class="tool-meta-left">
+                <span class="tool-icon">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+                </span>
+                <div class="tool-text-wrap">
+                  <div class="tool-name">{{ t.name }}</div>
+                  <div class="tool-desc">{{ t.desc }}</div>
+                </div>
+              </div>
+              <span class="tool-shortcut-tag">Alt+{{ allTools.findIndex(x => x.type === t.type) + 1 }}</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 系统工具 -->
+        <div v-if="categorizedTools.system.length > 0" class="tools-section">
+          <div class="section-title">系统工具 (SYSTEM)</div>
+          <div class="tools-flex-list">
+            <button v-for="t in categorizedTools.system" :key="t.type" class="tool-item-line" @click="store.openTool(t.type, t.name)">
+              <div class="tool-meta-left">
+                <span class="tool-icon">
+                  <svg v-if="t.icon === 'system'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8M12 17v4M6 8l4 4-4 4"/></svg>
+                  <svg v-else-if="t.icon === 'timestamp'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                  <svg v-else-if="t.icon === 'key'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 1.5 1.5M15.5 7.5 14 6"/></svg>
+                  <svg v-else-if="t.icon === 'cert'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                </span>
+                <div class="tool-text-wrap">
+                  <div class="tool-name">{{ t.name }}</div>
+                  <div class="tool-desc">{{ t.desc }}</div>
+                </div>
+              </div>
+              <span class="tool-shortcut-tag">Alt+{{ allTools.findIndex(x => x.type === t.type) + 1 }}</span>
+            </button>
           </div>
         </div>
       </div>
-    </Teleport>
+    </div>
 
     <Teleport to="body">
       <div v-if="projCtxShow" class="ctx" :style="{left:projCtxPos.x+'px',top:projCtxPos.y+'px'}" @click.stop>
@@ -305,8 +669,143 @@ input { @include input-base; }
   input { @include input-base; padding:6px 10px; font-size:13px; }
 }
 .acts { display:flex; justify-content:flex-end; gap:8px; margin-top:4px; }
-.tool-grid { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
-.tool-card { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; padding:12px 4px; background:var(--jc-bg-elevated); border:1px solid var(--jc-border-default); border-radius:6px; cursor:pointer; color:var(--jc-text-secondary); font-size:11px; transition:all 80ms;
-  &:hover { background:var(--jc-bg-hover); color:var(--jc-color-accent); border-color:var(--jc-color-accent); }
+.search-bar {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--jc-border-default);
+  flex-shrink: 0;
+}
+.tool-search-input {
+  width: 100%;
+  background: var(--jc-bg-input);
+  border: 1px solid var(--jc-border-strong);
+  color: var(--jc-text-primary);
+  padding: 4px 8px;
+  font-size: 11px;
+  outline: none;
+  &:focus {
+    border-color: var(--jc-color-accent);
+  }
+}
+.tools-list-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.tools-section {
+  display: flex;
+  flex-direction: column;
+}
+.section-title {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--jc-text-secondary);
+  padding: 0 10px 4px 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.tools-row-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+  padding: 0 10px;
+}
+.tool-item-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px;
+  background: var(--jc-bg-elevated);
+  border: 1px solid var(--jc-border-default);
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--jc-text-primary);
+  width: 100%;
+  &:hover {
+    background: var(--jc-bg-hover);
+    border-color: var(--jc-color-accent);
+    .tool-icon {
+      color: var(--jc-color-accent-hover);
+    }
+  }
+  .tool-icon {
+    color: var(--jc-color-accent);
+    display: flex;
+    align-items: center;
+  }
+  .tool-name {
+    font-size: 10px;
+    font-weight: 600;
+    text-align: center;
+  }
+}
+.tools-flex-list {
+  display: flex;
+  flex-direction: column;
+}
+.tool-item-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: none;
+  border: none;
+  width: 100%;
+  cursor: pointer;
+  color: var(--jc-text-primary);
+  text-align: left;
+  &:hover {
+    background: var(--jc-bg-hover);
+    .tool-icon {
+      color: var(--jc-color-accent-hover);
+    }
+    .tool-name {
+      color: var(--jc-text-highlight);
+    }
+  }
+}
+.tool-meta-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  width: 80%;
+}
+.tool-icon {
+  color: var(--jc-text-secondary);
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.tool-text-wrap {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  width: 100%;
+}
+.tool-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--jc-text-primary);
+}
+.tool-desc {
+  font-size: 9px;
+  color: var(--jc-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+}
+.tool-shortcut-tag {
+  font-size: 8px;
+  background: var(--jc-bg-elevated);
+  border: 1px solid var(--jc-border-strong);
+  color: var(--jc-text-secondary);
+  padding: 1px 3px;
+  border-radius: 3px;
+  font-family: Consolas, monospace;
 }
 </style>

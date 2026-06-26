@@ -51,7 +51,7 @@
   font-size: 12px;
   cursor: pointer;
   color: var(--jc-text-primary);
-  &:hover { background: var(--jc-color-accent-light); }
+  &:hover { background: var(--jc-bg-hover); color: var(--jc-text-highlight); }
 }
 
 // ── Scrollbar ──

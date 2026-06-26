@@ -11,6 +11,8 @@ const store = useProjectStore()
 const sidebarCollapsed = ref(false)
 const isSplash = ref(false)
 
+let defaultTerminalTimer: any = null
+
 onMounted(async () => {
   const win = getCurrentWindow()
 
@@ -29,23 +31,14 @@ onMounted(async () => {
     await win.show()
     await win.setFocus()
   } else {
-    const startTime = Date.now()
-    
     // 后台加载主窗口数据
     await store.loadProjects()
     await store.initListeners()
 
-    // 保证加载展示时间约 2.5 秒，给用户统一的精致视觉体验
-    const elapsed = Date.now() - startTime
-    const minSplashTime = 2500
-    if (elapsed < minSplashTime) {
-      await new Promise(resolve => setTimeout(resolve, minSplashTime - elapsed))
-    }
-
     // 显示并聚焦主窗口
     await win.show()
     await win.setFocus()
-    setTimeout(() => store.startDefaultTerminal(), 200)
+    defaultTerminalTimer = setTimeout(() => store.startDefaultTerminal(), 200)
 
     // 优雅地关闭 logo (splash) 窗口
     const splashWin = await WebviewWindow.getByLabel('splash')
@@ -54,7 +47,12 @@ onMounted(async () => {
     }
   }
 })
-onUnmounted(() => store.destroyListeners())
+onUnmounted(() => {
+  store.destroyListeners()
+  if (defaultTerminalTimer) {
+    clearTimeout(defaultTerminalTimer)
+  }
+})
 </script>
 <template>
   <!-- Splash: spinning icon on transparent background -->

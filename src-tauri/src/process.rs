@@ -43,7 +43,17 @@ impl ProcessManager {
             c
         };
         #[cfg(not(target_os = "windows"))]
-        let cb = { let mut c = CommandBuilder::new("bash"); c.args(&[if cmd.is_empty(){"bash"}else{&cmd}]); if !wd.is_empty() { c.cwd(&wd); } c };
+        let cb = {
+            let mut c = CommandBuilder::new("bash");
+            if !cmd.is_empty() {
+                let full_cmd = format!("{}; exec bash", cmd);
+                c.args(&["-c", &full_cmd]);
+            }
+            if !wd.is_empty() && Path::new(&wd).exists() {
+                c.cwd(&wd);
+            }
+            c
+        };
 
         let child = pair.slave.spawn_command(cb)
             .map_err(|e| { eprintln!("[qidong] spawn FAIL: {e}"); format!("PTY 内启动失败: {e}") })?;

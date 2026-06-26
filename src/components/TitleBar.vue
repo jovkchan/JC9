@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 
 const theme = ref<'dark'|'light'>('dark')
@@ -7,9 +7,24 @@ const atop = ref(false)
 const maximized = ref(false)
 const win = getCurrentWindow()
 
-onMounted(() => {
+let unlistenResized: (() => void) | null = null
+
+onMounted(async () => {
   const t = document.documentElement.getAttribute('data-theme')
   if (t === 'light' || t === 'dark') theme.value = t
+
+  try {
+    maximized.value = await win.isMaximized()
+    unlistenResized = await win.onResized(async () => {
+      maximized.value = await win.isMaximized()
+    })
+  } catch {}
+})
+
+onUnmounted(() => {
+  if (unlistenResized) {
+    unlistenResized()
+  }
 })
 
 function toggleTheme() {

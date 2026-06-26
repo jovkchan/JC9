@@ -8,21 +8,28 @@ function genId() { return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random(
 
 export interface RunningTab { projectId: string; projectName: string; commandId: string; commandName: string; command: string }
 export interface DocTab { id: string; title: string; command: string; content: string; loading: boolean }
+export interface ToolTab { id: string; title: string; toolType: string }
 export interface ShortcutItem { id: string; name: string; command: string; category: string; description: string; favorite?: boolean; useCount?: number }
 export interface LogStats { error: number; warn: number; info: number; debug: number }
 
 export const useProjectStore = defineStore('project', () => {
+  const decodersMap: Record<string, TextDecoder> = {}
+  const textBufferMap: Record<string, string> = {}
+
   const projects = ref<Project[]>([])
   const selectedProjectId = ref<string | null>(null)
   const runningMap = ref<Record<string, RunningStatus>>({})
   const outputMap = ref<Record<string, number[]>>({})
   const runningTabs = ref<RunningTab[]>([])
   const docTabs = ref<DocTab[]>([])
+  const toolTabs = ref<ToolTab[]>([])
   const activeTabIndex = ref(0)
   const activeDocIndex = ref(-1)
-  const activeTabType = ref<'term'|'doc'>('term')
+  const activeToolIndex = ref(-1)
+  const activeTabType = ref<'term'|'doc'|'tool'>('term')
   const shortcuts = ref<ShortcutItem[]>([])
   const pendingInput = ref('')
+  const recentTools = ref<string[]>(JSON.parse(localStorage.getItem('jc9-recent-tools') || '[]'))
 
   async function loadShortcuts() { try { shortcuts.value = await invoke<ShortcutItem[]>('get_shortcuts') } catch (e) { console.error(e) } }
   async function saveShortcuts(userOnly: ShortcutItem[]) { try { await invoke('save_shortcuts', { shortcuts: userOnly }) } catch (e) { console.error(e) } }
@@ -64,11 +71,18 @@ export const useProjectStore = defineStore('project', () => {
 
   function cmdKey(projectId: string, commandId: string) { return `${projectId}::${commandId}` }
 
-  async function startCommand(projectId: string, cmd: Command) {
+  async function startCommand(projectId: string, cmd: Command, keepOutput = false) {
     const processId = cmdKey(projectId, cmd.id)
     const project = projects.value.find(p => p.id === projectId)
-    outputMap.value[processId] = []
-    logStatsMap.value[processId] = { error: 0, warn: 0, info: 0, debug: 0 }
+    if (!keepOutput) {
+      outputMap.value[processId] = []
+      logStatsMap.value[processId] = { error: 0, warn: 0, info: 0, debug: 0 }
+      delete decodersMap[processId]
+      textBufferMap[processId] = ''
+    } else {
+      const divider = `\r\n\x1b[1;33m--- 进程重启 --- \x1b[0m\r\n`
+      bufferPtyOutput(processId, Array.from(new TextEncoder().encode(divider)))
+    }
     runningMap.value[processId] = 'running'
     const existing = runningTabs.value.findIndex(t => t.projectId === projectId && t.commandId === cmd.id)
     if (existing >= 0) { activeTabIndex.value = existing; activeTabType.value = 'term' }
@@ -78,10 +92,38 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   async function stopCommand(projectId: string, commandId: string) { const processId = cmdKey(projectId, commandId); try { await invoke('stop_command_by_ids', { projectId, commandId }) } catch { /* */ }; runningMap.value[processId] = 'stopped' }
-  async function restartCommand(projectId: string, cmd: Command) { await stopCommand(projectId, cmd.id); await new Promise(r => setTimeout(r, 500)); await startCommand(projectId, cmd) }
+  async function restartCommand(projectId: string, cmd: Command) { await stopCommand(projectId, cmd.id); await new Promise(r => setTimeout(r, 500)); await startCommand(projectId, cmd, true) }
 
   function closeTab(index: number) { const tab = runningTabs.value[index]; if (tab) stopCommand(tab.projectId, tab.commandId); runningTabs.value.splice(index, 1); if (activeTabIndex.value >= runningTabs.value.length) activeTabIndex.value = Math.max(0, runningTabs.value.length - 1) }
   function closeDocTab(index: number) { docTabs.value.splice(index, 1); if (activeDocIndex.value >= docTabs.value.length) activeDocIndex.value = Math.max(-1, docTabs.value.length - 1) }
+
+  function recordRecentTool(toolType: string) {
+    let list = [...recentTools.value].filter(t => t !== toolType)
+    list.unshift(toolType)
+    if (list.length > 4) list = list.slice(0, 4)
+    recentTools.value = list
+    localStorage.setItem('jc9-recent-tools', JSON.stringify(list))
+  }
+
+  function openTool(toolType: string, title: string) {
+    const existing = toolTabs.value.findIndex(t => t.toolType === toolType)
+    if (existing >= 0) {
+      activeToolIndex.value = existing
+      activeTabType.value = 'tool'
+    } else {
+      toolTabs.value.push({ id: genId(), title, toolType })
+      activeToolIndex.value = toolTabs.value.length - 1
+      activeTabType.value = 'tool'
+    }
+    recordRecentTool(toolType)
+  }
+
+  function closeToolTab(index: number) {
+    toolTabs.value.splice(index, 1)
+    if (activeToolIndex.value >= toolTabs.value.length) {
+      activeToolIndex.value = Math.max(0, toolTabs.value.length - 1)
+    }
+  }
 
   async function openDoc(command: string, title: string) {
     const id = genId()
@@ -106,16 +148,29 @@ export const useProjectStore = defineStore('project', () => {
     if (!outputMap.value[pid]) outputMap.value[pid] = []
     for (const b of data) outputMap.value[pid]!.push(b)
     if (outputMap.value[pid]!.length > 200000) outputMap.value[pid] = outputMap.value[pid]!.slice(-100000)
-    // Parse log levels
-    parseLogLevels(pid, data)
+
+    // 流式解码并处理
+    if (!decodersMap[pid]) {
+      decodersMap[pid] = new TextDecoder('utf-8', { fatal: false })
+    }
+    const chunkText = decodersMap[pid].decode(new Uint8Array(data), { stream: true })
+    const fullText = (textBufferMap[pid] || '') + chunkText
+    
+    // 按行切分，只处理完整的行，最后未闭合的部分存入缓冲区
+    const lines = fullText.split(/\r?\n/)
+    if (lines.length > 1) {
+      textBufferMap[pid] = lines.pop() || ''
+      const completedText = lines.join('\n')
+      parseLogLevels(pid, completedText)
+    } else {
+      textBufferMap[pid] = fullText
+    }
   }
 
   const logStatsMap = ref<Record<string, LogStats>>({})
-  function parseLogLevels(pid: string, data: number[]) {
-    const text = new TextDecoder('utf-8', { fatal: false }).decode(new Uint8Array(data))
+  function parseLogLevels(pid: string, text: string) {
     if (!logStatsMap.value[pid]) logStatsMap.value[pid] = { error: 0, warn: 0, info: 0, debug: 0 }
     const s = logStatsMap.value[pid]!
-    // Simple pattern matching per chunk
     const upper = text.toUpperCase()
     if (/\bERROR\b|\bFATAL\b|\bPANIC\b/.test(upper)) s.error += (upper.match(/\bERROR\b/g)?.length||0) + (upper.match(/\bFATAL\b/g)?.length||0) + (upper.match(/\bPANIC\b/g)?.length||0)
     if (/\bWARN(ING)?\b/.test(upper)) s.warn += (upper.match(/\bWARN(ING)?\b/g)?.length||0)
@@ -129,6 +184,8 @@ export const useProjectStore = defineStore('project', () => {
     const pid = cmdKey(projectId, commandId)
     outputMap.value[pid] = []
     clearLogStats(pid)
+    delete decodersMap[pid]
+    textBufferMap[pid] = ''
     clearTermSignal.value++
   }
   function getOutput(pid: string): number[] { return outputMap.value[pid] ?? [] }
@@ -154,5 +211,5 @@ export const useProjectStore = defineStore('project', () => {
   }
   function destroyListeners() { _unlistenExit?.(); _unlistenPty?.() }
 
-  return { projects, selectedProjectId, runningMap, outputMap, logStatsMap, runningTabs, docTabs, activeTabIndex, activeDocIndex, activeTabType, shortcuts, pendingInput, frequentShortcuts, favShortcuts, clearTermSignal, loadProjects, saveProjects, addProject, removeProject, updateProjectName, addCommand, removeCommand, updateCommand, startCommand, stopCommand, restartCommand, closeTab, closeDocTab, openDoc, openDocFromText, clearOutput, clearLogStats, getOutput, initListeners, destroyListeners, cmdKey, detectProject, bufferPtyOutput, loadShortcuts, addShortcut, removeShortcut, updateShortcut, isBuiltin, useShortcut, toggleFav, startDefaultTerminal }
+  return { projects, selectedProjectId, runningMap, outputMap, logStatsMap, runningTabs, docTabs, toolTabs, activeTabIndex, activeDocIndex, activeToolIndex, activeTabType, shortcuts, pendingInput, frequentShortcuts, favShortcuts, recentTools, clearTermSignal, loadProjects, saveProjects, addProject, removeProject, updateProjectName, addCommand, removeCommand, updateCommand, startCommand, stopCommand, restartCommand, closeTab, closeDocTab, openDoc, openDocFromText, clearOutput, clearLogStats, getOutput, initListeners, destroyListeners, cmdKey, detectProject, bufferPtyOutput, loadShortcuts, addShortcut, removeShortcut, updateShortcut, isBuiltin, useShortcut, toggleFav, startDefaultTerminal, openTool, closeToolTab }
 })
