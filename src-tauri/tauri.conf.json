@@ -1,8 +1,8 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicedoc/tauri/dev/crates/tauri-cli/schema.json",
-  "productName": "启动",
+  "productName": "jc9",
   "version": "1.0.0",
-  "identifier": "com.qidong.app",
+  "identifier": "com.jc9.app",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "启动 - Qidong",
+        "title": "jc9",
         "width": 1100,
         "height": 700,
         "minWidth": 800,

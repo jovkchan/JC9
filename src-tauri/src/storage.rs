@@ -32,7 +32,7 @@ pub struct Shortcut {
 
 fn get_storage_path() -> PathBuf {
     let mut path = dirs_next().unwrap_or_else(|| PathBuf::from("."));
-    path.push("qidong-projects.json");
+    path.push("jc9-projects.json");
     path
 }
 
@@ -42,11 +42,11 @@ fn dirs_next() -> Option<PathBuf> {
         std::env::var("APPDATA")
             .ok()
             .map(PathBuf::from)
-            .map(|p| p.join("qidong"))
+            .map(|p| p.join("jc9"))
     }
     #[cfg(not(target_os = "windows"))]
     {
-        dirs::data_dir().map(|p| p.join("qidong"))
+        dirs::data_dir().map(|p| p.join("jc9"))
     }
 }
 
@@ -78,7 +78,7 @@ pub fn save_projects(projects: &[Project]) -> Result<(), String> {
 
 fn get_shortcuts_path() -> PathBuf {
     let mut path = dirs_next().unwrap_or_else(|| PathBuf::from("."));
-    path.push("qidong-shortcuts.json");
+    path.push("jc9-shortcuts.json");
     path
 }
 

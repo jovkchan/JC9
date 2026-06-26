@@ -1,12 +1,12 @@
 [package]
-name = "qidong"
+name = "jc9"
 version = "1.0.0"
-description = "一键启动项目管理器"
+description = "jc9 项目管理器"
 authors = ["jovkchan"]
 edition = "2021"
 
 [lib]
-name = "qidong_lib"
+name = "jc9_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
