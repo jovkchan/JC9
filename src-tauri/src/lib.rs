@@ -1,12 +1,12 @@
 mod process;
-mod storage;
+mod database;
 
 use process::ProcessManager;
+use database::{Database, Project, Shortcut, NoteGroup, Note};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 use std::sync::Mutex;
-use storage::{load_projects, save_projects, load_shortcuts, save_shortcuts as save_sc, Project, Shortcut};
 use tauri::State;
 
 #[cfg(target_os = "windows")]
@@ -14,6 +14,7 @@ use std::os::windows::process::CommandExt;
 
 struct AppState {
     manager: ProcessManager,
+    db: Database,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -140,13 +141,15 @@ fn detect_project(dir: String) -> Result<ProjectInfo, String> {
 }
 
 #[tauri::command]
-fn get_projects() -> Result<Vec<Project>, String> {
-    load_projects()
+fn get_projects(state: State<'_, Mutex<AppState>>) -> Result<Vec<Project>, String> {
+    let app_state = state.lock().map_err(|e| e.to_string())?;
+    app_state.db.get_projects()
 }
 
 #[tauri::command]
-fn save_all_projects(projects: Vec<Project>) -> Result<(), String> {
-    save_projects(&projects)
+fn save_all_projects(state: State<'_, Mutex<AppState>>, projects: Vec<Project>) -> Result<(), String> {
+    let app_state = state.lock().map_err(|e| e.to_string())?;
+    app_state.db.save_projects(&projects)
 }
 
 #[tauri::command]
@@ -285,10 +288,16 @@ fn kill_port(port: u16) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn get_shortcuts() -> Vec<Shortcut> { load_shortcuts() }
+fn get_shortcuts(state: State<'_, Mutex<AppState>>) -> Vec<Shortcut> {
+    let app_state = match state.lock() { Ok(s) => s, Err(_) => return Vec::new() };
+    app_state.db.load_shortcuts()
+}
 
 #[tauri::command]
-fn save_shortcuts(shortcuts: Vec<Shortcut>) -> Result<(), String> { save_sc(&shortcuts) }
+fn save_shortcuts(state: State<'_, Mutex<AppState>>, shortcuts: Vec<Shortcut>) -> Result<(), String> {
+    let app_state = state.lock().map_err(|e| e.to_string())?;
+    app_state.db.save_shortcuts(&shortcuts)
+}
 
 fn get_cmd_help(cmd: &str) -> String {
     let cmd = cmd.trim();
@@ -319,10 +328,68 @@ fn get_cmd_help(cmd: &str) -> String {
 #[tauri::command]
 fn fetch_doc(command: String) -> String { get_cmd_help(&command) }
 
+// ── Notes ──
+
+#[tauri::command]
+fn get_note_groups(state: State<'_, Mutex<AppState>>) -> Result<Vec<NoteGroup>, String> {
+    state.lock().map_err(|e| e.to_string())?.db.get_note_groups()
+}
+
+#[tauri::command]
+fn save_note_group(state: State<'_, Mutex<AppState>>, group: NoteGroup) -> Result<(), String> {
+    state.lock().map_err(|e| e.to_string())?.db.save_note_group(&group)
+}
+
+#[tauri::command]
+fn delete_note_group(state: State<'_, Mutex<AppState>>, id: String) -> Result<(), String> {
+    state.lock().map_err(|e| e.to_string())?.db.delete_note_group(&id)
+}
+
+#[tauri::command]
+fn get_notes(state: State<'_, Mutex<AppState>>, group_id: Option<String>) -> Result<Vec<Note>, String> {
+    state.lock().map_err(|e| e.to_string())?.db.get_notes(group_id.as_deref(), false)
+}
+
+#[tauri::command]
+fn save_note(state: State<'_, Mutex<AppState>>, note: Note) -> Result<(), String> {
+    state.lock().map_err(|e| e.to_string())?.db.save_note(&note)
+}
+
+#[tauri::command]
+fn delete_note(state: State<'_, Mutex<AppState>>, id: String, permanent: Option<bool>) -> Result<(), String> {
+    let db = &state.lock().map_err(|e| e.to_string())?.db;
+    if permanent.unwrap_or(false) {
+        db.permanently_delete_note(&id)
+    } else {
+        db.delete_note(&id)
+    }
+}
+
+#[tauri::command]
+fn search_notes(state: State<'_, Mutex<AppState>>, query: String) -> Result<Vec<Note>, String> {
+    state.lock().map_err(|e| e.to_string())?.db.search_notes(&query)
+}
+
+#[tauri::command]
+fn get_note_count(state: State<'_, Mutex<AppState>>) -> Result<i32, String> {
+    state.lock().map_err(|e| e.to_string())?.db.get_note_count()
+}
+
+#[tauri::command]
+fn get_note_by_id(state: State<'_, Mutex<AppState>>, id: String) -> Result<Option<Note>, String> {
+    state.lock().map_err(|e| e.to_string())?.db.get_note_by_id(&id)
+}
+
 #[tauri::command]
 fn write_file_binary(path: String, data: Vec<u8>) -> Result<(), String> {
     fs::write(&path, data).map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+fn read_file_string(path: String) -> Result<String, String> {
+    fs::read_to_string(&path).map_err(|e| e.to_string())
+}
+
 
 #[tauri::command]
 fn show_in_folder(path: String) {
@@ -696,11 +763,14 @@ fn remove_env_var(key: String) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let db = Database::new().expect("无法初始化数据库");
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(Mutex::new(AppState {
             manager: ProcessManager::new(),
+            db,
         }))
         .invoke_handler(tauri::generate_handler![
             get_projects,
@@ -722,7 +792,17 @@ pub fn run() {
             set_env_var,
             remove_env_var,
             write_file_binary,
+            read_file_string,
             show_in_folder,
+            get_note_groups,
+            save_note_group,
+            delete_note_group,
+            get_notes,
+            save_note,
+            delete_note,
+            search_notes,
+            get_note_count,
+            get_note_by_id,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

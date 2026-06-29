@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useProjectStore } from '@/stores/project'
+import { useNotesStore } from '@/stores/notes'
 import TerminalView from '@/components/TerminalView.vue'
 import LogPanel from '@/components/LogPanel.vue'
+import NoteEditor from '@/components/notes/NoteEditor.vue'
 import JsonFormatter from '@/components/tools/JsonFormatter.vue'
 import Base64Tool from '@/components/tools/Base64Tool.vue'
 import EnvViewer from '@/components/tools/EnvViewer.vue'
@@ -37,7 +39,34 @@ import IconGenerator from '@/components/tools/IconGenerator.vue'
 
 
 
+import NoteFeedView from '@/components/notes/NoteFeedView.vue'
+import NoteSettings from '@/components/notes/NoteSettings.vue'
+import AiHelper from '@/components/tools/AiHelper.vue'
+import FloatingSearch from '@/components/notes/FloatingSearch.vue'
+
 const store = useProjectStore()
+const notesStore = useNotesStore()
+
+const activeNoteId = computed(() => notesStore.activeNoteTabId)
+
+// Auto-switch to note tab type when a note tab opens
+watch(activeNoteId, (id) => {
+  if (id !== null) store.activeTabType = 'note'
+})
+
+function getEditingNote(noteId: string | null) {
+  if (!noteId) return null
+  return notesStore.notes.find(n => n.id === noteId) ?? null
+}
+
+function onNoteSaved(note: any) {
+  // If this was a new note (tab id empty), update the tab
+  const idx = notesStore.noteTabs.findIndex(t => t.id === '' || t.id === note.id)
+  if (idx >= 0 && note.id) {
+    notesStore.noteTabs[idx] = { id: note.id, title: note.title || '无标题' }
+    notesStore.activeNoteTabId = note.id
+  }
+}
 const ctxShow = ref(false)
 const ctxPos = ref({ x: 0, y: 0 })
 const ctxIdx = ref(-1)
@@ -98,19 +127,71 @@ function confirmRename() {
   renameShow.value = false
 }
 
+let reminderTimer: ReturnType<typeof setInterval> | null = null
+const notifiedTasks = new Set<string>()
+
+function checkReminders() {
+  const now = new Date()
+  const y = now.getFullYear()
+  const m = String(now.getMonth() + 1).padStart(2, '0')
+  const d = String(now.getDate()).padStart(2, '0')
+  const hh = String(now.getHours()).padStart(2, '0')
+  const mm = String(now.getMinutes()).padStart(2, '0')
+  const nowTimeMinute = `${y}-${m}-${d} ${hh}:${mm}`
+
+  notesStore.notes.forEach(note => {
+    if (note.isDeleted || note.isArchived) return
+    const regex = /-\s+\[\s*\]\s+@(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\s+([^\n\r]+)/g
+    let match
+    while ((match = regex.exec(note.content)) !== null) {
+      const taskTimeStr = match[1]
+      const taskDesc = match[2]
+      const taskKey = `${note.id}-${taskTimeStr}-${taskDesc}`
+
+      if (notifiedTasks.has(taskKey)) continue
+
+      if (nowTimeMinute >= taskTimeStr) {
+        if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+          new Notification(`📅 备忘待办提醒: ${note.title || '备忘'}`, {
+            body: taskDesc
+          })
+          notifiedTasks.add(taskKey)
+        }
+      }
+    }
+  })
+}
+
+function handleKeyDownSearch(e: KeyboardEvent) {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+    if (store.sidebarTab === 'notes') {
+      e.preventDefault()
+      notesStore.showSearchPanel = !notesStore.showSearchPanel
+    }
+  }
+}
+
 onMounted(() => {
   document.addEventListener('click', closeCtx)
+  document.addEventListener('keydown', handleKeyDownSearch)
+  if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+    Notification.requestPermission()
+  }
+  checkReminders()
+  reminderTimer = setInterval(checkReminders, 15000)
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', closeCtx)
+  document.removeEventListener('keydown', handleKeyDownSearch)
+  if (reminderTimer) clearInterval(reminderTimer)
 })
 </script>
 
 <template>
   <div class="panel">
-    <!-- Tab Bar: terminals + docs -->
-    <div class="tabs" v-if="store.runningTabs.length>0||store.docTabs.length>0||store.toolTabs.length>0" role="tablist">
+    <!-- Tab Bar: terminals + docs + tools + notes -->
+    <div class="tabs" v-if="store.runningTabs.length>0||store.docTabs.length>0||store.toolTabs.length>0||notesStore.noteTabs.length>0" role="tablist">
       <div v-for="(t,i) in store.runningTabs" :key="'t'+t.projectId+t.commandId"
         :class="['tab',{on:store.activeTabType==='term'&&i===store.activeTabIndex}]"
         role="tab" :aria-selected="store.activeTabType==='term'&&i===store.activeTabIndex" tabindex="0"
@@ -135,6 +216,14 @@ onUnmounted(() => {
         @keyup.enter="store.activeTabType='tool';store.activeToolIndex=i">
         <span class="tl">{{ t.title }}</span>
         <button class="tx" @click.stop="store.closeToolTab(i)" aria-label="关闭标签">✕</button>
+      </div>
+      <div v-for="t in notesStore.noteTabs" :key="'n'+t.id"
+        :class="['tab',{on:store.activeTabType==='note'&&activeNoteId===t.id}]"
+        role="tab" :aria-selected="store.activeTabType==='note'&&activeNoteId===t.id" tabindex="0"
+        @click="store.activeTabType='note'; notesStore.activeNoteTabId = t.id"
+        @keyup.enter="store.activeTabType='note'; notesStore.activeNoteTabId = t.id">
+        <span class="tl">{{ t.title || '新笔记' }}</span>
+        <button class="tx" @click.stop="notesStore.closeNoteTab(t.id); if(!notesStore.activeNoteTabId)store.activeTabType='term'" aria-label="关闭标签">✕</button>
       </div>
     </div>
 
@@ -198,10 +287,31 @@ onUnmounted(() => {
         <CssUnits v-else-if="t.toolType === 'css'" />
         <SvgHelper v-else-if="t.toolType === 'svg'" />
         <IconGenerator v-else-if="t.toolType === 'icon-generator'" />
+        <AiHelper v-else-if="t.toolType === 'ai-helper'" />
       </div>
     </div>
 
-    <div v-if="store.runningTabs.length===0&&store.docTabs.length===0&&store.toolTabs.length===0" class="empty">从左侧项目列表点击命令启动</div>
+    <!-- Note content -->
+    <div v-for="t in notesStore.noteTabs" :key="'nc'+t.id" class="content" v-show="store.activeTabType==='note'&&activeNoteId===t.id">
+      <div class="bar"><code class="cmdtext">笔记{{ t.id ? ': ' + (getEditingNote(t.id)?.title || '无标题') : '' }}</code></div>
+      <div class="note-body">
+        <NoteEditor
+          v-if="activeNoteId === t.id"
+          :existing-note="getEditingNote(t.id) ?? null"
+          @saved="onNoteSaved"
+          @cancel="notesStore.closeNoteTab(t.id)"
+        />
+      </div>
+    </div>
+
+    <div v-if="store.runningTabs.length===0&&store.docTabs.length===0&&store.toolTabs.length===0&&notesStore.noteTabs.length===0" class="empty-or-feed" :style="store.sidebarTab === 'notes' ? 'flex: 1; display: flex; flex-direction: column; overflow: hidden;' : ''">
+      <template v-if="store.sidebarTab==='projects'"><div class="empty">从左侧项目列表点击命令启动</div></template>
+      <template v-else-if="store.sidebarTab==='shortcuts'"><div class="empty">点击快捷命令以执行</div></template>
+      <template v-else-if="store.sidebarTab==='tools'"><div class="empty">选择工具开始使用</div></template>
+      <template v-else-if="store.sidebarTab==='notes'">
+        <NoteFeedView @open-settings="notesStore.showSettings = true" />
+      </template>
+    </div>
 
     <Teleport to="body">
       <div v-if="ctxShow" class="ctx" :style="{left:ctxPos.x+'px',top:ctxPos.y+'px'}" @click.stop>
@@ -228,6 +338,12 @@ onUnmounted(() => {
         </div>
       </div>
     </Teleport>
+
+    <!-- 笔记设置面板 -->
+    <NoteSettings :show="notesStore.showSettings" @close="notesStore.showSettings = false" />
+    
+    <!-- 全局浮动搜索面板 -->
+    <FloatingSearch />
   </div>
 </template>
 
@@ -255,6 +371,7 @@ onUnmounted(() => {
 .term-area { flex:1; display:flex; overflow:hidden; }
 .tool-view-body { flex:1; display:flex; overflow:hidden; }
 .doc-body { flex:1; overflow-y:auto; padding:12px; font-family:'Cascadia Code',Consolas,monospace; font-size:12px; color:var(--jc-text-primary); white-space:pre-wrap; background:var(--jc-bg-app); }
+.note-body { flex:1; display:flex; overflow:hidden; flex-direction:column; }
 .ctx { @include ctx-menu; min-width:130px; }
 .ci { @include ctx-item; }
 </style>

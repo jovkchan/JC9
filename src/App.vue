@@ -14,8 +14,6 @@ const status = useStatusStore()
 const sidebarCollapsed = ref(false)
 const isSplash = ref(false)
 
-let defaultTerminalTimer: any = null
-
 // Watch project count
 watch(() => store.projects.length, (n) => status.setProjectCount(n), { immediate: true })
 
@@ -47,10 +45,6 @@ onMounted(async () => {
     // 显示并聚焦主窗口
     await win.show()
     await win.setFocus()
-    defaultTerminalTimer = setTimeout(() => {
-      store.startDefaultTerminal()
-      status.pushMessage('默认终端已启动')
-    }, 200)
 
     // 优雅地关闭 logo (splash) 窗口
     const splashWin = await WebviewWindow.getByLabel('splash')
@@ -61,9 +55,6 @@ onMounted(async () => {
 })
 onUnmounted(() => {
   store.destroyListeners()
-  if (defaultTerminalTimer) {
-    clearTimeout(defaultTerminalTimer)
-  }
 })
 </script>
 <template>

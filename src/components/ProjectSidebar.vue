@@ -3,10 +3,11 @@ import { ref, nextTick, computed, onMounted, onUnmounted } from 'vue'
 import { useProjectStore } from '@/stores/project'
 import { open } from '@tauri-apps/plugin-dialog'
 import CommandDialog from '@/components/CommandDialog.vue'
+import NoteSidebar from '@/components/notes/NoteSidebar.vue'
 import type { Command } from '@/types'
 
 const store = useProjectStore()
-const activeTab = ref<'projects' | 'shortcuts' | 'tools'>('projects')
+const activeTab = ref<'projects' | 'shortcuts' | 'tools' | 'notes'>('projects')
 const showAdd = ref(false)
 const newName = ref('')
 const newDir = ref('')
@@ -386,6 +387,11 @@ function handleShortcutKeys(e: KeyboardEvent) {
   }
 }
 
+function switchTab(tab: 'projects'|'shortcuts'|'tools'|'notes') {
+  activeTab.value = tab
+  store.sidebarTab = tab
+}
+
 function handleGlobalClick() {
   closeProjCtx()
   closeCmdCtx()
@@ -407,9 +413,10 @@ onUnmounted(() => {
   <aside class="side">
     <div class="side-head"></div>
     <div class="tabs" role="tablist">
-      <div :class="['tab',{on:activeTab==='projects'}]" role="tab" :aria-selected="activeTab==='projects'" tabindex="0" @click="activeTab='projects'" @keyup.enter="activeTab='projects'">项目</div>
-      <div :class="['tab',{on:activeTab==='shortcuts'}]" role="tab" :aria-selected="activeTab==='shortcuts'" tabindex="0" @click="activeTab='shortcuts'" @keyup.enter="activeTab='shortcuts'">快捷</div>
-      <div :class="['tab',{on:activeTab==='tools'}]" role="tab" :aria-selected="activeTab==='tools'" tabindex="0" @click="activeTab='tools'" @keyup.enter="activeTab='tools'">工具</div>
+      <div :class="['tab',{on:activeTab==='projects'}]" role="tab" :aria-selected="activeTab==='projects'" tabindex="0" @click="switchTab('projects')" @keyup.enter="switchTab('projects')">项目</div>
+      <div :class="['tab',{on:activeTab==='shortcuts'}]" role="tab" :aria-selected="activeTab==='shortcuts'" tabindex="0" @click="switchTab('shortcuts')" @keyup.enter="switchTab('shortcuts')">快捷</div>
+      <div :class="['tab',{on:activeTab==='tools'}]" role="tab" :aria-selected="activeTab==='tools'" tabindex="0" @click="switchTab('tools')" @keyup.enter="switchTab('tools')">工具</div>
+      <div :class="['tab',{on:activeTab==='notes'}]" role="tab" :aria-selected="activeTab==='notes'" tabindex="0" @click="switchTab('notes')" @keyup.enter="switchTab('notes')">笔记</div>
     </div>
 
     <!-- Projects -->
@@ -599,6 +606,11 @@ onUnmounted(() => {
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- Notes -->
+    <div v-show="activeTab==='notes'" class="panel">
+      <NoteSidebar />
     </div>
 
     <Teleport to="body">
