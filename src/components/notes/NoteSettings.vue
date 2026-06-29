@@ -74,7 +74,7 @@ function saveSettings() {
   localStorage.setItem('notes-ai-endpoint', aiEndpoint.value)
   localStorage.setItem('notes-ai-apikey', aiApiKey.value)
   localStorage.setItem('notes-ai-model', aiModel.value)
-  
+
   // 独立保存各供应商的配置
   localStorage.setItem(`notes-ai-endpoint-${aiProvider.value}`, aiEndpoint.value)
   localStorage.setItem(`notes-ai-apikey-${aiProvider.value}`, aiApiKey.value)
@@ -148,35 +148,22 @@ async function importData() {
 
 watchProvider()
 function watchProvider() {
-  const savedEndpoint = localStorage.getItem(`notes-ai-endpoint-${aiProvider.value}`)
-  const savedApiKey = localStorage.getItem(`notes-ai-apikey-${aiProvider.value}`)
-  const savedModel = localStorage.getItem(`notes-ai-model-${aiProvider.value}`)
-
-  if (savedEndpoint) aiEndpoint.value = savedEndpoint
-  if (savedApiKey) aiApiKey.value = savedApiKey
-  if (savedModel) aiModel.value = savedModel
-
-  // 若没有已存参数，则加载出厂预设默认值
-  if (!savedEndpoint || !savedModel) {
-    if (aiProvider.value === 'ollama') {
-      aiEndpoint.value = 'http://127.0.0.1:11434'
-      aiModel.value = 'llama3'
-    } else if (aiProvider.value === 'deepseek') {
-      aiEndpoint.value = 'https://api.deepseek.com/v1'
-      aiModel.value = 'deepseek-chat'
-    } else if (aiProvider.value === 'openai') {
-      aiEndpoint.value = 'https://api.openai.com/v1'
-      aiModel.value = 'gpt-4o-mini'
-    } else if (aiProvider.value === 'gemini') {
-      aiEndpoint.value = 'https://generativelanguage.googleapis.com'
-      aiModel.value = 'gemini-1.5-flash'
-    } else if (aiProvider.value === 'vllm') {
-      aiEndpoint.value = 'http://192.168.5.100:8000/v1'
-      aiModel.value = ''
-    }
-  }
-
-  if (aiProvider.value === 'vllm') {
+  // 当切换 Provider 时，自动设定默认 Endpoint 与 Model
+  if (aiProvider.value === 'ollama') {
+    aiEndpoint.value = 'http://127.0.0.1:11434'
+    aiModel.value = 'llama3'
+  } else if (aiProvider.value === 'deepseek') {
+    aiEndpoint.value = 'https://api.deepseek.com/v1'
+    aiModel.value = 'deepseek-chat'
+  } else if (aiProvider.value === 'openai') {
+    aiEndpoint.value = 'https://api.openai.com/v1'
+    aiModel.value = 'gpt-4o-mini'
+  } else if (aiProvider.value === 'gemini') {
+    aiEndpoint.value = 'https://generativelanguage.googleapis.com'
+    aiModel.value = 'gemini-1.5-flash'
+  } else if (aiProvider.value === 'vllm') {
+    aiEndpoint.value = 'http://192.168.5.100:8000/v1'
+    aiModel.value = ''
     fetchVllmModels()
   }
 }
@@ -270,10 +257,10 @@ function watchProvider() {
 
             <div class="backup-actions">
               <button class="backup-btn export" @click="exportData">
-                📤 备份并导出 JSON
+                备份并导出 JSON
               </button>
               <button class="backup-btn import" @click="importData">
-                📥 导入并恢复 JSON
+                导入并恢复 JSON
               </button>
             </div>
           </div>
