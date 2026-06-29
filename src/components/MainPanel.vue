@@ -33,6 +33,7 @@ import SymmetricCrypto from '@/components/tools/SymmetricCrypto.vue'
 import RsaCrypto from '@/components/tools/RsaCrypto.vue'
 import CssUnits from '@/components/tools/CssUnits.vue'
 import SvgHelper from '@/components/tools/SvgHelper.vue'
+import IconGenerator from '@/components/tools/IconGenerator.vue'
 
 
 
@@ -196,6 +197,7 @@ onUnmounted(() => {
         <RsaCrypto v-else-if="t.toolType === 'rsa'" />
         <CssUnits v-else-if="t.toolType === 'css'" />
         <SvgHelper v-else-if="t.toolType === 'svg'" />
+        <IconGenerator v-else-if="t.toolType === 'icon-generator'" />
       </div>
     </div>
 

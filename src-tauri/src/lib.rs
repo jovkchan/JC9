@@ -320,6 +320,38 @@ fn get_cmd_help(cmd: &str) -> String {
 fn fetch_doc(command: String) -> String { get_cmd_help(&command) }
 
 #[tauri::command]
+fn write_file_binary(path: String, data: Vec<u8>) -> Result<(), String> {
+    fs::write(&path, data).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn show_in_folder(path: String) {
+    #[cfg(target_os = "windows")]
+    {
+        use std::process::Command;
+        let _ = Command::new("explorer")
+            .args(["/select,", &path])
+            .spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::Command;
+        let _ = Command::new("open")
+            .args(["-R", &path])
+            .spawn();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use std::process::Command;
+        if let Some(parent) = std::path::Path::new(&path).parent() {
+            let _ = Command::new("xdg-open")
+                .arg(parent)
+                .spawn();
+        }
+    }
+}
+
+#[tauri::command]
 fn get_env_vars() -> Vec<(String, String)> {
     let mut vars: Vec<(String, String)> = std::env::vars().collect();
     vars.sort_by(|a, b| a.0.cmp(&b.0));
@@ -689,6 +721,8 @@ pub fn run() {
             generate_ssl_cert,
             set_env_var,
             remove_env_var,
+            write_file_binary,
+            show_in_folder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

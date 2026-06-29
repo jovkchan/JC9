@@ -343,12 +343,13 @@ const allTools = [
   { type: 'case', name: '命名风格转换', desc: '下划线/驼峰/帕斯卡/烤串/常量命名互转', category: 'code', icon: 'base64' },
   { type: 'lorem', name: '占位假文生成', desc: '一键生成中英文假文段落填充UI', category: 'code', icon: 'json' },
   { type: 'lines', name: '文本行操作器', desc: '多行文本排序、去重、拆分与合并', category: 'code', icon: 'diff' },
-  { type: 'aes-des', name: '对称加解密 (AES/DES)', desc: 'AES/DES 在线加解密与编码转换', category: 'code', icon: 'key' },
-  { type: 'rsa', name: '非对称加密 (RSA)', desc: 'RSA 密钥对生成、加解密与签名验签', category: 'code', icon: 'cert' },
+  { type: 'aes-des', name: '对称加解密 (AES/DES)', desc: 'AES/DES 在线加解密与编码转换', category: 'code', icon: 'aes' },
+  { type: 'rsa', name: '非对称加密 (RSA)', desc: 'RSA 密钥对生成、加解密与签名验签', category: 'code', icon: 'rsa' },
   { type: 'css', name: 'CSS 单位换算', desc: 'PX、REM、EM、VW、VH 实时联动转换', category: 'code', icon: 'color' },
   { type: 'svg', name: 'SVG 预览与优化', desc: 'SVG 实时图形渲染预览与源码精简压缩', category: 'code', icon: 'color' },
   { type: 'ssh', name: 'SSH 密钥生成', desc: '生成安全多算法 SSH 密钥对', category: 'system', icon: 'key' },
-  { type: 'ssl', name: 'SSL 证书生成', desc: '生成开发测试用自签名 SSL 证书对', category: 'system', icon: 'cert' }
+  { type: 'ssl', name: 'SSL 证书生成', desc: '生成开发测试用自签名 SSL 证书对', category: 'system', icon: 'cert' },
+  { type: 'icon-generator', name: '图标生成器', desc: '一键生成多平台/尺寸 ICO/PNG/ICNS 图标包', category: 'code', icon: 'image' }
 ]
 
 const toolSearchQuery = ref('')
@@ -518,6 +519,9 @@ onUnmounted(() => {
                 <svg v-else-if="t.icon === 'timestamp'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
                 <svg v-else-if="t.icon === 'key'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 1.5 1.5M15.5 7.5 14 6"/></svg>
                 <svg v-else-if="t.icon === 'cert'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                <svg v-else-if="t.icon === 'image'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+                <svg v-else-if="t.icon === 'aes'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20 L12 4 L20 20 M8 13 H16" /></svg>
+                <svg v-else-if="t.icon === 'rsa'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20 V4 H13 C17 4 17 11 13 11 H4 M12 11 L19 20" /></svg>
               </span>
               <div class="tool-info">
                 <div class="tool-name">{{ t.name }}</div>
@@ -540,6 +544,9 @@ onUnmounted(() => {
                   <svg v-else-if="t.icon === 'diff'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"/><path d="M9 7v10M5 12h8"/></svg>
                   <svg v-else-if="t.icon === 'color'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
                   <svg v-else-if="t.icon === 'qr'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="8" x="3" y="3" rx="1"/><rect width="8" height="8" x="13" y="3" rx="1"/><rect width="8" height="8" x="3" y="13" rx="1"/><path d="M13 13h1v1h-1zM18 13h3v3h-3zM13 18h3v3h-3zM18 18h1v1h-1z"/></svg>
+                  <svg v-else-if="t.icon === 'image'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+                  <svg v-else-if="t.icon === 'aes'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20 L12 4 L20 20 M8 13 H16" /></svg>
+                  <svg v-else-if="t.icon === 'rsa'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20 V4 H13 C17 4 17 11 13 11 H4 M12 11 L19 20" /></svg>
                 </span>
                 <div class="tool-text-wrap">
                   <div class="tool-name">{{ t.name }}</div>
