@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick, computed } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick, computed, watch } from 'vue'
 import { useNotesStore } from '@/stores/notes'
 import { useStatusStore } from '@/stores/status'
 import { useAiStore } from '@/stores/ai'
+import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import type { TaskNode, WorkerState, ApprovalRequest } from '@/types/ai'
 
 const notesStore = useNotesStore()
@@ -25,17 +27,14 @@ const sending = ref(false)
 
 // ── DeepSeek 风格 UI 状态 ──
 const enableDeepThink = ref(false)
-const enableLocalKb = ref(true)
+const enableLocalKb = ref(false)
+const enableAgentMode = ref(false)
+const reasoningEffort = ref<'high' | 'max' | 'off'>('high')
 const isFocused = ref(false)
 
-// ── AI Agent 相关变量与绑定 ──
-const newSessionTitle = ref('')
-const taskRequest = ref('')
-const selectedTaskId = ref<string | null>(null)
-const systemPrompt = ref('你是一个专业的代码助手，请使用 ReAct 模式完成任务。')
+// ── AI Agent Store ──
 const pollTimer = ref<number | null>(null)
 const manualPath = ref('')
-
 const showSettings = ref(false)
 const localConfig = ref({
   inputCachedCostPerM: 0.025,
@@ -43,10 +42,6 @@ const localConfig = ref({
   outputCostPerM: 6.0,
   costLimit: 5.0
 })
-
-const selectedTask = computed<TaskNode | null>(() =>
-  ai.taskTree.find((t) => t.id === selectedTaskId.value) ?? null,
-)
 
 const statusColors: Record<string, string> = {
   thinking: '#58a6ff',
@@ -167,10 +162,55 @@ async function refreshLocalModels() {
   ])
   loadingModels.value = false
   status.pushMessage('本地模型列表刷新完毕', 'success')
-  selectedCombinedModel.value = `${aiProvider.value}/${aiModel.value}`
+  if (aiProvider.value === 'ollama' || aiProvider.value === 'vllm') {
+    selectedCombinedModel.value = `${aiProvider.value}/${aiModel.value}`
+  }
 }
 
 function loadConfig() {
+  loadCustomModels()
+  const lastSelected = localStorage.getItem('jc9-last-model')
+  
+  if (customModels.value.length > 0) {
+    try {
+      let target = null
+      if (lastSelected) {
+        if (lastSelected.includes('::')) {
+          const [cfgId] = lastSelected.split('::')
+          target = customModels.value.find(c => c.id === cfgId || `${c.provider}-${c.model}-${c.name}` === cfgId)
+        } else {
+          // 模糊向下兼容老配置格式
+          target = customModels.value.find(c => lastSelected.includes(c.model) || lastSelected.startsWith(c.provider))
+        }
+      }
+      
+      const cfg = target || customModels.value[0]
+      aiProvider.value = cfg.provider
+      
+      const subModels = cfg.model.split(',').map(m => m.trim()).filter(Boolean)
+      const activeModel = (lastSelected && lastSelected.includes('::'))
+        ? lastSelected.split('::')[1]
+        : (subModels[0] || cfg.model)
+        
+      aiModel.value = activeModel
+      aiEndpoint.value = cfg.endpoint
+      aiApiKey.value = cfg.apiKey || ''
+      
+      const configId = cfg.id || `${cfg.provider}-${cfg.model}-${cfg.name}`
+      selectedCombinedModel.value = `${configId}::${activeModel}`
+      
+      // 同步预算与费率至后端
+      ai.updateCostConfig({
+        inputCachedCostPerM: cfg.inputPrice ? cfg.inputPrice * 0.008 : 0.025,
+        inputUncachedCostPerM: cfg.inputPrice || 2.0,
+        outputCostPerM: cfg.outputPrice || 4.0,
+        costLimit: cfg.costLimit || 10.0,
+      })
+      return
+    } catch { /* ignore */ }
+  }
+
+  // 兜底旧逻辑
   aiProvider.value = localStorage.getItem('notes-ai-provider') || 'ollama'
   aiEndpoint.value = localStorage.getItem('notes-ai-endpoint') || 'http://127.0.0.1:11434'
   aiApiKey.value = localStorage.getItem('notes-ai-apikey') || ''
@@ -188,86 +228,131 @@ function loadConfig() {
   }
 }
 
+interface CustomModel {
+  id: string
+  name: string
+  provider: string
+  model: string
+  endpoint: string
+  apiKey: string
+  inputPrice?: number
+  outputPrice?: number
+  costLimit?: number
+}
+
+const customModels = ref<CustomModel[]>([])
+
+function loadCustomModels() {
+  const saved = localStorage.getItem('notes-ai-models')
+  if (saved) {
+    try {
+      customModels.value = JSON.parse(saved)
+    } catch {
+      customModels.value = []
+    }
+  }
+}
+
 const modelOptions = computed(() => {
-  const groups: Record<string, { name: string; label: string }[]> = {}
+  const groups: Record<string, Array<{ id: string; name: string; label: string }>> = {}
 
-  const ollamaList: { name: string; label: string }[] = []
+  // 1. 分组读取用户在设置里添加的自定义模型配置，并支持多模型解析
+  for (const cfg of customModels.value) {
+    const provName = cfg.provider.charAt(0).toUpperCase() + cfg.provider.slice(1)
+    if (!groups[provName]) groups[provName] = []
+    
+    // 对逗号分隔的多个模型名称进行切割
+    const subModels = cfg.model.split(',').map(m => m.trim()).filter(Boolean)
+    for (const m of subModels) {
+      const configId = cfg.id || `${cfg.provider}-${cfg.model}-${cfg.name}`
+      // 复合 value 标识为：配置唯一ID::特定模型标识符
+      const selectId = `${configId}::${m}`
+      groups[provName].push({
+        id: selectId,
+        name: m,
+        label: `${cfg.name} (${m})`
+      })
+    }
+  }
+
+  // 2. 兜底：Ollama 本地模型
+  const ollamaList: Array<{ id: string; name: string; label: string }> = []
   if (ollamaModels.value.length > 0) {
-    ollamaModels.value.forEach(m => ollamaList.push({ name: m, label: m }))
+    ollamaModels.value.forEach(m => ollamaList.push({ id: `ollama/${m}`, name: m, label: m }))
   }
-  const userOllama = localStorage.getItem('notes-ai-model-ollama')
-  if (userOllama && !ollamaList.some(x => x.name === userOllama)) {
-    ollamaList.push({ name: userOllama, label: `${userOllama} (手动配置)` })
-  }
-  if (ollamaList.length > 0) {
-    groups['Ollama'] = ollamaList
-  }
+  if (ollamaList.length > 0 && !groups['Ollama']) groups['Ollama'] = ollamaList
 
-  const vllmList: { name: string; label: string }[] = []
+  // 3. 兜底：vLLM
+  const vllmList: Array<{ id: string; name: string; label: string }> = []
   if (vllmModels.value.length > 0) {
-    vllmModels.value.forEach(m => vllmList.push({ name: m, label: m }))
+    vllmModels.value.forEach(m => vllmList.push({ id: `vllm/${m}`, name: m, label: m }))
   }
-  const userVllm = localStorage.getItem('notes-ai-model-vllm')
-  if (userVllm && !vllmList.some(x => x.name === userVllm)) {
-    vllmList.push({ name: userVllm, label: `${userVllm} (手动配置)` })
-  }
-  if (vllmList.length > 0) {
-    groups['vLLM'] = vllmList
-  }
-
-  if (deepseekKey.value || aiProvider.value === 'deepseek') {
-    groups['DeepSeek'] = [
-      { name: 'deepseek-chat', label: 'deepseek-chat' },
-      { name: 'deepseek-coder', label: 'deepseek-coder' }
-    ]
-  }
-
-  if (openaiKey.value || aiProvider.value === 'openai') {
-    groups['OpenAI'] = [
-      { name: 'gpt-4o-mini', label: 'gpt-4o-mini' },
-      { name: 'gpt-4o', label: 'gpt-4o' }
-    ]
-  }
-
-  if (geminiKey.value || aiProvider.value === 'gemini') {
-    groups['Gemini'] = [
-      { name: 'gemini-1.5-flash', label: 'gemini-1.5-flash' },
-      { name: 'gemini-1.5-pro', label: 'gemini-1.5-pro' }
-    ]
-  }
+  if (vllmList.length > 0 && !groups['Vllm']) groups['Vllm'] = vllmList
 
   return groups
 })
 
 function handleModelChange() {
-  const parts = selectedCombinedModel.value.split('/')
-  if (parts.length < 2) return
-  const prov = parts[0]
-  const model = parts.slice(1).join('/')
+  const val = selectedCombinedModel.value
+  if (!val) return
 
-  aiProvider.value = prov
-  aiModel.value = model
+  // 1. 判断是否是动态加载的本地 Ollama / vLLM 兜底模型
+  if (val.startsWith('ollama/') || val.startsWith('vllm/')) {
+    const parts = val.split('/')
+    const prov = parts[0]
+    const model = parts.slice(1).join('/')
 
-  const savedEndpoint = localStorage.getItem(`notes-ai-endpoint-${prov}`)
-  const savedApiKey = localStorage.getItem(`notes-ai-apikey-${prov}`)
+    aiProvider.value = prov
+    aiModel.value = model
 
-  if (savedEndpoint) {
-    aiEndpoint.value = savedEndpoint
-  } else {
-    if (prov === 'ollama') aiEndpoint.value = 'http://127.0.0.1:11434'
-    else if (prov === 'vllm') aiEndpoint.value = 'http://192.168.5.100:8000/v1'
-    else if (prov === 'deepseek') aiEndpoint.value = 'https://api.deepseek.com/v1'
-    else if (prov === 'openai') aiEndpoint.value = 'https://api.openai.com/v1'
-    else if (prov === 'gemini') aiEndpoint.value = 'https://generativelanguage.googleapis.com'
-  }
-
-  if (savedApiKey) {
-    aiApiKey.value = savedApiKey
-  } else {
+    const savedEndpoint = localStorage.getItem(`notes-ai-endpoint-${prov}`)
+    if (savedEndpoint) {
+      aiEndpoint.value = savedEndpoint
+    } else {
+      aiEndpoint.value = prov === 'ollama' ? 'http://127.0.0.1:11434' : 'http://localhost:8000/v1'
+    }
     aiApiKey.value = ''
+    
+    saveQuickConfig()
+    localStorage.setItem('jc9-last-model', val)
+    return
   }
 
-  saveQuickConfig()
+  // 2. 精准匹配用户在设置面板自定义的 AI 配置 (通过唯一 ID 并解析多模型名称)
+  let configId = ''
+  let selectedModelName = ''
+
+  if (val.includes('::')) {
+    const parts = val.split('::')
+    configId = parts[0]
+    selectedModelName = parts.slice(1).join('::')
+  } else {
+    // 兼容没有双冒号的旧版本缓存
+    configId = val
+  }
+
+  const cfg = customModels.value.find(c => c.id === configId || `${c.provider}-${c.model}-${c.name}` === configId)
+  if (cfg) {
+    aiProvider.value = cfg.provider
+    if (!selectedModelName) {
+      // 降级选择配置中的第一个模型名称
+      selectedModelName = cfg.model.split(',')[0]?.trim() || cfg.model
+    }
+    aiModel.value = selectedModelName
+    aiEndpoint.value = cfg.endpoint
+    aiApiKey.value = cfg.apiKey
+
+    // 同步更新后端的防爆 Token 预算限额及单价
+    ai.updateCostConfig({
+      inputCachedCostPerM: cfg.inputPrice ? cfg.inputPrice * 0.008 : 0.025,
+      inputUncachedCostPerM: cfg.inputPrice || 2.0,
+      outputCostPerM: cfg.outputPrice || 4.0,
+      costLimit: cfg.costLimit || 10.0,
+    })
+
+    saveQuickConfig()
+    localStorage.setItem('jc9-last-model', val)
+  }
 }
 
 function saveQuickConfig() {
@@ -285,8 +370,6 @@ function saveQuickConfig() {
 
 // ── 核心流式请求（SSE/Chunked 读取） ──
 async function callAiStream(promptMessages: Message[], onChunk: (text: string) => void) {
-  loadConfig()
-
   const headers: Record<string, string> = {
     'Content-Type': 'application/json'
   }
@@ -317,6 +400,8 @@ async function callAiStream(promptMessages: Message[], onChunk: (text: string) =
     }
   }
 
+  console.log(`📡 API 请求 → ${url} | Model: ${aiModel.value} | Provider: ${aiProvider.value}`)
+
   const res = await fetch(url, {
     method: 'POST',
     headers,
@@ -334,7 +419,10 @@ async function callAiStream(promptMessages: Message[], onChunk: (text: string) =
 
   const decoder = new TextDecoder('utf-8')
   let buffer = ''
+  let chunkCount = 0
+  let fullResponse = ''
 
+  console.group('📡 流式响应')
   while (true) {
     const { value, done } = await reader.read()
     if (done) break
@@ -351,10 +439,13 @@ async function callAiStream(promptMessages: Message[], onChunk: (text: string) =
         try {
           const json = JSON.parse(trimmed)
           const text = json.message?.content || ''
-          if (text) onChunk(text)
-        } catch (e) {
-          // 忽略
-        }
+          if (text) {
+            chunkCount++
+            fullResponse += text
+            console.log(`  chunk #${chunkCount}:`, text)
+            onChunk(text)
+          }
+        } catch (e) { /* ignore */ }
       } else {
         if (trimmed.startsWith('data:')) {
           const dataVal = trimmed.slice(5).trim()
@@ -362,14 +453,19 @@ async function callAiStream(promptMessages: Message[], onChunk: (text: string) =
           try {
             const json = JSON.parse(dataVal)
             const text = json.choices?.[0]?.delta?.content || ''
-            if (text) onChunk(text)
-          } catch (e) {
-            // 忽略
-          }
+            if (text) {
+              chunkCount++
+              fullResponse += text
+              console.log(`  chunk #${chunkCount}:`, text)
+              onChunk(text)
+            }
+          } catch (e) { /* ignore */ }
         }
       }
     }
   }
+  console.log(`✅ 完成，共 ${chunkCount} chunk, ${fullResponse.length} 字符`)
+  console.groupEnd()
 }
 
 // ── 智能中英文切词与停用词过滤 ──
@@ -407,11 +503,21 @@ function extractTerms(query: string): string[] {
   return Array.from(new Set(terms))
 }
 
-// ── 发送消息（智能 RAG 感知） ──
+// ── 发送消息（智能 RAG 感知 + Agent 自动管道）──
 async function sendMessage() {
   const text = userInput.value.trim()
   if (!text || sending.value) return
 
+  // Agent 模式：自动触发任务规划+Worker 管道
+  if (enableAgentMode.value) {
+    await sendAgentMessage(text)
+    return
+  }
+
+  await doSendMessage(text)
+}
+
+async function doSendMessage(text: string) {
   messages.value.push({ role: 'user', content: text })
   userInput.value = ''
   sending.value = true
@@ -462,21 +568,11 @@ async function sendMessage() {
       .map(n => `[笔记标题: ${n.title || '无标题'}, 更新时间: ${n.updatedAt || n.createdAt}]\n内容:\n${n.content}`)
       .join('\n\n---\n\n')
 
-    systemPromptStr = `你是一个内置在用户本地客户端（JC9 项目与终端管理器）中的专属 AI 助理。
-你拥有完全的本地笔记库读取权限。在每次对话中，系统都会自动为你检索并读取出与用户当前提问高度相关的本地笔记内容。
-
-当前为你读取并注入的本地笔记如下：
-=========================================
-${referenceText}
-=========================================
-
-请注意：
-1. 你当前【绝对有权限】访问这些本地笔记。不要对用户说“我无法访问你的本地文件”、“我无法读取本地笔记”、“需要你复制粘贴给我”等推阻之词。
-2. 用户的所有关于“我记了什么”、“找一下某某笔记”、“总结某篇笔记”的提问，都请直接在上方提供的数据中寻找并进行回答。
-3. 请以第一人称（如“我已经为您找到了关于‘标题2’的笔记，内容如下：”）来回答，表现出你确实能直接读取和管理他的笔记库。
-4. 如果上述注入的内容中确实没有包含用户所要寻找的任何笔记（且你的常规知识也无法解答），你可以友好地引导用户：“在您当前的笔记库中似乎未检索到相关内容，您可以确认一下笔记标题或内容是否正确。”`
+    systemPromptStr = `你是通用 AI 助手。以下是用户本地笔记库中相关的笔记供参考：
+${referenceText ? `\n${referenceText}\n` : ''}
+请直接回答用户的问题，有笔记相关内容时可引用，但不强制。`
   } else {
-    systemPromptStr = `你是一个内置在用户本地客户端（JC9 项目与终端管理器）中的专属 AI 助理。请以专业、清晰且对开发者友好的语气解答用户的问题。`
+    systemPromptStr = '你是一个通用 AI 助手。请直接、简洁地回答用户的问题。不要说"作为XX助手"之类的话，直接回答问题即可。'
   }
 
   if (enableDeepThink.value) {
@@ -488,6 +584,15 @@ ${referenceText}
     { role: 'system', content: systemPromptStr },
     ...messages.value.filter(m => m.role === 'user' || m.role === 'assistant').slice(0, -1)
   ]
+
+  // 🔍 完整调试日志
+  console.group(`🤖 AI 请求 | ${aiProvider.value} / ${aiModel.value}`)
+  console.log('📋 System Prompt:\n', systemPromptStr)
+  console.log('💬 Messages (', promptMsgs.length, '条):')
+  promptMsgs.forEach((m, i) => {
+    console.log(`  [${i}] ${m.role}:`, m.content.length > 500 ? m.content.slice(0, 500) + '...' : m.content)
+  })
+  console.groupEnd()
 
   const currentModel = aiModel.value || 'Default Model'
   messages.value.push({ role: 'assistant', content: '', modelName: currentModel })
@@ -578,28 +683,97 @@ function clearChat() {
   ]
 }
 
+// ── DS 思维强度切换（即时生效）──
+async function setReasoningEffort(effort: 'high' | 'max' | 'off') {
+  reasoningEffort.value = effort
+  const val = effort === 'off' ? '' : effort
+  try { await invoke('ai_set_reasoning_effort', { effort: val }) } catch { /* ignore */ }
+}
+
+// ── Agent 模式：自然语言一键触发规划+Worker ──
+async function sendAgentMessage(text: string) {
+  console.group('🤖 Agent 模式')
+  console.log('任务:', text)
+
+  // 意图检测：非编码任务走普通对话
+  const codingKeywords = /编写|添加|修复|创建|修改|重构|实现|优化|配置|安装|部署|调试|写一个|改一下|帮我写|生成|代码|文件|组件|模块|接口|函数|类|类型|测试|构建|打包|编译|提交|合并|分支|npm|cargo|git|vue|react|rust|typescript|python|依赖|import|export|package|运行|启动|检查|报错|错误/i
+  if (!codingKeywords.test(text)) {
+    console.log('📋 非编码任务，走普通对话')
+    console.groupEnd()
+    await doSendMessage(text)
+    return
+  }
+
+  console.log('模型:', `${aiProvider.value}/${aiModel.value}`)
+
+  // 同步 LLM 配置到后端
+  try {
+    await invoke('ai_configure_llm', {
+      provider: aiProvider.value,
+      apiKey: aiApiKey.value,
+      baseUrl: aiEndpoint.value,
+      model: aiModel.value,
+    })
+    console.log('✅ LLM 配置已同步')
+  } catch (e) {
+    console.warn('⚠️ 同步 LLM 配置失败:', e)
+  }
+
+  messages.value.push({ role: 'user', content: text })
+  userInput.value = ''
+  sending.value = true
+  scrollToBottom()
+
+  try {
+    if (!ai.currentSessionId) {
+      const title = text.slice(0, 30) + (text.length > 30 ? '...' : '')
+      await ai.createSession(title)
+      addAgentBubble('📋 新会话已创建')
+    }
+    addAgentBubble('🧠 正在分析并拆解任务...')
+    const tasks = await ai.planTask(ai.currentSessionId!, text)
+    console.log('规划结果:', tasks.length, '个子任务')
+    if (tasks.length > 0) {
+      const list = tasks.map(t => `  • **${t.title}** _(${statusLabel(t.status)})_`).join('\n')
+      addAgentBubble(`✅ 已规划 **${tasks.length}** 个子任务：\n${list}`)
+      for (const task of tasks) {
+        if (task.status === 'pending') {
+          addAgentBubble(`🚀 启动 Worker：「${task.title}」...`)
+          const sp = `你是一个专业的代码助手，使用 ReAct 模式。任务：${task.description}`
+          await ai.spawnWorker(ai.currentSessionId!, task, sp)
+        }
+      }
+    } else {
+      addAgentBubble('⚠️ 任务规划返回空，请尝试更具体的描述。')
+    }
+  } catch (e: any) {
+    console.error('❌ Agent 错误:', e)
+    addAgentBubble(`❌ Agent 错误: ${e}`)
+  } finally {
+    console.groupEnd()
+    sending.value = false
+    scrollToBottom()
+  }
+}
+
+function addAgentBubble(content: string) {
+  messages.value.push({ role: 'system', content })
+  scrollToBottom()
+}
+
 const placeholderText = computed(() => {
+  if (enableAgentMode.value) return '描述开发任务，Agent 自动规划并执行... (Enter 发送)'
   return `给 ${aiModel.value || 'AI'} 发送消息... (Enter 发送, Shift+Enter 换行)`
 })
 
-// ── AI Agent 业务处理 ──
-async function handleCreateSession() {
-  if (!newSessionTitle.value.trim()) return
-  await ai.createSession(newSessionTitle.value.trim())
-  newSessionTitle.value = ''
-}
+const workspaceShortName = computed(() => {
+  const p = ai.workspaceRoot
+  if (!p) return '📁 未设置'
+  const parts = p.replace(/\\/g, '/').split('/')
+  return '📁 ' + (parts[parts.length - 1] || p)
+})
 
-async function handlePlanTask() {
-  if (!ai.currentSessionId || !taskRequest.value.trim()) return
-  await ai.planTask(ai.currentSessionId, taskRequest.value.trim())
-  taskRequest.value = ''
-}
-
-async function handleSpawnWorker(task: TaskNode) {
-  if (!ai.currentSessionId) return
-  await ai.spawnWorker(ai.currentSessionId, task, systemPrompt.value)
-}
-
+// ── 审批处理 ──
 async function handleApprove(req: ApprovalRequest) {
   await ai.approveRequest(req.id)
 }
@@ -624,17 +798,6 @@ async function handlePromote(entryId: string) {
   await ai.promoteKnowledge(entryId)
 }
 
-async function saveSettings() {
-  await ai.updateCostConfig(localConfig.value)
-  showSettings.value = false
-}
-
-function estimateCost(tokenCount: number): string {
-  const avgRate = (ai.costConfig.inputUncachedCostPerM * 0.8) + (ai.costConfig.outputCostPerM * 0.2);
-  const cost = (tokenCount * avgRate) / 1_000_000.0;
-  return cost.toFixed(4);
-}
-
 async function handleKillWorker(workerId: string) {
   await ai.killWorker(workerId)
 }
@@ -651,12 +814,17 @@ async function handleManualWorkspace() {
 
 function startPolling() {
   pollTimer.value = window.setInterval(async () => {
-    await Promise.all([
-      ai.loadWorkers(), 
-      ai.loadPendingApprovals(),
-      ai.loadDrafts()
-    ])
-  }, 2000)
+    loadCustomModels()
+    try {
+      await ai.loadWorkers()
+    } catch { /* ignore */ }
+    try {
+      await ai.loadPendingApprovals()
+    } catch { /* ignore */ }
+    try {
+      await ai.loadDrafts()
+    } catch { /* ignore */ }
+  }, 3000)
 }
 
 function stopPolling() {
@@ -666,25 +834,120 @@ function stopPolling() {
   }
 }
 
+const workerUnlisten = ref<(() => void) | null>(null)
+const lastDraftIds = ref<string[]>([])
+
+watch(() => ai.drafts, (newDrafts) => {
+  const newItems = newDrafts.filter(d => !lastDraftIds.value.includes(d.id))
+  for (const item of newItems) {
+    addAgentBubble(`💡 **【二脑知识沉淀】** 已自动提炼并沉淀草稿备忘《${item.title}》，可信度为 ${(item.confidence * 100).toFixed(0)}%。`)
+  }
+  lastDraftIds.value = newDrafts.map(d => d.id)
+}, { deep: true })
+
 onMounted(async () => {
+  loadCustomModels()
   loadConfig()
-  fetchOllamaModels()
-  fetchVllmModels()
-  selectedCombinedModel.value = `${aiProvider.value}/${aiModel.value}`
+  // 只在 notes-ai-models 中有 ollama/vllm 配置时才拉取
+  let hasOllama = false, hasVllm = false
+  const saved = localStorage.getItem('notes-ai-models')
+  if (saved) {
+    try {
+      const configs: Array<{provider:string}> = JSON.parse(saved)
+      hasOllama = configs.some(c => c.provider === 'ollama')
+      hasVllm = configs.some(c => c.provider === 'vllm')
+    } catch {}
+  }
+  if (hasOllama) fetchOllamaModels()
+  if (hasVllm) fetchVllmModels()
 
   await ai.loadSessions()
   await ai.loadWorkspaceRoot()
   manualPath.value = ai.workspaceRoot
   await ai.initListeners()
   await ai.loadDrafts()
+  lastDraftIds.value = ai.drafts.map(d => d.id)
   localConfig.value = { ...ai.costConfig }
+  
+  // 额外监听后端状态，在终态时直接在聊天框发送通知气泡
+  workerUnlisten.value = await listen<WorkerState>('ai:worker-update', (event) => {
+    const w = event.payload
+    const taskTitle = ai.taskTree.find(t => t.id === w.taskId)?.title || '开发任务'
+    if (w.status === 'completed') {
+      addAgentBubble(`🎉 子任务「${taskTitle}」已顺利执行完毕，所有代码变更已安全合入工作区。`)
+    } else if (w.status === 'failed') {
+      const reason = w.terminationReason || '遇到阻碍或触发熔断'
+      addAgentBubble(`❌ 子任务「${taskTitle}」执行失败。原因: ${reason}`)
+    } else if (w.status === 'killed') {
+      addAgentBubble(`🛑 子任务「${taskTitle}」已被手动强制终止。`)
+    }
+  })
+
   startPolling()
 })
 
 onUnmounted(() => {
   stopPolling()
   ai.destroyListeners()
+  if (workerUnlisten.value) {
+    workerUnlisten.value()
+  }
 })
+
+const newSessionTitle = ref('')
+const plannerInput = ref('')
+
+async function handleCreateSession() {
+  const title = newSessionTitle.value.trim()
+  if (!title) return
+  const id = await ai.createSession(title)
+  if (id) {
+    newSessionTitle.value = ''
+    status.pushMessage('会话创建成功', 'success')
+  }
+}
+
+async function handlePlanTask() {
+  if (!ai.currentSessionId) {
+    status.pushMessage('请先选择或创建一个 Agent 会话', 'warn')
+    return
+  }
+  const request = plannerInput.value.trim()
+  if (!request) return
+  sending.value = true
+  try {
+    addAgentBubble('🧠 正在分析并拆解任务...')
+    const tasks = await ai.planTask(ai.currentSessionId, request)
+    if (tasks.length > 0) {
+      plannerInput.value = ''
+      const list = tasks.map(t => `  • **${t.title}** _(${statusLabel(t.status)})_`).join('\n')
+      addAgentBubble(`✅ 已规划 **${tasks.length}** 个子任务：\n${list}`)
+    } else {
+      addAgentBubble('⚠️ 任务规划返回空，请尝试更具体的描述。')
+    }
+  } catch (e: any) {
+    status.pushMessage(`规划任务失败: ${e.message}`, 'error')
+  } finally {
+    sending.value = false
+  }
+}
+
+async function handleStartTaskWorker(task: TaskNode) {
+  if (!ai.currentSessionId) return
+  addAgentBubble(`🚀 启动 Worker 执行任务：「${task.title}」...`)
+  const systemPrompt = `你是一个专业的代码助手，使用 ReAct 模式。任务：${task.description}`
+  try {
+    await invoke('ai_configure_llm', {
+      provider: aiProvider.value,
+      apiKey: aiApiKey.value,
+      baseUrl: aiEndpoint.value,
+      model: aiModel.value,
+    })
+    await ai.spawnWorker(ai.currentSessionId, task, systemPrompt)
+  } catch (e: any) {
+    status.pushMessage(`启动 Worker 失败: ${e.message}`, 'error')
+  }
+}
 </script>
 
 <template>
@@ -751,7 +1014,37 @@ onUnmounted(() => {
                     <path d="M1.5 8a6.5 6.5 0 0 1 10.5-5L14 5m0-3.5V5h-3.5M14.5 8a6.5 6.5 0 0 1-10.5 5L2 11m0 3.5V11h3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
                   </svg>
                 </button>
+                <button 
+                  class="ds-pill-settings-btn" 
+                  @click="showModelSettingsModal = true" 
+                  title="自定义 AI 模型管理"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="settings-gear-svg">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                  </svg>
+                </button>
               </div>
+ <!-- DS 思维强度（仅 DS 模型显示） -->
+              <div v-if="aiProvider === 'deepseek'" class="ds-pill-select-wrap" style="gap:4px">
+                
+                <select v-model="reasoningEffort" @change="setReasoningEffort(reasoningEffort)" class="ds-pill-select" style="max-width:56px;font-size:10px" title="思维强度">
+                  <option value="high">标准</option>
+                  <option value="max">深度</option>
+                  <option value="off">关闭</option>
+                </select>
+              </div>
+              <!-- 工作区 -->
+              <button 
+                class="ds-pill-btn workspace-btn" 
+                @click="handleSelectWorkspace"
+                :title="ai.workspaceRoot || '选择工作区'"
+              >
+                <svg class="ds-pill-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                </svg>
+                {{ workspaceShortName }}
+              </button>
 
               <!-- 深度思考 -->
               <button 
@@ -780,6 +1073,21 @@ onUnmounted(() => {
                 </svg>
                 本地知识库
               </button>
+
+              <!-- Agent 模式 -->
+              <button 
+                class="ds-pill-btn agent-mode" 
+                :class="{ active: enableAgentMode }" 
+                @click="enableAgentMode = !enableAgentMode"
+                title="开启后直接描述编码任务，自动规划并执行"
+              >
+                <svg class="ds-pill-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                </svg>
+                Agent
+              </button>
+
+             
             </div>
             
             <div class="ds-actions">
@@ -805,131 +1113,22 @@ onUnmounted(() => {
             </div>
           </div>
         </div>
-      </div>
-    </div>
 
-    <!-- 右侧：AI 智能体运行及设置侧边栏 -->
-    <div class="ai-agent-sidebar">
-      <div class="sidebar-scroll">
-        <!-- 工作空间管理 -->
-        <div class="agent-section-card">
-          <div class="card-meta">
-            <span class="card-label">📁 工作区根目录:</span>
-            <span class="card-path" :title="ai.workspaceRoot">{{ ai.workspaceRoot || '获取工作区...' }}</span>
-          </div>
-          <div class="workspace-controls-bar">
-            <button class="btn-sidebar btn-primary-sidebar" @click="handleSelectWorkspace">选择文件夹</button>
-            <div class="workspace-manual-bar">
-              <input v-model="manualPath" placeholder="输入绝对路径..." class="input-sidebar" @keyup.enter="handleManualWorkspace" />
-              <button class="btn-sidebar" @click="handleManualWorkspace">指定</button>
+        <!-- 极简活跃智能体进程状态栏 -->
+        <Transition name="fade-slide">
+          <div class="active-agents-ticker" v-if="ai.activeWorkers.length > 0">
+            <div v-for="w in ai.activeWorkers" :key="w.id" class="ticker-item">
+              <span class="ticker-dot" :style="{ background: statusColors[w.status] }"></span>
+              <span class="ticker-text">
+                <span class="ticker-worker-name">Worker-{{ w.id.slice(0, 8) }}</span>
+                <span class="ticker-worker-status">{{ statusLabel(w.status) }}</span>:
+                <span class="ticker-thought" v-if="w.currentThought">{{ w.currentThought }}</span>
+                <span class="ticker-thought" v-else>正在分配/思考中...</span>
+              </span>
+              <button class="ticker-kill-btn" @click="handleKillWorker(w.id)" title="强制终止">✕ 强杀</button>
             </div>
           </div>
-        </div>
-
-        <!-- 计费与熔断防爆配置 -->
-        <div class="agent-section-card border-gold">
-          <div class="card-title font-gold" @click="showSettings = !showSettings" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
-            <span>⚙️ 计费与防爆设置 (DeepSeek)</span>
-            <span style="font-size: 10px;">{{ showSettings ? '折叠 ▲' : '展开 ▼' }}</span>
-          </div>
-          <div class="settings-body-sidebar" v-show="showSettings">
-            <div class="settings-row-sidebar">
-              <label>缓存未命中输入 (元/百万):</label>
-              <input type="number" step="0.1" v-model="localConfig.inputUncachedCostPerM" class="input-sidebar width-60" />
-            </div>
-            <div class="settings-row-sidebar">
-              <label>缓存命中输入 (元/百万):</label>
-              <input type="number" step="0.001" v-model="localConfig.inputCachedCostPerM" class="input-sidebar width-60" />
-            </div>
-            <div class="settings-row-sidebar">
-              <label>输出 Token 价格 (元/百万):</label>
-              <input type="number" step="0.1" v-model="localConfig.outputCostPerM" class="input-sidebar width-60" />
-            </div>
-            <div class="settings-row-sidebar">
-              <label>防爆熔断限额 (元 ¥):</label>
-              <input type="number" step="0.5" v-model="localConfig.costLimit" class="input-sidebar width-60" />
-            </div>
-            <div class="settings-actions-sidebar">
-              <button class="btn-sidebar btn-primary-sidebar" @click="saveSettings">保存</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- 会话与任务规划 -->
-        <div class="agent-section-card">
-          <div class="card-title font-gold">任务规划 (LLM Planner)</div>
-          <div class="session-create-bar">
-            <input v-model="newSessionTitle" placeholder="新会话标题..." class="input-sidebar flex-1" @keyup.enter="handleCreateSession" />
-            <button class="btn-sidebar btn-primary-sidebar" @click="handleCreateSession">创建</button>
-          </div>
-          <div class="session-list-bar" v-if="ai.sessions.length > 0">
-            <div v-for="s in ai.sessions" :key="s.id" class="session-item-bar" :class="{ active: s.id === ai.currentSessionId }" @click="ai.currentSessionId = s.id">
-              <span class="dot-bar" :style="{ background: statusColors[s.status] }"></span>
-              <span class="name-bar">{{ s.title }}</span>
-            </div>
-          </div>
-          
-          <div class="planner-box" v-if="ai.currentSessionId">
-            <textarea v-model="taskRequest" placeholder="描述你要完成的开发任务..." class="textarea-sidebar" rows="2"></textarea>
-            <button class="btn-sidebar btn-primary-sidebar" @click="handlePlanTask" :disabled="ai.isLoading" style="width: 100%; margin-top: 6px;">
-              {{ ai.isLoading ? '分析规划中...' : '开始规划任务' }}
-            </button>
-            
-            <div class="task-tree-bar" v-if="ai.taskTree.length > 0">
-              <div v-for="task in ai.taskTree" :key="task.id" class="task-node-bar" :class="{ selected: task.id === selectedTaskId }" @click="selectedTaskId = task.id">
-                <div class="node-header">
-                  <span class="dot-bar" :style="{ background: statusColors[task.status] }"></span>
-                  <span class="node-title">{{ task.title }}</span>
-                </div>
-                <div class="node-desc">{{ task.description }}</div>
-                <div class="node-actions" v-if="task.status === 'pending'">
-                  <button class="btn-sidebar btn-sm-sidebar btn-primary-sidebar" @click.stop="handleSpawnWorker(task)">启动 Worker</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Worker 状态控制 -->
-        <div class="agent-section-card">
-          <div class="card-title">Worker 并发调度池 <span class="badge-sidebar">{{ ai.workers.length }}</span></div>
-          <div class="worker-list-bar" v-if="ai.workers.length > 0">
-            <div v-for="w in ai.workers" :key="w.id" class="worker-item-bar">
-              <div class="worker-header-bar">
-                <span class="dot-bar" :style="{ background: statusColors[w.status] }"></span>
-                <span class="worker-name-bar">{{ w.id.slice(0, 8) }} ({{ statusLabel(w.status) }})</span>
-                <button class="btn-sidebar btn-danger-sidebar" @click="handleKillWorker(w.id)" v-if="!['killed','completed','failed'].includes(w.status)">终止</button>
-              </div>
-              <div class="worker-thought-bar" v-if="w.currentThought">💭 {{ w.currentThought }}</div>
-              
-              <div class="sandbox-box" v-if="w.cowPath">
-                <span class="sandbox-lbl">📦 隔离沙箱:</span>
-                <code class="sandbox-pth" :title="w.cowPath">{{ w.cowPath }}</code>
-              </div>
-
-              <div class="worker-meta-bar">
-                <span>🔧 {{ w.toolCallCount }} 工具</span>
-                <span class="cost-lbl">💰 ¥{{ estimateCost(w.tokenCount) }}</span>
-              </div>
-            </div>
-          </div>
-          <div class="empty-bar-hint" v-else>暂无子代 Worker 运行</div>
-        </div>
-
-        <!-- 知识经验草稿箱 -->
-        <div class="agent-section-card">
-          <div class="card-title">💡 知识草稿箱 <span class="badge-sidebar-blue" v-if="ai.drafts.length > 0">{{ ai.drafts.length }}</span></div>
-          <div class="draft-list-bar" v-if="ai.drafts.length > 0">
-            <div v-for="d in ai.drafts" :key="d.id" class="draft-item-bar">
-              <div class="draft-title-bar"># {{ d.title }}</div>
-              <div class="draft-content-bar">{{ d.content }}</div>
-              <div class="draft-actions-bar">
-                <button class="btn-sidebar btn-sm-sidebar btn-primary-sidebar" @click="handlePromote(d.id)">推广至 RAG</button>
-              </div>
-            </div>
-          </div>
-          <div class="empty-bar-hint" v-else>暂无待审核草稿</div>
-        </div>
+        </Transition>
       </div>
     </div>
 
@@ -1045,6 +1244,15 @@ onUnmounted(() => {
     .bubble-content {
       background: var(--jc-bg-selected);
       border-color: var(--jc-color-accent);
+    }
+  }
+
+  &.system {
+    .bubble-sender { color: #f0883e; }
+    .bubble-content {
+      border-left: 3px solid #f0883e;
+      font-size: 12px;
+      opacity: 0.9;
     }
   }
 }
@@ -1200,6 +1408,21 @@ onUnmounted(() => {
       background: rgba(138, 88, 255, 0.09);
       border-color: var(--jc-color-accent, #8a58ff);
       color: var(--jc-color-accent, #8a58ff);
+    }
+    &.agent-mode.active {
+      background: rgba(240, 136, 62, 0.12);
+      border-color: #f0883e;
+      color: #f0883e;
+    }
+    &.workspace-btn {
+      max-width: 130px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    &.model-settings-btn {
+      font-size: 14px;
+      padding: 4px 8px;
     }
   }
 
@@ -1496,5 +1719,74 @@ onUnmounted(() => {
 @keyframes spin-anim {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+/* 极简活跃智能体进程状态栏 */
+.active-agents-ticker {
+  background: var(--jc-bg-elevated);
+  border: 1px solid var(--jc-border-default);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+
+  .ticker-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+  }
+
+  .ticker-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .ticker-text {
+    flex: 1;
+    color: var(--jc-text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+
+    .ticker-worker-name {
+      font-family: monospace;
+      font-weight: 600;
+      color: #58a6ff;
+    }
+
+    .ticker-worker-status {
+      font-weight: 600;
+      color: var(--jc-text-secondary);
+      margin-left: 4px;
+    }
+
+    .ticker-thought {
+      color: var(--jc-text-secondary);
+      font-style: italic;
+      margin-left: 6px;
+    }
+  }
+
+  .ticker-kill-btn {
+    background: transparent;
+    border: 1px solid #f85149;
+    color: #f85149;
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.2s;
+
+    &:hover {
+      background: rgba(248, 81, 73, 0.1);
+    }
+  }
 }
 </style>

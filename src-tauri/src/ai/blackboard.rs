@@ -24,6 +24,22 @@ impl SharedBlackboard {
         value: String,
         source_worker: String,
     ) -> String {
+        // 强规约与数据结构化校验
+        match entry_type {
+            BlackboardEntryType::GlobalConfigPath => {
+                if value.trim().is_empty() {
+                    eprintln!("❌ [Blackboard] 拒绝写入：GlobalConfigPath 的值不能为空");
+                    return String::new();
+                }
+            }
+            BlackboardEntryType::EnvVariable => {
+                if !value.contains('=') && serde_json::from_str::<serde_json::Value>(&value).is_err() {
+                    eprintln!("⚠️ [Blackboard] 写入警告：EnvVariable 应符合 KEY=VALUE 键值对或 JSON 规约格式");
+                }
+            }
+            _ => {}
+        }
+
         let id = uuid::Uuid::new_v4().to_string();
         let entry = BlackboardEntry {
             id: id.clone(),

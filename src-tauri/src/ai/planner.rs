@@ -17,8 +17,11 @@ impl Planner {
     ) -> Vec<TaskNode> {
         // 如果是 mock，不调用大模型直接返回预设
         if provider.name() == "mock" {
+            println!("🧠 [Planner] mock模式，返回预设计划");
             return Self::generate_mock_plan(session_id, request);
         }
+
+        println!("🧠 [Planner] 开始规划: {:.100}", request);
 
         // 从黑板中拉取所有历史 Worker 生成的经验沉淀 (Takeaways)，以实现反思与任务树自适应调整
         let mut takeaways_context = String::new();
@@ -78,6 +81,10 @@ impl Planner {
                     Ok(mut nodes) => {
                         for node in &mut nodes {
                             node.session_id = session_id.clone();
+                        }
+                        println!("✅ [Planner] 成功，{} 个节点", nodes.len());
+                        for n in &nodes {
+                            println!("  📋 {} [{:?}] parent={:?}", n.title, n.status, n.parent_id);
                         }
                         nodes
                     }

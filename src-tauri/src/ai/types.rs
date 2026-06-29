@@ -316,6 +316,7 @@ pub struct CostConfig {
     pub input_uncached_cost_per_m: f64,
     pub output_cost_per_m: f64,
     pub cost_limit: f64,
+    pub reasoning_effort: String,  // "high" | "max" | "" (空=关闭)
 }
 
 /// Token 成本看板

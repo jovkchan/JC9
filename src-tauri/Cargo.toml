@@ -19,13 +19,17 @@ tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 portable-pty = "0.8"
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.31", features = ["bundled", "load_extension"] }
 # AI Agent 依赖
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", features = ["json", "stream"] }
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 sha2 = "0.10"
+# Tree-sitter AST 解析
+tree-sitter = "0.23"
+tree-sitter-typescript = "0.21"
+tree-sitter-rust = "0.21"
 hex = "0.4"
 regex = "1"
 async-trait = "0.1"

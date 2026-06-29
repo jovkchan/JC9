@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 use std::sync::Mutex;
-use tauri::State;
+use tauri::{State, Manager};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -809,7 +809,8 @@ async fn ai_spawn_worker(
         let app_state = state.lock().map_err(|e| e.to_string())?;
         app_state.ai_manager.clone()
     };
-    ai_manager.worker_manager().spawn_worker(session_id, task, system_prompt).await
+    let result = ai_manager.worker_manager().read().await.spawn_worker(session_id, task, system_prompt).await;
+    result
 }
 
 #[tauri::command]
@@ -818,7 +819,8 @@ async fn ai_list_workers(state: State<'_, Mutex<AppState>>) -> Result<Vec<ai::ty
         let app_state = state.lock().map_err(|e| e.to_string())?;
         app_state.ai_manager.clone()
     };
-    Ok(ai_manager.worker_manager().list_workers().await)
+    let result = ai_manager.worker_manager().read().await.list_workers().await;
+    Ok(result)
 }
 
 #[tauri::command]
@@ -827,7 +829,8 @@ async fn ai_kill_worker(state: State<'_, Mutex<AppState>>, worker_id: String) ->
         let app_state = state.lock().map_err(|e| e.to_string())?;
         app_state.ai_manager.clone()
     };
-    Ok(ai_manager.worker_manager().kill_worker(&worker_id).await)
+    let result = ai_manager.worker_manager().read().await.kill_worker(&worker_id).await;
+    Ok(result)
 }
 
 #[tauri::command]
@@ -868,6 +871,33 @@ async fn ai_search_knowledge(
         app_state.ai_manager.clone()
     };
     Ok(ai_manager.knowledge_base().search(&query, limit).await)
+}
+
+/// 向量语义搜索
+#[tauri::command]
+async fn ai_semantic_search(
+    state: State<'_, Mutex<AppState>>,
+    query: String,
+    limit: usize,
+) -> Result<Vec<serde_json::Value>, String> {
+    let ai_manager = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.ai_manager.clone()
+    };
+    let results = ai_manager.knowledge_base().semantic_search(&query, limit).await;
+    Ok(results.into_iter().map(|(id, score, content)| {
+        serde_json::json!({ "id": id, "score": score, "content": content })
+    }).collect())
+}
+
+/// 检查 sqlite-vec 扩展是否已加载
+#[tauri::command]
+async fn ai_vec_status(state: State<'_, Mutex<AppState>>) -> Result<bool, String> {
+    let ai_manager = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.ai_manager.clone()
+    };
+    Ok(ai_manager.knowledge_base().using_sqlite_vec())
 }
 
 #[tauri::command]
@@ -938,6 +968,39 @@ async fn ai_update_cost_config(
     Ok(())
 }
 
+/// 运行时设置 DS 思维强度
+#[tauri::command]
+async fn ai_set_reasoning_effort(
+    state: State<'_, Mutex<AppState>>,
+    effort: String,
+) -> Result<(), String> {
+    let ai_manager = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.ai_manager.clone()
+    };
+    ai_manager.set_reasoning_effort(effort).await;
+    Ok(())
+}
+
+/// Agent 模式激活时，从配置注入 LLM Provider
+#[tauri::command]
+async fn ai_configure_llm(
+    state: State<'_, Mutex<AppState>>,
+    provider: String,
+    #[allow(non_snake_case)]
+    apiKey: String,
+    #[allow(non_snake_case)]
+    baseUrl: String,
+    model: String,
+) -> Result<(), String> {
+    let ai_manager = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.ai_manager.clone()
+    };
+    ai_manager.reconfigure_llm(&provider, &apiKey, &baseUrl, &model).await;
+    Ok(())
+}
+
 #[tauri::command]
 async fn ai_get_workspace_root(
     state: State<'_, Mutex<AppState>>,
@@ -1000,18 +1063,31 @@ async fn ai_select_workspace_dialog(
 pub fn run() {
     let db = Database::new().expect("无法初始化数据库");
 
-    let ai_manager = std::sync::Arc::new(ai::agent_manager::AgentManager::new(
-        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
-    ));
+    // 工作区默认指向项目根目录（Tauri dev 时 cwd 在 src-tauri，需回退一层）
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let workspace = if cwd.ends_with("src-tauri") {
+        cwd.parent().unwrap_or(&cwd).to_path_buf()
+    } else {
+        cwd.clone()
+    };
+    let kb_path = workspace.join("jc9_knowledge.db");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
-        .manage(Mutex::new(AppState {
-            manager: ProcessManager::new(),
-            db,
-            ai_manager,
-        }))
+        .setup(move |app| {
+            let ai_manager = std::sync::Arc::new(ai::agent_manager::AgentManager::new(
+                workspace,
+                kb_path,
+                Some(app.handle().clone()),
+            ));
+            app.manage(Mutex::new(AppState {
+                manager: ProcessManager::new(),
+                db,
+                ai_manager,
+            }));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             get_projects,
             save_all_projects,
@@ -1054,12 +1130,16 @@ pub fn run() {
             ai_approve_request,
             ai_deny_request,
             ai_search_knowledge,
+            ai_semantic_search,
+            ai_vec_status,
             ai_add_knowledge,
             ai_connect_mcp_server,
             ai_list_mcp_servers,
             ai_list_drafts,
             ai_promote_knowledge,
             ai_update_cost_config,
+            ai_set_reasoning_effort,
+            ai_configure_llm,
             ai_get_workspace_root,
             ai_update_workspace_root,
             ai_select_workspace_dialog,

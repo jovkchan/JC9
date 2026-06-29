@@ -3,6 +3,7 @@ use tokio::sync::{RwLock, Semaphore};
 use std::collections::HashMap;
 use chrono::Utc;
 use std::path::PathBuf;
+use tauri::Emitter;
 
 use super::types::*;
 use super::llm::LlmProvider;
@@ -13,6 +14,8 @@ use super::loop_breaker::LoopBreaker;
 use super::approval::ApprovalQueue;
 use super::workspace::WorkspaceManager;
 use super::security::SecuritySandbox;
+use super::host_detector::HostDetector;
+use super::knowledge_base::KnowledgeBase;
 
 /// Worker 管理器 - 并发控制、Worker 生命周期与 COW 隔离环境调度
 pub struct WorkerManager {
@@ -21,9 +24,11 @@ pub struct WorkerManager {
     provider: Arc<dyn LlmProvider>,
     blackboard: Arc<SharedBlackboard>,
     approval_queue: Arc<ApprovalQueue>,
+    knowledge_base: Arc<KnowledgeBase>,
     workspace_root: Arc<tokio::sync::RwLock<PathBuf>>,
     cost_config: Arc<tokio::sync::RwLock<CostConfig>>,
     max_iterations: u32,
+    app_handle: Option<tauri::AppHandle>,
 }
 
 impl WorkerManager {
@@ -31,15 +36,18 @@ impl WorkerManager {
         provider: Arc<dyn LlmProvider>,
         blackboard: Arc<SharedBlackboard>,
         approval_queue: Arc<ApprovalQueue>,
+        knowledge_base: Arc<KnowledgeBase>,
         workspace_root: Arc<tokio::sync::RwLock<PathBuf>>,
         cost_config: Arc<tokio::sync::RwLock<CostConfig>>,
         max_concurrent: usize,
         max_iterations: u32,
+        app_handle: Option<tauri::AppHandle>,
     ) -> Self {
         Self {
             workers: Arc::new(RwLock::new(HashMap::new())),
             semaphore: Arc::new(Semaphore::new(max_concurrent)),
-            provider, blackboard, approval_queue, workspace_root, cost_config, max_iterations,
+            provider, blackboard, approval_queue, knowledge_base, workspace_root, cost_config, max_iterations,
+            app_handle,
         }
     }
 
@@ -50,12 +58,23 @@ impl WorkerManager {
 
         // 1. 初始化 COW 临时沙箱
         let current_root = self.workspace_root.read().await.clone();
-        let workspace_mgr = Arc::new(WorkspaceManager::new(current_root));
+        let workspace_mgr = Arc::new(WorkspaceManager::new(current_root.clone()));
         let temp_workspace = workspace_mgr.prepare_sandbox()?;
+        println!("📦 [Worker] {} COW沙箱: {}", &worker_id[..8], temp_workspace.display());
 
         // 2. 为该子代理定制专有的沙箱边界和工具集以实现进程修改隔离
-        let worker_sandbox = SecuritySandbox::new(temp_workspace.clone());
+        let mut worker_sandbox = SecuritySandbox::new(temp_workspace.clone());
+        // 允许读取原始工作区文件（写操作仍走 COW 沙箱）
+        worker_sandbox.add_read_only_path(current_root);
         let worker_tools = Arc::new(ToolRegistry::new(worker_sandbox));
+
+        // 3. 采集宿主环境信息并注入到 System Prompt 头部
+        let host_env = HostDetector::new().detect();
+        let enriched_system_prompt = format!(
+            "{}\n\n{}",
+            HostDetector::new().generate_system_prompt(&host_env),
+            system_prompt
+        );
 
         let worker_state = WorkerState {
             id: worker_id.clone(), session_id: session_id.clone(), task_id: task.id.clone(),
@@ -64,7 +83,11 @@ impl WorkerManager {
             created_at: Utc::now(), last_active: Utc::now(), token_count: 0,
             cow_path: Some(temp_workspace.to_string_lossy().to_string()),
         };
-        self.workers.write().await.insert(worker_id.clone(), worker_state);
+        self.workers.write().await.insert(worker_id.clone(), worker_state.clone());
+
+        if let Some(ref handle) = self.app_handle {
+            let _ = handle.emit("ai:worker-update", worker_state);
+        }
 
         let current_cost_config = self.cost_config.read().await.clone();
         let loop_breaker = Arc::new(LoopBreaker::new(worker_id.clone()));
@@ -72,33 +95,59 @@ impl WorkerManager {
             worker_id.clone(), session_id, self.provider.clone(), worker_tools,
             self.blackboard.clone(), loop_breaker, self.approval_queue.clone(),
             current_cost_config, self.max_iterations,
+            self.workers.clone(), self.app_handle.clone(),
         );
 
         let workers_clone = self.workers.clone();
         let wid = worker_id.clone();
+        let wid_log = wid.clone();
         let provider_for_summary = self.provider.clone();
+        println!("🚀 [Worker] {} 启动 | task={}", &wid_log[..8], task.title);
         let blackboard_for_summary = self.blackboard.clone();
+        let knowledge_base = self.knowledge_base.clone();
         let task_id_for_summary = task.id.clone();
+        let task_title = task.title.clone();
+        let app_handle_clone = self.app_handle.clone();
         
         tokio::spawn(async move {
-            match react_loop.run(system_prompt, task.description).await {
+            match react_loop.run(enriched_system_prompt, task.description).await {
                 Ok(result) => {
                     let mut workers = workers_clone.write().await;
                     if let Some(w) = workers.get_mut(&wid) {
                         w.status = WorkerStatus::Completed;
                         w.last_active = Utc::now();
+                        if let Some(ref handle) = app_handle_clone {
+                            let _ = handle.emit("ai:worker-update", w.clone());
+                        }
                     }
-                    println!("Worker {} 完成: {}", wid, result);
+                    println!("🏁 [Worker] {} 完成 | result_len={}", &wid[..8], result.len());
 
-                    // 1. 运行轨迹摘要提取
+                    // 1. 运行轨迹摘要提取并沉淀到知识库草稿箱
                     let state = react_loop.get_state().await;
                     if let Ok(summary) = super::summarizer::Summarizer::summarize_run(provider_for_summary, &state.history).await {
+                        // 写入共享黑板供其他 Worker 参考
                         blackboard_for_summary.write(
                             BlackboardEntryType::IdentifiedBug,
                             format!("{}_takeaway", task_id_for_summary),
-                            summary,
+                            summary.clone(),
                             wid.clone()
                         ).await;
+
+                        // 持久化到知识库草稿箱（前端轮询可见）
+                        let draft_entry = KbEntry {
+                            id: String::new(),
+                            title: format!("[Takeaway] {}", task_title),
+                            content: summary,
+                            entry_type: KbEntryType::Takeaway,
+                            tags: vec!["auto-generated".into(), "takeaway".into()],
+                            source_session: Some(wid.clone()),
+                            confidence: 0.5, // 初始置信度，后续 Step 5 会自动调整
+                            is_draft: true,
+                            created_at: Utc::now(),
+                            updated_at: Utc::now(),
+                            embedding: None,
+                        };
+                        knowledge_base.add_entry(draft_entry).await;
                     }
 
                     // 2. 任务成功完成。把隔离快照中的增量修改写入原始工作区
@@ -112,8 +161,11 @@ impl WorkerManager {
                     if let Some(w) = workers.get_mut(&wid) {
                         w.status = WorkerStatus::Failed;
                         w.last_active = Utc::now();
+                        if let Some(ref handle) = app_handle_clone {
+                            let _ = handle.emit("ai:worker-update", w.clone());
+                        }
                     }
-                    println!("Worker {} 失败: {}", wid, e);
+                    println!("💀 [Worker] {} 失败: {}", &wid[..8], e);
                     workspace_mgr.cleanup();
                 }
             }
@@ -134,6 +186,10 @@ impl WorkerManager {
         let mut workers = self.workers.write().await;
         if let Some(w) = workers.get_mut(id) {
             w.status = WorkerStatus::Killed;
+            w.last_active = Utc::now();
+            if let Some(ref handle) = self.app_handle {
+                let _ = handle.emit("ai:worker-update", w.clone());
+            }
             true
         } else { false }
     }

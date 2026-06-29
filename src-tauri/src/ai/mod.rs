@@ -15,6 +15,8 @@ pub mod diff_merge;
 pub mod mcp_client;
 pub mod planner;
 pub mod agent_manager;
+pub mod ast_parser;
+pub mod vector_store;
 
 pub use types::*;
 pub use llm::{LlmProvider, LlmMessage, LlmResponse, MockLlmProvider, OpenAiProvider};

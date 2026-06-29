@@ -81,6 +81,13 @@ impl SecuritySandbox {
         self.workspace_root = new_root;
     }
 
+    /// 动态添加只读白名单路径
+    pub fn add_read_only_path(&mut self, path: PathBuf) {
+        if !self.read_only_whitelist.contains(&path) {
+            self.read_only_whitelist.push(path);
+        }
+    }
+
     pub fn validate_read_path(&self, path: &str) -> Result<PathBuf, String> {
         let p = Path::new(path);
         let canonical = if p.is_absolute() {

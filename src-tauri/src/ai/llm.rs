@@ -12,21 +12,45 @@ use super::tools::ToolDefinition;
 pub struct LlmMessage {
     pub role: MessageRole,
     pub content: String,
+    pub reasoning_content: Option<String>,  // DS thinking mode 思维链
+    pub tool_call_id: Option<String>,       // 工具调用的ID，回传给API
     pub tool_calls: Vec<ToolCallRecord>,
 }
 
 impl LlmMessage {
     pub fn system(content: String) -> Self {
-        Self { role: MessageRole::System, content, tool_calls: vec![] }
+        Self { role: MessageRole::System, content, reasoning_content: None, tool_call_id: None, tool_calls: vec![] }
     }
     pub fn user(content: String) -> Self {
-        Self { role: MessageRole::User, content, tool_calls: vec![] }
+        Self { role: MessageRole::User, content, reasoning_content: None, tool_call_id: None, tool_calls: vec![] }
     }
     pub fn assistant(content: String) -> Self {
-        Self { role: MessageRole::Assistant, content, tool_calls: vec![] }
+        Self { role: MessageRole::Assistant, content, reasoning_content: None, tool_call_id: None, tool_calls: vec![] }
+    }
+    pub fn assistant_with_tool_calls(content: String, reasoning: Option<String>, calls: &[ToolCallRecord]) -> Self {
+        let tc_json: Vec<serde_json::Value> = calls.iter().map(|tc| {
+            serde_json::json!({
+                "id": tc.id,
+                "type": "function",
+                "function": {
+                    "name": tc.tool_name,
+                    "arguments": serde_json::to_string(&tc.arguments).unwrap_or_default(),
+                }
+            })
+        }).collect();
+        Self {
+            role: MessageRole::Assistant,
+            content,
+            reasoning_content: reasoning,
+            tool_call_id: None,
+            tool_calls: calls.to_vec(),
+        }
     }
     pub fn tool(content: String) -> Self {
-        Self { role: MessageRole::Tool, content, tool_calls: vec![] }
+        Self { role: MessageRole::Tool, content, reasoning_content: None, tool_call_id: None, tool_calls: vec![] }
+    }
+    pub fn tool_with_id(content: String, call_id: String) -> Self {
+        Self { role: MessageRole::Tool, content, reasoning_content: None, tool_call_id: Some(call_id), tool_calls: vec![] }
     }
 }
 
@@ -48,6 +72,8 @@ pub trait LlmProvider: Send + Sync {
     async fn chat(&self, messages: &[LlmMessage], tools: &[ToolDefinition]) -> Result<LlmResponse, String>;
     fn name(&self) -> &str;
     fn estimate_cost(&self, input_tokens: u64, output_tokens: u64) -> f64;
+    /// 运行时切换思维强度（DS thinking mode），默认空实现
+    async fn set_reasoning_effort(&self, _effort: Option<String>) {}
 }
 
 /// Mock LLM Provider - 用于本地闭环逻辑验证
@@ -168,22 +194,42 @@ impl LlmProvider for MockLlmProvider {
     fn estimate_cost(&self, _input: u64, _output: u64) -> f64 { 0.0 }
 }
 
-/// OpenAI 兼容 Provider
+/// OpenAI 兼容 Provider（完整支持 DeepSeek thinking mode + 运行时切换强度）
 pub struct OpenAiProvider {
     api_key: String,
     base_url: String,
     model: String,
+    reasoning_effort: Arc<tokio::sync::RwLock<Option<String>>>,
     client: reqwest::Client,
 }
 
 impl OpenAiProvider {
-    pub fn new(api_key: String, base_url: Option<String>, model: Option<String>) -> Self {
+    pub fn new(api_key: String, base_url: Option<String>, model: Option<String>, reasoning_effort_override: Option<String>) -> Self {
+        let model = model.unwrap_or_else(|| "deepseek-v4-pro".into());
+        let base_url = base_url.unwrap_or_else(|| "https://api.deepseek.com".into());
+
+        let reasoning_effort = reasoning_effort_override
+            .filter(|e| !e.is_empty() && e != "off")
+            .or_else(|| {
+                if model.contains("deepseek") || model.contains("o1") || model.contains("o3") {
+                    Some("high".to_string())
+                } else {
+                    None
+                }
+            });
+
         Self {
             api_key,
-            base_url: base_url.unwrap_or_else(|| "https://api.openai.com/v1".into()),
-            model: model.unwrap_or_else(|| "gpt-4o".into()),
+            base_url,
+            model,
+            reasoning_effort: Arc::new(tokio::sync::RwLock::new(reasoning_effort)),
             client: reqwest::Client::new(),
         }
+    }
+
+    /// 运行时切换思维强度（即时生效）
+    pub async fn set_reasoning_effort(&self, effort: Option<String>) {
+        *self.reasoning_effort.write().await = effort;
     }
 }
 
@@ -193,15 +239,44 @@ impl LlmProvider for OpenAiProvider {
         let url = format!("{}/chat/completions", self.base_url);
 
         let messages_json: Vec<serde_json::Value> = messages.iter().map(|m| {
-            serde_json::json!({
-                "role": match m.role {
-                    MessageRole::System => "system",
-                    MessageRole::User => "user",
-                    MessageRole::Assistant => "assistant",
-                    MessageRole::Tool => "tool",
-                },
-                "content": m.content,
-            })
+            let role = match m.role {
+                MessageRole::System => "system",
+                MessageRole::User => "user",
+                MessageRole::Assistant => "assistant",
+                MessageRole::Tool => "tool",
+            };
+            let mut msg = serde_json::json!({ "role": role, "content": m.content });
+
+            // DS thinking mode: 有 tool_calls 的 assistant 消息必须回传 reasoning_content
+            if m.role == MessageRole::Assistant {
+                if let Some(ref rc) = m.reasoning_content {
+                    if !rc.is_empty() {
+                        msg["reasoning_content"] = serde_json::json!(rc);
+                    }
+                }
+                // 有 tool_calls 时必须带上
+                if !m.tool_calls.is_empty() {
+                    msg["tool_calls"] = serde_json::json!(m.tool_calls.iter().map(|tc| {
+                        serde_json::json!({
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.tool_name,
+                                "arguments": serde_json::to_string(&tc.arguments).unwrap_or_default(),
+                            }
+                        })
+                    }).collect::<Vec<_>>());
+                }
+            }
+
+            // tool 消息必须带 tool_call_id
+            if m.role == MessageRole::Tool {
+                if let Some(ref tcid) = m.tool_call_id {
+                    msg["tool_call_id"] = serde_json::json!(tcid);
+                }
+            }
+
+            msg
         }).collect();
 
         let tools_json: Vec<serde_json::Value> = tools.iter().map(|t| {
@@ -215,12 +290,35 @@ impl LlmProvider for OpenAiProvider {
             })
         }).collect();
 
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "model": self.model,
             "messages": messages_json,
             "tools": tools_json,
             "tool_choice": "auto",
         });
+
+        // 针对支持思维的推理模型（如 DeepSeek 思考模型、OpenAI o1/o3 等）加入 reasoning_effort
+        let is_reasoning_model = self.model.contains("deepseek") || self.model.contains("o1") || self.model.contains("o3");
+        let current_effort = self.reasoning_effort.read().await.clone();
+        
+        if is_reasoning_model {
+            if let Some(ref effort) = current_effort {
+                body["reasoning_effort"] = serde_json::json!(effort);
+                if self.model.contains("deepseek") {
+                    body["extra_body"] = serde_json::json!({
+                        "thinking": { "type": "enabled" }
+                    });
+                }
+            }
+        } else {
+            body["temperature"] = serde_json::json!(0.7);
+        }
+
+        // 🔍 后端日志：请求概览
+        println!(
+            "🤖 [LLM] → {} | model={} | msgs={} | tools={} | thinking={:?}",
+            url, self.model, messages.len(), tools.len(), current_effort
+        );
 
         let resp = self.client
             .post(&url)
@@ -234,6 +332,7 @@ impl LlmProvider for OpenAiProvider {
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
+            eprintln!("❌ [LLM] 错误 {status}: {text}");
             return Err(format!("LLM 返回错误 {status}: {text}"));
         }
 
@@ -245,6 +344,11 @@ impl LlmProvider for OpenAiProvider {
         let message = &choice["message"];
         let content = message["content"].as_str().unwrap_or("").to_string();
         let finish_reason = choice["finish_reason"].as_str().unwrap_or("stop").to_string();
+
+        // DS thinking mode: 提取 reasoning_content
+        let thought = message["reasoning_content"].as_str()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
 
         let tool_calls: Vec<ToolCallRecord> = if let Some(calls) = message["tool_calls"].as_array() {
             calls.iter().filter_map(|c| {
@@ -269,9 +373,31 @@ impl LlmProvider for OpenAiProvider {
         let input_tokens = json["usage"]["prompt_tokens"].as_u64().unwrap_or(0);
         let output_tokens = json["usage"]["completion_tokens"].as_u64().unwrap_or(0);
 
+        // 🔍 后端日志：响应摘要
+        println!(
+            "✅ [LLM] ← finish={} | content_len={} | thought_len={} | tool_calls={} | tokens in={} out={}",
+            finish_reason,
+            content.len(),
+            thought.as_ref().map_or(0, |t| t.len()),
+            tool_calls.len(),
+            input_tokens,
+            output_tokens,
+        );
+        if let Some(ref t) = thought {
+            let safe_len = t.char_indices().nth(200).map(|(i, _)| i).unwrap_or(t.len());
+            println!("💭 [LLM] reasoning: {}", &t[..safe_len]);
+        }
+        if !content.is_empty() {
+            let safe_len = content.char_indices().nth(300).map(|(i, _)| i).unwrap_or(content.len());
+            println!("📝 [LLM] content: {}", &content[..safe_len]);
+        }
+        for tc in &tool_calls {
+            println!("🔧 [LLM] tool_call: {} ({})", tc.tool_name, tc.id);
+        }
+
         Ok(LlmResponse {
             content,
-            thought: None,
+            thought,
             tool_calls,
             input_tokens,
             output_tokens,
@@ -282,7 +408,7 @@ impl LlmProvider for OpenAiProvider {
     fn name(&self) -> &str { "openai" }
 
     fn estimate_cost(&self, input: u64, output: u64) -> f64 {
-        // GPT-4o 定价: $2.50/1M input, $10.00/1M output
-        (input as f64 * 2.5 / 1_000_000.0) + (output as f64 * 10.0 / 1_000_000.0)
+        // DS v4 定价: ¥2/1M input, ¥4/1M output（在 agent_manager CostConfig 中配置为元）
+        (input as f64 * 2.0 / 1_000_000.0) + (output as f64 * 4.0 / 1_000_000.0)
     }
 }

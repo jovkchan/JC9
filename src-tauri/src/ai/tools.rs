@@ -434,7 +434,7 @@ pub fn generate_simple_diff(target: &str, replacement: &str) -> String {
 }
 
 // ══════════════════════════════════════════════════════════════
-// 6. 静态符号检索工具 (find_symbols)
+// 6. 静态符号检索工具 (find_symbols) — 基于 Tree-sitter AST 解析
 // ══════════════════════════════════════════════════════════════
 pub struct FindSymbolsTool;
 
@@ -443,7 +443,7 @@ impl Tool for FindSymbolsTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
             name: "find_symbols".into(),
-            description: "通过正则静态扫描提取目标代码文件的类、函数与方法大纲（符号定位）。".into(),
+            description: "通过 Tree-sitter AST 精确提取目标代码文件的类、函数、方法与结构体大纲（支持 TS/JS/Vue/Rust）。".into(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -466,27 +466,25 @@ impl Tool for FindSymbolsTool {
 
         match sandbox.validate_read_path(path_str) {
             Ok(verified_path) => {
-                match std::fs::read_to_string(&verified_path) {
-                    Ok(content) => {
-                        let re_rust = regex::Regex::new(r"(?m)^\s*(pub\s+)?(fn|struct|enum|trait|impl|mod)\s+([a-zA-Z_][a-zA-Z0-9_]*)").unwrap();
-                        let re_js_ts = regex::Regex::new(r"(?m)^\s*(export\s+)?(async\s+)?(function|class|interface|type)\s+([a-zA-Z_][a-zA-Z0-9_]*)").unwrap();
-                        let re_go = regex::Regex::new(r"(?m)^\s*(func|type)\s+([a-zA-Z_][a-zA-Z0-9_]*)").unwrap();
-                        let re_arrow = regex::Regex::new(r"(?m)^\s*(const|let|var)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(\([^)]*\)|[a-zA-Z_][a-zA-Z0-9_]*)\s*=>").unwrap();
-
-                        let mut outline = Vec::new();
-                        for (idx, line) in content.lines().enumerate() {
-                            if re_rust.is_match(line) || re_js_ts.is_match(line) || re_go.is_match(line) || re_arrow.is_match(line) {
-                                outline.push(format!("第 {} 行: {}", idx + 1, line.trim()));
-                            }
-                        }
-
-                        if outline.is_empty() {
+                let mut parser = super::ast_parser::AstParser::new();
+                match parser.parse_file(&verified_path) {
+                    Ok(symbols) => {
+                        if symbols.is_empty() {
                             ToolResult { success: true, output: "未能在文件中检测到清晰的类/函数/方法定义符号。".into(), error: None }
                         } else {
-                            ToolResult { success: true, output: format!("文件中的符号大纲如下：\n{}", outline.join("\n")), error: None }
+                            let mut outline = String::from("文件中的符号大纲如下（Tree-sitter AST 解析）：\n");
+                            for sym in &symbols {
+                                let vis = sym.visibility.as_deref().unwrap_or("");
+                                let parent = sym.parent.as_deref().map(|p| format!(" (∈ {})", p)).unwrap_or_default();
+                                outline.push_str(&format!(
+                                    "第 {} 行: {:?}{} {}{}\n",
+                                    sym.line, sym.kind, vis, sym.name, parent
+                                ));
+                            }
+                            ToolResult { success: true, output: outline, error: None }
                         }
                     }
-                    Err(e) => ToolResult { success: false, output: "".into(), error: Some(format!("读取文件失败: {}", e)) }
+                    Err(e) => ToolResult { success: false, output: "".into(), error: Some(format!("AST 解析失败: {}", e)) }
                 }
             }
             Err(err_msg) => ToolResult { success: false, output: "".into(), error: Some(err_msg) }
@@ -545,5 +543,9 @@ impl ToolRegistry {
                 error: Some(format!("工具 '{}' 未在注册表中注册", name)),
             }
         }
+    }
+
+    pub fn sandbox(&self) -> &SecuritySandbox {
+        &self.sandbox
     }
 }
