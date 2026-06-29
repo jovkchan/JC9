@@ -1,5 +1,6 @@
 mod process;
 mod database;
+pub mod ai;
 
 use process::ProcessManager;
 use database::{Database, Project, Shortcut, NoteGroup, Note};
@@ -15,6 +16,7 @@ use std::os::windows::process::CommandExt;
 struct AppState {
     manager: ProcessManager,
     db: Database,
+    ai_manager: std::sync::Arc<ai::agent_manager::AgentManager>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -761,9 +763,246 @@ fn remove_env_var(key: String) -> Result<(), String> {
     Ok(())
 }
 
+// ══════════════════════════════════════════════════════════════
+// AI Agent 相关的 Tauri 命令
+// ══════════════════════════════════════════════════════════════
+
+#[tauri::command]
+async fn ai_list_sessions(state: State<'_, Mutex<AppState>>) -> Result<Vec<ai::types::AiSession>, String> {
+    let ai_manager = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.ai_manager.clone()
+    };
+    Ok(ai_manager.get_sessions().await)
+}
+
+#[tauri::command]
+async fn ai_create_session(state: State<'_, Mutex<AppState>>, title: String) -> Result<String, String> {
+    let ai_manager = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.ai_manager.clone()
+    };
+    Ok(ai_manager.create_session(title).await)
+}
+
+#[tauri::command]
+async fn ai_plan_task(
+    state: State<'_, Mutex<AppState>>,
+    session_id: String,
+    request: String,
+) -> Result<Vec<ai::types::TaskNode>, String> {
+    let ai_manager = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.ai_manager.clone()
+    };
+    Ok(ai_manager.plan_task(session_id, request).await)
+}
+
+#[tauri::command]
+async fn ai_spawn_worker(
+    state: State<'_, Mutex<AppState>>,
+    session_id: String,
+    task: ai::types::TaskNode,
+    system_prompt: String,
+) -> Result<String, String> {
+    let ai_manager = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.ai_manager.clone()
+    };
+    ai_manager.worker_manager().spawn_worker(session_id, task, system_prompt).await
+}
+
+#[tauri::command]
+async fn ai_list_workers(state: State<'_, Mutex<AppState>>) -> Result<Vec<ai::types::WorkerState>, String> {
+    let ai_manager = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.ai_manager.clone()
+    };
+    Ok(ai_manager.worker_manager().list_workers().await)
+}
+
+#[tauri::command]
+async fn ai_kill_worker(state: State<'_, Mutex<AppState>>, worker_id: String) -> Result<bool, String> {
+    let ai_manager = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.ai_manager.clone()
+    };
+    Ok(ai_manager.worker_manager().kill_worker(&worker_id).await)
+}
+
+#[tauri::command]
+async fn ai_get_pending_approvals(state: State<'_, Mutex<AppState>>) -> Result<Vec<ai::types::ApprovalRequest>, String> {
+    let ai_manager = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.ai_manager.clone()
+    };
+    Ok(ai_manager.approval_queue().get_pending().await)
+}
+
+#[tauri::command]
+async fn ai_approve_request(state: State<'_, Mutex<AppState>>, request_id: String) -> Result<bool, String> {
+    let ai_manager = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.ai_manager.clone()
+    };
+    Ok(ai_manager.approval_queue().approve(&request_id).await)
+}
+
+#[tauri::command]
+async fn ai_deny_request(state: State<'_, Mutex<AppState>>, request_id: String) -> Result<bool, String> {
+    let ai_manager = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.ai_manager.clone()
+    };
+    Ok(ai_manager.approval_queue().deny(&request_id).await)
+}
+
+#[tauri::command]
+async fn ai_search_knowledge(
+    state: State<'_, Mutex<AppState>>,
+    query: String,
+    limit: usize,
+) -> Result<Vec<ai::types::KbEntry>, String> {
+    let ai_manager = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.ai_manager.clone()
+    };
+    Ok(ai_manager.knowledge_base().search(&query, limit).await)
+}
+
+#[tauri::command]
+async fn ai_add_knowledge(
+    state: State<'_, Mutex<AppState>>,
+    entry: ai::types::KbEntry,
+) -> Result<String, String> {
+    let ai_manager = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.ai_manager.clone()
+    };
+    Ok(ai_manager.knowledge_base().add_entry(entry).await)
+}
+
+#[tauri::command]
+async fn ai_connect_mcp_server(
+    state: State<'_, Mutex<AppState>>,
+    name: String,
+    url: String,
+) -> Result<(), String> {
+    let ai_manager = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.ai_manager.clone()
+    };
+    ai_manager.mcp_client().connect(name, url).await
+}
+
+#[tauri::command]
+async fn ai_list_mcp_servers(
+    state: State<'_, Mutex<AppState>>,
+) -> Result<Vec<ai::mcp_client::McpServerInfo>, String> {
+    let ai_manager = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.ai_manager.clone()
+    };
+    Ok(ai_manager.mcp_client().list_servers().await)
+}
+
+#[tauri::command]
+async fn ai_list_drafts(state: State<'_, Mutex<AppState>>) -> Result<Vec<ai::types::KbEntry>, String> {
+    let ai_manager = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.ai_manager.clone()
+    };
+    Ok(ai_manager.knowledge_base().list_drafts().await)
+}
+
+#[tauri::command]
+async fn ai_promote_knowledge(state: State<'_, Mutex<AppState>>, entry_id: String) -> Result<bool, String> {
+    let ai_manager = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.ai_manager.clone()
+    };
+    Ok(ai_manager.knowledge_base().promote(&entry_id).await)
+}
+
+#[tauri::command]
+async fn ai_update_cost_config(
+    state: State<'_, Mutex<AppState>>,
+    config: ai::types::CostConfig,
+) -> Result<(), String> {
+    let ai_manager = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.ai_manager.clone()
+    };
+    let mut current_config = ai_manager.cost_config().write().await;
+    *current_config = config;
+    Ok(())
+}
+
+#[tauri::command]
+async fn ai_get_workspace_root(
+    state: State<'_, Mutex<AppState>>,
+) -> Result<String, String> {
+    let ai_manager = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.ai_manager.clone()
+    };
+    let root = ai_manager.workspace_root().read().await.clone();
+    Ok(root.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+async fn ai_update_workspace_root(
+    state: State<'_, Mutex<AppState>>,
+    new_path: String,
+) -> Result<(), String> {
+    let ai_manager = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.ai_manager.clone()
+    };
+    ai_manager.update_workspace_root(std::path::PathBuf::from(new_path)).await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn ai_select_workspace_dialog(
+    app: tauri::AppHandle,
+    state: State<'_, Mutex<AppState>>,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let (tx, rx) = tokio::sync::oneshot::channel::<Option<String>>();
+    
+    app.dialog()
+        .file()
+        .pick_folder(move |folder| {
+            let path_str = folder.and_then(|f| {
+                match f {
+                    tauri_plugin_dialog::FilePath::Path(p) => Some(p.to_string_lossy().to_string()),
+                    tauri_plugin_dialog::FilePath::Url(u) => u.to_file_path().ok().map(|p| p.to_string_lossy().to_string()),
+                }
+            });
+            let _ = tx.send(path_str);
+        });
+
+    let selected_path = rx.await.map_err(|e| e.to_string())?;
+    
+    if let Some(ref path) = selected_path {
+        let ai_manager = {
+            let app_state = state.lock().map_err(|e| e.to_string())?;
+            app_state.ai_manager.clone()
+        };
+        ai_manager.update_workspace_root(std::path::PathBuf::from(path)).await;
+    }
+
+    Ok(selected_path)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let db = Database::new().expect("无法初始化数据库");
+
+    let ai_manager = std::sync::Arc::new(ai::agent_manager::AgentManager::new(
+        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+    ));
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -771,6 +1010,7 @@ pub fn run() {
         .manage(Mutex::new(AppState {
             manager: ProcessManager::new(),
             db,
+            ai_manager,
         }))
         .invoke_handler(tauri::generate_handler![
             get_projects,
@@ -803,6 +1043,26 @@ pub fn run() {
             search_notes,
             get_note_count,
             get_note_by_id,
+            // AI commands
+            ai_list_sessions,
+            ai_create_session,
+            ai_plan_task,
+            ai_spawn_worker,
+            ai_list_workers,
+            ai_kill_worker,
+            ai_get_pending_approvals,
+            ai_approve_request,
+            ai_deny_request,
+            ai_search_knowledge,
+            ai_add_knowledge,
+            ai_connect_mcp_server,
+            ai_list_mcp_servers,
+            ai_list_drafts,
+            ai_promote_knowledge,
+            ai_update_cost_config,
+            ai_get_workspace_root,
+            ai_update_workspace_root,
+            ai_select_workspace_dialog,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,5 +1,7 @@
 node_modules/
 dist/
+memos/
+docs/
 target/
 *.log
 .DS_Store
