@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import { useStatusStore } from '@/stores/status'
 import type { Command, Project, RunningStatus } from '@/types'
 
 function genId() { return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 9)}` }
@@ -56,14 +57,18 @@ export const useProjectStore = defineStore('project', () => {
   function addProject(name: string) {
     const p: Project = { id: genId(), name, commands: [], createdAt: new Date().toISOString() }
     projects.value.push(p); selectedProjectId.value = p.id; saveProjects()
+    useStatusStore().pushMessage(`项目「${name}」已创建`, 'success')
   }
   function removeProject(id: string) {
+    const p = projects.value.find(p => p.id === id)
+    const name = p?.name ?? ''
     projects.value.find(p => p.id === id)?.commands.forEach(c => stopCommand(id, c.id))
     projects.value = projects.value.filter(p => p.id !== id)
     if (selectedProjectId.value === id) selectedProjectId.value = projects.value[0]?.id ?? null
     saveProjects()
+    useStatusStore().pushMessage(`项目「${name}」已删除`)
   }
-  function updateProjectName(id: string, name: string) { const p = projects.value.find(p => p.id === id); if (p) { p.name = name; saveProjects() } }
+  function updateProjectName(id: string, name: string) { const p = projects.value.find(p => p.id === id); if (p) { p.name = name; saveProjects(); useStatusStore().pushMessage(`项目已重命名为「${name}」`) } }
 
   function addCommand(projectId: string, c: Omit<Command, 'id'>) { const p = projects.value.find(p => p.id === projectId); if (p) { p.commands.push({ ...c, id: genId() }); saveProjects() } }
   function removeCommand(projectId: string, commandId: string) { stopCommand(projectId, commandId); const p = projects.value.find(p => p.id === projectId); if (p) { p.commands = p.commands.filter(c => c.id !== commandId); saveProjects() } }
@@ -87,11 +92,23 @@ export const useProjectStore = defineStore('project', () => {
     const existing = runningTabs.value.findIndex(t => t.projectId === projectId && t.commandId === cmd.id)
     if (existing >= 0) { activeTabIndex.value = existing; activeTabType.value = 'term' }
     else { runningTabs.value.push({ projectId, projectName: project?.name ?? '', commandId: cmd.id, commandName: cmd.name, command: cmd.command }); activeTabIndex.value = runningTabs.value.length - 1; activeTabType.value = 'term' }
-    try { await invoke('start_command', { processId, projectId, commandId: cmd.id, workingDir: cmd.workingDir, command: cmd.command }) }
-    catch (e) { runningMap.value[processId] = 'stopped'; bufferPtyOutput(processId, [...new TextEncoder().encode(`[启动失败] ${e}`)]) }
+    try {
+      await invoke('start_command', { processId, projectId, commandId: cmd.id, workingDir: cmd.workingDir, command: cmd.command })
+      useStatusStore().pushMessage(`命令「${cmd.name}」已启动`, 'success')
+    } catch (e) {
+      runningMap.value[processId] = 'stopped'; bufferPtyOutput(processId, [...new TextEncoder().encode(`[启动失败] ${e}`)])
+      useStatusStore().pushMessage(`命令「${cmd.name}」启动失败: ${e}`, 'error')
+    }
   }
 
-  async function stopCommand(projectId: string, commandId: string) { const processId = cmdKey(projectId, commandId); try { await invoke('stop_command_by_ids', { projectId, commandId }) } catch { /* */ }; runningMap.value[processId] = 'stopped' }
+  async function stopCommand(projectId: string, commandId: string) {
+    const processId = cmdKey(projectId, commandId)
+    const p = projects.value.find(x => x.id === projectId)
+    const c = p?.commands.find(x => x.id === commandId)
+    try { await invoke('stop_command_by_ids', { projectId, commandId }) } catch { /* */ }
+    runningMap.value[processId] = 'stopped'
+    if (c) useStatusStore().pushMessage(`命令「${c.name}」已停止`)
+  }
   async function restartCommand(projectId: string, cmd: Command) { await stopCommand(projectId, cmd.id); await new Promise(r => setTimeout(r, 500)); await startCommand(projectId, cmd, true) }
 
   function closeTab(index: number) { const tab = runningTabs.value[index]; if (tab) stopCommand(tab.projectId, tab.commandId); runningTabs.value.splice(index, 1); if (activeTabIndex.value >= runningTabs.value.length) activeTabIndex.value = Math.max(0, runningTabs.value.length - 1) }

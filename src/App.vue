@@ -1,17 +1,23 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { useProjectStore } from '@/stores/project'
+import { useStatusStore } from '@/stores/status'
 import ProjectSidebar from '@/components/ProjectSidebar.vue'
 import MainPanel from '@/components/MainPanel.vue'
 import TitleBar from '@/components/TitleBar.vue'
+import StatusBar from '@/components/StatusBar.vue'
 
 const store = useProjectStore()
+const status = useStatusStore()
 const sidebarCollapsed = ref(false)
 const isSplash = ref(false)
 
 let defaultTerminalTimer: any = null
+
+// Watch project count
+watch(() => store.projects.length, (n) => status.setProjectCount(n), { immediate: true })
 
 onMounted(async () => {
   const win = getCurrentWindow()
@@ -35,10 +41,16 @@ onMounted(async () => {
     await store.loadProjects()
     await store.initListeners()
 
+    status.setProjectCount(store.projects.length)
+    status.pushMessage('项目加载完成', 'success')
+
     // 显示并聚焦主窗口
     await win.show()
     await win.setFocus()
-    defaultTerminalTimer = setTimeout(() => store.startDefaultTerminal(), 200)
+    defaultTerminalTimer = setTimeout(() => {
+      store.startDefaultTerminal()
+      status.pushMessage('默认终端已启动')
+    }, 200)
 
     // 优雅地关闭 logo (splash) 窗口
     const splashWin = await WebviewWindow.getByLabel('splash')
@@ -80,6 +92,7 @@ onUnmounted(() => {
       </div>
       <MainPanel />
     </div>
+    <StatusBar />
   </div>
 </template>
 <style scoped lang="scss">
