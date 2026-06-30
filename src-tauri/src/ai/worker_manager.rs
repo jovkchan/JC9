@@ -1,13 +1,14 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::{RwLock, Semaphore};
 use std::collections::HashMap;
 use chrono::Utc;
 use std::path::PathBuf;
 use tauri::Emitter;
+use rusqlite::Connection;
 
 use super::types::*;
 use super::llm::LlmProvider;
-use super::tools::ToolRegistry;
+use super::tools::{ToolRegistry, ToolDefinition};
 use super::blackboard::SharedBlackboard;
 use super::react_loop::ReActLoop;
 use super::loop_breaker::LoopBreaker;
@@ -16,6 +17,9 @@ use super::workspace::WorkspaceManager;
 use super::security::SecuritySandbox;
 use super::host_detector::HostDetector;
 use super::knowledge_base::KnowledgeBase;
+use super::prompt_builder::PromptBuilder;
+use super::repo_map::RepoMap;
+use super::mcp_client::McpClient;
 
 /// Worker 管理器 - 并发控制、Worker 生命周期与 COW 隔离环境调度
 pub struct WorkerManager {
@@ -29,6 +33,9 @@ pub struct WorkerManager {
     cost_config: Arc<tokio::sync::RwLock<CostConfig>>,
     max_iterations: u32,
     app_handle: Option<tauri::AppHandle>,
+    db_conn: Option<Arc<Mutex<Connection>>>,
+    mcp_client: Arc<McpClient>,
+    frontend_tools: Arc<RwLock<HashMap<String, ToolDefinition>>>,
 }
 
 impl WorkerManager {
@@ -42,16 +49,24 @@ impl WorkerManager {
         max_concurrent: usize,
         max_iterations: u32,
         app_handle: Option<tauri::AppHandle>,
+        db_conn: Option<Arc<Mutex<Connection>>>,
+        mcp_client: Arc<McpClient>,
     ) -> Self {
         Self {
             workers: Arc::new(RwLock::new(HashMap::new())),
             semaphore: Arc::new(Semaphore::new(max_concurrent)),
             provider, blackboard, approval_queue, knowledge_base, workspace_root, cost_config, max_iterations,
-            app_handle,
+            app_handle, db_conn, mcp_client,
+            frontend_tools: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
-    /// 拉起一个并发 Worker 并绑定 COW 隔离开发空间
+    /// 注册前端工具定义
+    pub async fn register_frontend_tool(&self, definition: ToolDefinition) {
+        self.frontend_tools.write().await.insert(definition.name.clone(), definition);
+    }
+
+    /// 铺拉起一个并发 Worker 并绑定 COW 隔离开发空间
     pub async fn spawn_worker(&self, session_id: String, task: TaskNode, system_prompt: String) -> Result<String, String> {
         let _permit = self.semaphore.acquire().await.map_err(|e| e.to_string())?;
         let worker_id = uuid::Uuid::new_v4().to_string();
@@ -68,13 +83,44 @@ impl WorkerManager {
         worker_sandbox.add_read_only_path(current_root);
         let worker_tools = Arc::new(ToolRegistry::new(worker_sandbox));
 
-        // 3. 采集宿主环境信息并注入到 System Prompt 头部
+        // 将 MCP 工具注册到当前 Worker 的工具集
+        self.mcp_client.bind_registry(worker_tools.clone()).await;
+
+        // 注册已有的前端动态工具
+        {
+            let ft_list = self.frontend_tools.read().await;
+            if let Some(ref handle) = self.app_handle {
+                for (name, def) in ft_list.iter() {
+                    let tool = Arc::new(super::frontend_tool::FrontendProxyTool::new(def.clone(), handle.clone())) as Arc<dyn super::tools::Tool>;
+                    worker_tools.register(name.clone(), tool).await;
+                }
+            }
+        }
+
+        // 3. 通过 PromptBuilder 构建结构化 System Prompt
         let host_env = HostDetector::new().detect();
-        let enriched_system_prompt = format!(
-            "{}\n\n{}",
-            HostDetector::new().generate_system_prompt(&host_env),
-            system_prompt
-        );
+        let host_prompt = HostDetector::new().generate_system_prompt(&host_env);
+
+        let repo_map = RepoMap::new(self.workspace_root.clone());
+        let repo_map_text = repo_map.generate().await;
+
+        let tool_defs = worker_tools.get_definitions().await;
+        let cost_config = self.cost_config.read().await.clone();
+
+        let enriched_system_prompt = PromptBuilder::new()
+            .with_host_prompt(host_prompt)
+            .with_repo_map(repo_map_text)
+            .with_tools(tool_defs)
+            .with_cost_config(cost_config)
+            .with_safety_rules(
+                "## 安全约束\n\
+                 - 禁止执行可能破坏系统的命令（rm -rf /、format 等）\n\
+                 - 文件写操作必须先读取确认目标文件内容\n\
+                 - 所有修改前自动备份原文件\n\
+                 - 高风险操作需等待用户审批\n"
+                    .into(),
+            )
+            .build(&system_prompt);
 
         let worker_state = WorkerState {
             id: worker_id.clone(), session_id: session_id.clone(), task_id: task.id.clone(),
@@ -98,6 +144,7 @@ impl WorkerManager {
             self.blackboard.clone(), loop_breaker, self.approval_queue.clone(),
             current_cost_config, self.max_iterations,
             self.workers.clone(), self.app_handle.clone(),
+            self.db_conn.clone(),
         );
 
         let workers_clone = self.workers.clone();

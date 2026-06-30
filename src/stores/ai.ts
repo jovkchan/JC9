@@ -302,6 +302,51 @@ export const useAiStore = defineStore('ai', () => {
         }
       }),
     )
+
+    // 监听后端 AI Agent 对前端工具的 RPC 调用
+    unlisteners.push(
+      await listen<{ callId: string; toolName: string; arguments: any }>('ai:call-frontend-tool', async (event) => {
+        const { callId, toolName, arguments: args } = event.payload
+        try {
+          const { dispatchFrontendTool } = await import('@/utils/frontendToolsExecutor')
+          const output = dispatchFrontendTool(toolName, args)
+          await invoke('ai_submit_frontend_tool_result', {
+            callId,
+            success: true,
+            output,
+            error: null
+          })
+        } catch (e: any) {
+          await invoke('ai_submit_frontend_tool_result', {
+            callId,
+            success: false,
+            output: '',
+            error: e.message || '前端工具执行出错'
+          })
+        }
+      })
+    )
+  }
+
+  // 动态注册前端拥有的 33 个开发小工具定义给 AI Agent
+  async function registerAllFrontendTools() {
+    try {
+      await invoke('ai_register_frontend_tool', {
+        name: 'frontend_base64',
+        description: '在前端对输入的文本进行 Base64 编码或解码。参数: mode (为 "encode" 或 "decode")，input (待处理的字符串)。',
+        parameters: {
+          type: 'object',
+          properties: {
+            mode: { type: 'string', enum: ['encode', 'decode'], description: '编码还是解码' },
+            input: { type: 'string', description: '需要编码或解码的文本' }
+          },
+          required: ['mode', 'input']
+        }
+      })
+      console.log('✅ 前端工具 frontend_base64 已成功注册至 AI Agent')
+    } catch (e) {
+      console.warn('⚠️ 注册前端小工具至 AI Agent 失败:', e)
+    }
   }
 
   function destroyListeners() {
@@ -348,5 +393,6 @@ export const useAiStore = defineStore('ai', () => {
     updateCostConfig,
     initListeners,
     destroyListeners,
+    registerAllFrontendTools,
   }
 })

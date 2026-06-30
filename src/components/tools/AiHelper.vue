@@ -1061,9 +1061,9 @@ const placeholderText = computed(() => {
 
 const workspaceShortName = computed(() => {
   const p = ai.workspaceRoot
-  if (!p) return '📁 未设置'
+  if (!p) return '未设置'
   const parts = p.replace(/\\/g, '/').split('/')
-  return '📁 ' + (parts[parts.length - 1] || p)
+  return (parts[parts.length - 1] || p)
 })
 
 // ── 审批处理 ──
@@ -1161,6 +1161,7 @@ onMounted(async () => {
   await ai.loadWorkspaceRoot()
   manualPath.value = ai.workspaceRoot
   await ai.initListeners()
+  await ai.registerAllFrontendTools()
   await ai.loadDrafts()
   lastDraftIds.value = ai.drafts.map(d => d.id)
   localConfig.value = { ...ai.costConfig }

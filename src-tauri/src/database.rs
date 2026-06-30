@@ -77,6 +77,7 @@ pub struct Note {
 
 fn default_visibility() -> String { "PRIVATE".into() }
 
+#[derive(Clone)]
 pub struct Database {
     pub conn: Arc<Mutex<Connection>>,
 }
@@ -138,6 +139,28 @@ impl Database {
                 source_id TEXT NOT NULL,
                 content TEXT NOT NULL,
                 embedding BLOB NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS react_checkpoints (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                worker_id TEXT NOT NULL,
+                iteration INTEGER NOT NULL,
+                thought TEXT NOT NULL DEFAULT '',
+                action TEXT NOT NULL DEFAULT '{}',
+                observation TEXT NOT NULL DEFAULT '',
+                timestamp TEXT NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES ai_sessions(id)
+            );
+            CREATE TABLE IF NOT EXISTS mcp_servers (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                transport TEXT NOT NULL,
+                url TEXT,
+                command TEXT,
+                args TEXT,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
             );
         ").map_err(|e| format!("create tables: {e}"))?;
         let _ = conn.execute("ALTER TABLE notes ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0", []);
@@ -316,6 +339,104 @@ impl Database {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let count: i32 = conn.query_row("SELECT COUNT(*) FROM notes WHERE user_id = 'local' AND is_deleted = 0", [], |row| row.get(0)).map_err(|e| e.to_string())?;
         Ok(count)
+    }
+
+    // ── Checkpoint 持久化 ──
+
+    #[allow(dead_code)]
+    pub fn save_checkpoint(&self, session_id: &str, worker_id: &str, iteration: u32, thought: &str, action: &str, observation: &str, timestamp: &str) -> Result<(), String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let id = format!("cp_{}_{}", worker_id, iteration);
+        conn.execute(
+            "INSERT OR REPLACE INTO react_checkpoints (id, session_id, worker_id, iteration, thought, action, observation, timestamp) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![id, session_id, worker_id, iteration, thought, action, observation, timestamp],
+        ).map_err(|e| format!("保存 checkpoint 失败: {}", e))?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub fn load_checkpoints(&self, session_id: &str) -> Result<Vec<(u32, String, String, String, String)>, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn.prepare(
+            "SELECT iteration, thought, action, observation, timestamp FROM react_checkpoints WHERE session_id = ?1 ORDER BY iteration ASC"
+        ).map_err(|e| e.to_string())?;
+        let rows = stmt.query_map(rusqlite::params![session_id], |row| {
+            Ok((row.get::<_,u32>(0)?, row.get::<_,String>(1)?, row.get::<_,String>(2)?, row.get::<_,String>(3)?, row.get::<_,String>(4)?))
+        }).map_err(|e| e.to_string())?;
+        let mut results = Vec::new();
+        for row in rows.flatten() {
+            results.push(row);
+        }
+        Ok(results)
+    }
+
+    #[allow(dead_code)]
+    pub fn clear_session_checkpoints(&self, session_id: &str) -> Result<(), String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        conn.execute("DELETE FROM react_checkpoints WHERE session_id = ?1", rusqlite::params![session_id])
+            .map_err(|e| format!("清理 checkpoint 失败: {}", e))?;
+        Ok(())
+    }
+
+    // ── MCP 服务器配置持久化 ──
+
+    pub fn save_mcp_server(&self, id: &str, name: &str, transport: &str, url: Option<&str>, command: Option<&str>, args: Option<&str>) -> Result<(), String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT OR REPLACE INTO mcp_servers (id, name, transport, url, command, args, enabled, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, COALESCE((SELECT created_at FROM mcp_servers WHERE id=?1), ?7), ?7)",
+            rusqlite::params![id, name, transport, url, command, args, now],
+        ).map_err(|e| format!("保存 MCP 服务器失败: {}", e))?;
+        Ok(())
+    }
+
+    pub fn delete_mcp_server(&self, id: &str) -> Result<(), String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        conn.execute("DELETE FROM mcp_servers WHERE id = ?1", rusqlite::params![id])
+            .map_err(|e| format!("删除 MCP 服务器失败: {}", e))?;
+        Ok(())
+    }
+
+    pub fn list_mcp_servers(&self) -> Result<Vec<(String, String, String, Option<String>, Option<String>, Option<String>, bool)>, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn.prepare(
+            "SELECT id, name, transport, url, command, args, enabled FROM mcp_servers ORDER BY name"
+        ).map_err(|e| e.to_string())?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_,String>(0)?,
+                row.get::<_,String>(1)?,
+                row.get::<_,String>(2)?,
+                row.get::<_,Option<String>>(3)?,
+                row.get::<_,Option<String>>(4)?,
+                row.get::<_,Option<String>>(5)?,
+                row.get::<_,i32>(6)? != 0,
+            ))
+        }).map_err(|e| e.to_string())?;
+        let mut results = Vec::new();
+        for row in rows.flatten() { results.push(row); }
+        Ok(results)
+    }
+
+    pub fn get_enabled_mcp_servers(&self) -> Result<Vec<(String, String, String, Option<String>, Option<String>, Option<String>)>, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn.prepare(
+            "SELECT id, name, transport, url, command, args FROM mcp_servers WHERE enabled = 1 ORDER BY name"
+        ).map_err(|e| e.to_string())?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_,String>(0)?,
+                row.get::<_,String>(1)?,
+                row.get::<_,String>(2)?,
+                row.get::<_,Option<String>>(3)?,
+                row.get::<_,Option<String>>(4)?,
+                row.get::<_,Option<String>>(5)?,
+            ))
+        }).map_err(|e| e.to_string())?;
+        let mut results = Vec::new();
+        for row in rows.flatten() { results.push(row); }
+        Ok(results)
     }
 }
 

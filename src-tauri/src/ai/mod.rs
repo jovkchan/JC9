@@ -18,7 +18,10 @@ pub mod planner;
 pub mod agent_manager;
 pub mod ast_parser;
 pub mod vector_store;
+pub mod prompt_builder;
+pub mod repo_map;
 pub mod skill_loader;
+pub mod frontend_tool;
 
 pub use types::*;
 pub use llm::{LlmProvider, LlmMessage, LlmResponse, MockLlmProvider, OpenAiProvider};
@@ -36,3 +39,4 @@ pub use workspace::WorkspaceManager;
 pub use diff_merge::DiffMergeEngine;
 pub use mcp_client::McpClient;
 pub use planner::Planner;
+pub use frontend_tool::{FrontendProxyTool, pending_calls};

@@ -67,9 +67,6 @@ impl SkillLoader {
                 count += 1;
             }
         }
-        if count > 0 {
-            println!("✅ 已同步 {} 个技能到知识库", count);
-        }
         count
     }
 

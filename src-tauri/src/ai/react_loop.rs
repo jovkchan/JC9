@@ -1,8 +1,9 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::RwLock;
 use chrono::Utc;
 use std::collections::HashMap;
 use tauri::Emitter;
+use rusqlite::Connection;
 use super::types::*;
 use super::llm::{LlmProvider, LlmMessage};
 use super::tools::{ToolRegistry, ToolResult};
@@ -26,6 +27,7 @@ pub struct ReActLoop {
     max_iterations: u32,
     workers: Arc<RwLock<HashMap<String, WorkerState>>>,
     app_handle: Option<tauri::AppHandle>,
+    db_conn: Option<Arc<Mutex<Connection>>>,
 }
 
 impl ReActLoop {
@@ -41,6 +43,7 @@ impl ReActLoop {
         max_iterations: u32,
         workers: Arc<RwLock<HashMap<String, WorkerState>>>,
         app_handle: Option<tauri::AppHandle>,
+        db_conn: Option<Arc<Mutex<Connection>>>,
     ) -> Self {
         let state = ReActState {
             worker_id: worker_id.clone(),
@@ -66,6 +69,7 @@ impl ReActLoop {
             max_iterations,
             workers,
             app_handle,
+            db_conn,
         }
     }
 
@@ -83,6 +87,23 @@ impl ReActLoop {
             w.termination_reason = term_reason;
             if let Some(ref handle) = self.app_handle {
                 let _ = handle.emit("ai:worker-update", w.clone());
+            }
+        }
+    }
+
+    /// 持久化当前迭代的 checkpoint 到 SQLite
+    async fn save_checkpoint(&self, thought: &str, action: Option<&ToolCallRecord>, observation: Option<&str>) {
+        if let Some(ref conn_arc) = self.db_conn {
+            let iteration = self.state.read().await.iteration;
+            let action_json = action.map(|a| serde_json::to_string(a).unwrap_or_default()).unwrap_or_default();
+            let obs = observation.unwrap_or("");
+            let ts = Utc::now().to_rfc3339();
+            if let Ok(conn) = conn_arc.lock() {
+                let id = format!("cp_{}_{}", self.worker_id, iteration);
+                let _ = conn.execute(
+                    "INSERT OR REPLACE INTO react_checkpoints (id, session_id, worker_id, iteration, thought, action, observation, timestamp) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    rusqlite::params![id, self.session_id, self.worker_id, iteration, thought, action_json, obs, ts],
+                );
             }
         }
     }
@@ -171,6 +192,7 @@ impl ReActLoop {
                     observation: Some("任务完成".into()), timestamp: Utc::now(),
                 };
                 self.state.write().await.history.push(step);
+                self.save_checkpoint(&thought, None, Some("任务完成")).await;
 
                 self.update_worker_state(|w| {
                     w.status = WorkerStatus::Completed;
@@ -441,6 +463,8 @@ impl ReActLoop {
                 iteration, thought, action: response.tool_calls.first().cloned(),
                 observation: Some(observations.join("\n")), timestamp: Utc::now(),
             };
+            let obs_joined = observations.join("\n");
+            self.save_checkpoint(&step.thought, step.action.as_ref(), Some(&obs_joined)).await;
             self.state.write().await.history.push(step);
         }
     }

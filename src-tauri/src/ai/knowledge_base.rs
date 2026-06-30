@@ -86,8 +86,9 @@ impl KnowledgeBase {
         tokio::spawn(async move {
             match vector_store.generate_embedding(&entry_content).await {
                 Ok(embedding) => {
+                    // 使用 source_id 作为 embedding 的主键，确保 UPSERT 正确替换而非追加
                     let vec_entry = super::vector_store::VectorEntry {
-                        id: uuid::Uuid::new_v4().to_string(),
+                        id: format!("emb_{}", entry_id),
                         source_id: entry_id,
                         content: entry_content,
                         embedding,

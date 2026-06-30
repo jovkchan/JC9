@@ -54,13 +54,14 @@ impl AgentManager {
             Arc::new(MockLlmProvider::new())
         };
 
-        let knowledge_base = Arc::new(KnowledgeBase::new(conn));
+        let knowledge_base = Arc::new(KnowledgeBase::new(conn.clone()));
 
         // 启动时从 SQLite 恢复历史会话
         let persisted_sessions = knowledge_base.load_sessions_blocking();
 
         let provider: Arc<tokio::sync::RwLock<Arc<dyn LlmProvider>>> = Arc::new(tokio::sync::RwLock::new(provider_raw.clone()));
 
+        let mcp_client = Arc::new(McpClient::new());
         let worker_manager = Arc::new(tokio::sync::RwLock::new(Arc::new(WorkerManager::new(
             provider_raw,
             blackboard.clone(),
@@ -71,6 +72,8 @@ impl AgentManager {
             10,
             15,
             app_handle.clone(),
+            Some(conn.clone()),
+            mcp_client.clone(),
         ))));
 
         Self {
@@ -82,7 +85,7 @@ impl AgentManager {
             worker_manager,
             sandbox,
             host_detector: HostDetector::new(),
-            mcp_client: Arc::new(McpClient::new()),
+            mcp_client,
             cost_config,
             workspace_root: workspace_root_lock,
             app_handle,
@@ -187,6 +190,8 @@ impl AgentManager {
             self.cost_config.clone(),
             10, 15,
             self.app_handle.clone(),
+            None,
+            self.mcp_client.clone(),
         ));
         *self.provider.write().await = new_provider;
         *self.worker_manager.write().await = new_wm;

@@ -864,6 +864,47 @@ async fn ai_spawn_worker(
 }
 
 #[tauri::command]
+async fn ai_register_frontend_tool(
+    state: State<'_, Mutex<AppState>>,
+    name: String,
+    description: String,
+    parameters: serde_json::Value,
+) -> Result<bool, String> {
+    let ai_manager = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.ai_manager.clone()
+    };
+    let definition = ai::tools::ToolDefinition {
+        name,
+        description,
+        parameters,
+        risk_level: ai::types::RiskLevel::Low,
+    };
+    ai_manager.worker_manager().read().await.register_frontend_tool(definition).await;
+    Ok(true)
+}
+
+#[tauri::command]
+async fn ai_submit_frontend_tool_result(
+    call_id: String,
+    success: bool,
+    output: String,
+    error: Option<String>,
+) -> Result<bool, String> {
+    if let Some(tx) = ai::frontend_tool::pending_calls().write().await.remove(&call_id) {
+        let res = ai::tools::ToolResult {
+            success,
+            output,
+            error,
+        };
+        let _ = tx.send(res);
+        Ok(true)
+    } else {
+        Err("找不到对应的调用 ID，可能已超时".into())
+    }
+}
+
+#[tauri::command]
 async fn ai_list_workers(state: State<'_, Mutex<AppState>>) -> Result<Vec<ai::types::WorkerState>, String> {
     let ai_manager = {
         let app_state = state.lock().map_err(|e| e.to_string())?;
@@ -1023,6 +1064,77 @@ async fn ai_disconnect_mcp_server(
     Ok(())
 }
 
+/// 保存 MCP 服务器配置到数据库
+#[tauri::command]
+async fn ai_save_mcp_server_config(
+    state: State<'_, Mutex<AppState>>,
+    id: String,
+    name: String,
+    transport: String,
+    url: Option<String>,
+    command: Option<String>,
+    args: Option<String>,
+) -> Result<(), String> {
+    let app_state = state.lock().map_err(|e| e.to_string())?;
+    app_state.db.save_mcp_server(&id, &name, &transport, url.as_deref(), command.as_deref(), args.as_deref())
+}
+
+/// 删除 MCP 服务器配置
+#[tauri::command]
+async fn ai_delete_mcp_server_config(
+    state: State<'_, Mutex<AppState>>,
+    id: String,
+) -> Result<(), String> {
+    let app_state = state.lock().map_err(|e| e.to_string())?;
+    app_state.db.delete_mcp_server(&id)
+}
+
+/// 列出所有已保存的 MCP 服务器配置
+#[tauri::command]
+async fn ai_list_mcp_server_configs(
+    state: State<'_, Mutex<AppState>>,
+) -> Result<Vec<(String, String, String, Option<String>, Option<String>, Option<String>, bool)>, String> {
+    let app_state = state.lock().map_err(|e| e.to_string())?;
+    app_state.db.list_mcp_servers()
+}
+
+/// 重启时自动重连所有已启用的 MCP 服务器
+#[tauri::command]
+async fn ai_reconnect_mcp_servers(
+    state: State<'_, Mutex<AppState>>,
+) -> Result<Vec<String>, String> {
+    let (db, ai_manager) = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        (app_state.db.clone(), app_state.ai_manager.clone())
+    };
+    let rows: Vec<(String, String, String, Option<String>, Option<String>, Option<String>)> = 
+        db.get_enabled_mcp_servers().map_err(|e: String| e)?;
+    let mut results: Vec<String> = Vec::new();
+    for (_id, name, transport, url, command, args) in &rows {
+        match transport.as_str() {
+            "sse" => {
+                if let Some(u) = url {
+                    match ai_manager.mcp_client().connect(name.clone(), u.clone()).await {
+                        Ok(()) => results.push(format!("{}: 已连接", name)),
+                        Err(e) => results.push(format!("{}: 连接失败 - {}", name, e)),
+                    }
+                }
+            }
+            "stdio" => {
+                if let (Some(cmd), Some(args_str)) = (command, args) {
+                    let arg_list: Vec<String> = serde_json::from_str(args_str).unwrap_or_default();
+                    match ai_manager.mcp_client().connect_stdio(name.clone(), cmd.clone(), arg_list).await {
+                        Ok(()) => results.push(format!("{}: 已连接", name)),
+                        Err(e) => results.push(format!("{}: 连接失败 - {}", name, e)),
+                    }
+                }
+            }
+            _ => results.push(format!("{}: 未知传输类型 {}", name, transport)),
+        }
+    }
+    Ok(results)
+}
+
 #[tauri::command]
 async fn ai_list_drafts(state: State<'_, Mutex<AppState>>) -> Result<Vec<ai::types::KbEntry>, String> {
     let ai_manager = {
@@ -1174,7 +1286,7 @@ pub fn run() {
                 ai_manager,
             }));
 
-            // 启动时回填历史笔记到知识库
+            // 启动时同步技能 + 自动重连 MCP 服务器
             let app_handle = app.handle().clone();
             let db_conn_clone = db_conn.clone();
             let skills_dir = workspace.join(".jc9");
@@ -1186,22 +1298,38 @@ pub fn run() {
                     println!("✅ 已同步 {} 个技能到知识库", skill_count);
                 }
 
-                // 2. 回填历史笔记
+                // 2. 自动重连已保存的 MCP 服务器
                 let state = app_handle.state::<Mutex<AppState>>();
-                let (notes, kb) = {
+                let (mcp_configs, mcp_client) = {
                     let guard = state.lock().unwrap();
-                    let notes = guard.db.get_notes(None, false).unwrap_or_default();
-                    let kb = guard.ai_manager.clone();
-                    (notes, kb)
+                    let configs = guard.db.get_enabled_mcp_servers().unwrap_or_default();
+                    let client = guard.ai_manager.mcp_client();
+                    (configs, client.clone())
                 };
-                let mut count = 0usize;
-                for note in &notes {
-                    let entry = note_to_kb_entry(note);
-                    kb.knowledge_base().add_entry(entry).await;
-                    count += 1;
+                for (_, name, transport, url, command, args) in &mcp_configs {
+                    match transport.as_str() {
+                        "sse" => {
+                            if let Some(u) = url {
+                                match mcp_client.connect(name.clone(), u.clone()).await {
+                                    Ok(()) => println!("  🔗 MCP [{}] SSE 已自动重连", name),
+                                    Err(e) => println!("  ⚠️ MCP [{}] 自动重连失败: {}", name, e),
+                                }
+                            }
+                        }
+                        "stdio" => {
+                            if let (Some(cmd), Some(args_str)) = (command, args) {
+                                let arg_list: Vec<String> = serde_json::from_str(args_str).unwrap_or_default();
+                                match mcp_client.connect_stdio(name.clone(), cmd.clone(), arg_list).await {
+                                    Ok(()) => println!("  🔗 MCP [{}] stdio 已自动重连", name),
+                                    Err(e) => println!("  ⚠️ MCP [{}] 自动重连失败: {}", name, e),
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
                 }
-                if count > 0 {
-                    println!("✅ 已回填 {} 条历史笔记到知识库", count);
+                if !mcp_configs.is_empty() {
+                    println!("✅ MCP 服务器自动重连完成 ({} 个)", mcp_configs.len());
                 }
             });
 
@@ -1258,6 +1386,10 @@ pub fn run() {
             ai_list_mcp_servers,
             ai_connect_mcp_stdio,
             ai_disconnect_mcp_server,
+            ai_save_mcp_server_config,
+            ai_delete_mcp_server_config,
+            ai_list_mcp_server_configs,
+            ai_reconnect_mcp_servers,
             ai_list_drafts,
             ai_promote_knowledge,
             ai_update_cost_config,
@@ -1266,6 +1398,8 @@ pub fn run() {
             ai_get_workspace_root,
             ai_update_workspace_root,
             ai_select_workspace_dialog,
+            ai_register_frontend_tool,
+            ai_submit_frontend_tool_result,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
