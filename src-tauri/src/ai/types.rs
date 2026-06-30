@@ -122,6 +122,8 @@ pub struct WorkerState {
     pub last_active: DateTime<Utc>,
     pub token_count: u64,
     pub cow_path: Option<String>,
+    pub history: Vec<ReActStep>,
+    pub termination_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

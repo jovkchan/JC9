@@ -5,7 +5,8 @@ import { useStatusStore } from '@/stores/status'
 import { useAiStore } from '@/stores/ai'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import type { TaskNode, WorkerState, ApprovalRequest } from '@/types/ai'
+import type { WorkerState, ApprovalRequest } from '@/types/ai'
+import { getRole, loadAllRoles, type AgentRole } from '@/config/roles'
 
 const notesStore = useNotesStore()
 const status = useStatusStore()
@@ -16,6 +17,8 @@ interface Message {
   role: 'user' | 'assistant' | 'system'
   content: string
   modelName?: string
+  roleName?: string
+  roleIcon?: string
 }
 
 const messages = ref<Message[]>([
@@ -32,10 +35,54 @@ const enableAgentMode = ref(false)
 const reasoningEffort = ref<'high' | 'max' | 'off'>('high')
 const isFocused = ref(false)
 
+// ── AI 角色切换与智能路由 ──
+const activeChatRoleId = ref('auto')
+const chatRolesList = ref<AgentRole[]>([])
+
+const activeChatRole = computed(() => {
+  if (activeChatRoleId.value === 'auto') {
+    return { id: 'auto', name: '智能路由', icon: '🤖', description: '根据提问内容自动选择最适合的角色', systemPrompt: '' }
+  }
+  return chatRolesList.value.find(r => r.id === activeChatRoleId.value) || { id: 'auto', name: '智能路由', icon: '🤖', description: '', systemPrompt: '' }
+})
+
 // ── AI Agent Store ──
 const pollTimer = ref<number | null>(null)
 const manualPath = ref('')
-const showSettings = ref(false)
+const showModelSettingsModal = ref(false)
+const isConsoleExpanded = ref(true)
+const expandedWorkers = ref<Record<string, boolean>>({})
+
+function toggleWorkerExpand(workerId: string) {
+  expandedWorkers.value[workerId] = !expandedWorkers.value[workerId]
+}
+
+function getTaskTitle(taskId: string): string {
+  const task = ai.taskTree.find(t => t.id === taskId)
+  return task ? task.title : '未命名任务'
+}
+
+function getWorkerRole(taskId: string) {
+  const task = ai.taskTree.find(t => t.id === taskId)
+  return getRole(task?.assignedWorker)
+}
+
+function formatTime(timestampStr: string): string {
+  if (!timestampStr) return ''
+  try {
+    const d = new Date(timestampStr)
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  } catch {
+    return timestampStr
+  }
+}
+
+async function handleKillAllWorkers() {
+  for (const w of ai.activeWorkers) {
+    await ai.killWorker(w.id)
+  }
+}
+
 const localConfig = ref({
   inputCachedCostPerM: 0.025,
   inputUncachedCostPerM: 3.0,
@@ -503,10 +550,138 @@ function extractTerms(query: string): string[] {
   return Array.from(new Set(terms))
 }
 
+async function handleCreateNoteFromAi(text: string) {
+  // 1. 检测是否包含 URL 链接
+  const urlRegex = /(https?:\/\/[^\s]+)/gi
+  const urlMatch = text.match(urlRegex)
+  let contentText = ""
+
+  sending.value = true
+  messages.value.push({ role: 'user', content: text })
+  userInput.value = ''
+  scrollToBottom()
+
+  const currentModel = aiModel.value || 'Default Model'
+  messages.value.push({ role: 'assistant', content: '🤖 正在分析您的笔记生成请求，请稍候...', modelName: currentModel })
+  const aiMsgIndex = messages.value.length - 1
+
+  if (urlMatch && urlMatch[0]) {
+    const url = urlMatch[0]
+    messages.value[aiMsgIndex].content = `🔍 检测到网页链接: \`${url}\`，正在尝试抓取网页内容...`
+    try {
+      const html = await invoke<string>('fetch_url_html', { url })
+      const doc = new DOMParser().parseFromString(html, 'text/html')
+      doc.querySelectorAll('script, style, meta, link, header, footer, nav, iframe').forEach(el => el.remove())
+      contentText = doc.body.innerText.replace(/\s+/g, ' ').slice(0, 12000)
+      if (!contentText.trim()) {
+        throw new Error("抓取到的网页正文内容为空。")
+      }
+      messages.value[aiMsgIndex].content = `📥 网页内容抓取成功（约 ${contentText.length} 字符），正在调用 AI 智能生成总结笔记...`
+    } catch (e: any) {
+      messages.value[aiMsgIndex].content = `❌ 网页抓取失败: ${e.message || e}。\n我们将跳过网页抓取，直接根据您提供的信息生成笔记。`
+    }
+  }
+
+  // 2. 构造 Prompt
+  let prompt = ""
+  if (contentText) {
+    prompt = `用户指令：“${text}”\n\n抓取到的网页网页内容如下：\n${contentText}\n\n请根据以上网页内容，提取核心要点并整理出一篇结构清晰、排版优美并具有清晰层级的 Markdown 备忘笔记。
+请必须仅输出一个符合以下 JSON 格式的字符串，不要包含任何 markdown 标志（如 \`\`\`json）：
+{
+  "title": "网页核心主题标题",
+  "content": "# 标题\\n\\n## 概述\\n...内容详情...\\n使用 Markdown 格式。",
+  "tags": ["标签1", "标签2"]
+}`
+  } else {
+    // 提取历史聊天记录
+    const historyText = messages.value
+      .slice(0, -2) // 排除掉刚发送的 user 提问和当前的 assistant 提示气泡
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .map(m => `${m.role === 'user' ? '用户' : 'AI助理'}: ${m.content}`)
+      .join('\n\n')
+
+    prompt = `用户指令：“${text}”\n\n当前对话的历史上下文如下：\n${historyText || '无上下文历史。'}\n\n请根据以上历史对话内容（如有），结合您的知识库，提取核心要点并整理出一篇结构清晰、排版优美并具有清晰层级的 Markdown 备忘笔记。
+请必须仅输出一个符合以下 JSON 格式的字符串，不要包含任何 markdown 标志（如 \`\`\`json）：
+{
+  "title": "本篇对话核心主题标题",
+  "content": "# 标题\\n\\n## 对话要点总结\\n...内容详情...\\n使用 Markdown 格式。",
+  "tags": ["标签1", "标签2"]
+}`
+  }
+
+  // 3. 呼叫大模型
+  let responseText = ''
+  try {
+    const promptMsgs: Message[] = [
+      { role: 'system', content: '你是一个专业的 Markdown 笔记整理专家。请必须按指定的 JSON 格式输出生成的笔记标题、正文 and 标签列表。不要输出任何 JSON 之外的多余内容或 markdown 围栏。' },
+      { role: 'user', content: prompt }
+    ]
+
+    await callAiStream(promptMsgs, (chunk) => {
+      responseText += chunk
+      messages.value[aiMsgIndex].content = `✍️ 正在流式接收并生成笔记中...\n\n${responseText.slice(0, 1000)}${responseText.length > 1000 ? '...' : ''}`
+    })
+
+    // 解析 JSON
+    const cleanedJson = responseText
+      .trim()
+      .replace(/^```json\s*/i, '')
+      .replace(/```$/, '')
+      .trim()
+
+    let parsed: any
+    try {
+      parsed = JSON.parse(cleanedJson)
+    } catch (err) {
+      // 容错处理：如果未能直接输出 JSON，尝试提取中间的 JSON 串
+      const match = cleanedJson.match(/\{[\s\S]*\}/)
+      if (match) {
+        parsed = JSON.parse(match[0])
+      } else {
+        throw err
+      }
+    }
+
+    if (parsed.title && parsed.content) {
+      // 创建笔记
+      const newNote = await notesStore.createNote({
+        title: parsed.title,
+        content: parsed.content,
+        format: 'markdown',
+        visibility: 'PRIVATE',
+        groupId: null,
+        tags: parsed.tags || []
+      })
+
+      if (newNote) {
+        messages.value[aiMsgIndex].content = `🎉 **本地备忘笔记已自动生成并保存成功！**\n\n- **标题**：${parsed.title}\n- **分类标签**：${(parsed.tags || []).map((t: string) => '#' + t).join(' ')}\n\n*系统已为您自动在左侧开启该笔记编辑 Tab，您可以直接查看或做进一步润色。*`
+        notesStore.openNoteTab(newNote.id)
+      } else {
+        messages.value[aiMsgIndex].content = `❌ 笔记整理完毕，但保存至本地 SQLite 数据库失败，请检查终端日志。`
+      }
+    } else {
+      messages.value[aiMsgIndex].content = `❌ 笔记生成失败。大模型未按预期返回 \`title\` 或 \`content\` 字段。\n\n大模型原始回复如下：\n\`\`\`\n${responseText}\n\`\`\``
+    }
+  } catch (e: any) {
+    console.error('笔记生成失败:', e)
+    messages.value[aiMsgIndex].content = `❌ 整理笔记失败: ${e.message || e}\n\n大模型原始回复：\n${responseText || '（无响应）'}`
+  } finally {
+    sending.value = false
+    scrollToBottom()
+  }
+}
+
 // ── 发送消息（智能 RAG 感知 + Agent 自动管道）──
 async function sendMessage() {
   const text = userInput.value.trim()
   if (!text || sending.value) return
+
+  // 检查是否匹配写/总结笔记意图
+  const writeNoteKeywords = /总结.*到笔记|总结一下.*添加.*笔记|添加.*笔记|归纳.*到笔记|总结.*添加到笔记|生成.*笔记/i
+  if (writeNoteKeywords.test(text)) {
+    await handleCreateNoteFromAi(text)
+    return
+  }
 
   // Agent 模式：自动触发任务规划+Worker 管道
   if (enableAgentMode.value) {
@@ -524,55 +699,115 @@ async function doSendMessage(text: string) {
   scrollToBottom()
 
   let systemPromptStr = ''
+  let promptInstruction = ''
+  const userQuery = text.toLowerCase()
+  const hasNoteKeywords = /笔记|备忘|文档|知识|记录|草稿|我的/.test(userQuery)
+  const shouldRetrieve = enableLocalKb.value || hasNoteKeywords
 
-  if (enableLocalKb.value) {
+  if (shouldRetrieve) {
     await notesStore.loadAllNotes()
-    const userQuery = text.toLowerCase()
     const activeNotes = notesStore.notes.filter(n => !n.isDeleted && !n.isArchived)
-    const terms = extractTerms(userQuery)
-    const titleMatched = activeNotes.filter(n => n.title && (userQuery.includes(n.title.toLowerCase()) || n.title.toLowerCase().includes(userQuery)))
-
-    const scored = activeNotes.map(n => {
-      let score = 0
-      const titleLower = (n.title || '').toLowerCase()
-      const contentLower = (n.content || '').toLowerCase()
-
-      if (titleLower && (userQuery.includes(titleLower) || titleLower.includes(userQuery))) {
-        score += 150
-      }
-      n.tags.forEach(t => {
-        if (userQuery.includes(t.toLowerCase())) score += 50
-      })
-      terms.forEach(term => {
-        if (titleLower && titleLower.includes(term)) score += term.length * 30
-        if (contentLower && contentLower.includes(term)) score += term.length * 8
-        n.tags.forEach(t => {
-          if (t.toLowerCase().includes(term)) score += term.length * 15
-        })
-      })
-      return { note: n, score }
-    })
-
-    const isSummaryRequest = /汇总|所有|全部|概括|总结我|整理我/.test(userQuery)
-    let contextNotes = scored.filter(x => x.score > 0).map(x => x.note)
     
-    if (contextNotes.length === 0 || isSummaryRequest) {
-      contextNotes = activeNotes.slice(0, 40)
-    } else if (titleMatched.length > 0) {
-      contextNotes = Array.from(new Set([...titleMatched, ...contextNotes])).slice(0, 10)
+    // 如果是宽泛的“查看笔记/所有笔记/有哪些笔记”指令，我们直接把最近修改的 15 篇笔记的标题和摘要组装进 Prompt
+    const isListNotesRequest = /查看笔记|列出笔记|有什么笔记|所有笔记|我的笔记|有哪些笔记|有哪些文档|有什么备忘|找下笔记/.test(userQuery)
+
+    if (isListNotesRequest) {
+      const sortedRecent = [...activeNotes].sort((a, b) => {
+        const tA = new Date(a.updatedAt || a.createdAt).getTime()
+        const tB = new Date(b.updatedAt || b.createdAt).getTime()
+        return tB - tA
+      }).slice(0, 15)
+      
+      const listText = sortedRecent.map((n, idx) => {
+        const brief = n.content ? (n.content.slice(0, 80) + (n.content.length > 80 ? '...' : '')) : '无内容'
+        return `${idx + 1}. 【${n.title || '无标题'}】(更新于: ${n.updatedAt || n.createdAt}) - 简述: ${brief}`
+      }).join('\n')
+      
+      promptInstruction = `\n[系统感知] 用户提出了查看或列出其笔记的请求。以下是用户最近更新的 15 篇笔记列表摘要：\n${listText}\n请直接向用户展现此列表，并温柔、主动地询问用户想要详细阅读或处理哪一篇。\n`
     } else {
-      contextNotes = scored.sort((a, b) => b.score - a.score).map(x => x.note).slice(0, 10)
+      // 正常的关键词检索
+      const terms = extractTerms(userQuery)
+      const titleMatched = activeNotes.filter(n => n.title && (userQuery.includes(n.title.toLowerCase()) || n.title.toLowerCase().includes(userQuery)))
+  
+      const scored = activeNotes.map(n => {
+        let score = 0
+        const titleLower = (n.title || '').toLowerCase()
+        const contentLower = (n.content || '').toLowerCase()
+  
+        if (titleLower && (userQuery.includes(titleLower) || titleLower.includes(userQuery))) {
+          score += 150
+        }
+        n.tags.forEach(t => {
+          if (userQuery.includes(t.toLowerCase())) score += 50
+        })
+        terms.forEach(term => {
+          if (titleLower && titleLower.includes(term)) score += term.length * 30
+          if (contentLower && contentLower.includes(term)) score += term.length * 8
+          n.tags.forEach(t => {
+            if (t.toLowerCase().includes(term)) score += term.length * 15
+          })
+        })
+        return { note: n, score }
+      })
+  
+      const isSummaryRequest = /汇总|所有|全部|概括|总结我|整理我/.test(userQuery)
+      let contextNotes = scored.filter(x => x.score > 0).map(x => x.note)
+      
+      if (contextNotes.length === 0 || isSummaryRequest) {
+        contextNotes = activeNotes.slice(0, 10)
+      } else if (titleMatched.length > 0) {
+        contextNotes = Array.from(new Set([...titleMatched, ...contextNotes])).slice(0, 5)
+      } else {
+        contextNotes = scored.sort((a, b) => b.score - a.score).map(x => x.note).slice(0, 5)
+      }
+  
+      const referenceText = contextNotes
+        .map(n => `[笔记标题: ${n.title || '无标题'}, 更新时间: ${n.updatedAt || n.createdAt}]\n内容:\n${n.content}`)
+        .join('\n\n---\n\n')
+  
+      promptInstruction = referenceText
+        ? `\n以下是用户本地笔记库中相关的笔记供参考：\n${referenceText}\n请结合这些参考笔记直接且简洁地回答用户的问题，如果有相关内容可进行引用或说明。\n`
+        : '\n未找到明确相关的本地笔记内容。请正常回答用户，或告诉用户您的本地笔记库中目前可能还没有相关内容。\n'
     }
 
-    const referenceText = contextNotes
-      .map(n => `[笔记标题: ${n.title || '无标题'}, 更新时间: ${n.updatedAt || n.createdAt}]\n内容:\n${n.content}`)
-      .join('\n\n---\n\n')
-
-    systemPromptStr = `你是通用 AI 助手。以下是用户本地笔记库中相关的笔记供参考：
-${referenceText ? `\n${referenceText}\n` : ''}
-请直接回答用户的问题，有笔记相关内容时可引用，但不强制。`
+    systemPromptStr = `你是通用 AI 助手，也是用户的本地备忘笔记助理。${promptInstruction}请直接、友好地回答用户。`
   } else {
     systemPromptStr = '你是一个通用 AI 助手。请直接、简洁地回答用户的问题。不要说"作为XX助手"之类的话，直接回答问题即可。'
+  }
+
+  // ── 根据选定角色或智能路由匹配专属提示词 ──
+  let matchedRole: AgentRole | null = null
+  if (activeChatRoleId.value === 'auto') {
+    const rolesListStr = chatRolesList.value
+      .map(r => `- ${r.id} (${r.name} - ${r.description})`)
+      .join('\n')
+
+    // 训练大模型作为“天才调度员”，让其自适应分析并选择最适合解答此问题的专家身份
+    systemPromptStr = `你是一个极其聪明的天才协调官与首席调度专家（Master Planner & Router）。
+根据用户的提问，你需要从以下角色列表中，选择一个最适合且最专业地解答当前问题的角色：
+${rolesListStr}
+
+【重要输出指令】
+你必须在回答的最开始第一行，按照以下指定格式标注你本次判定并决定担任的角色：
+选择角色：[前端工程师]
+
+接着换行，并以你选定的角色的专业设定、知识视角和专属工作准则去深入、精彩地解答用户的问题。如果在角色列表中未找到绝对对口的角色，第一行请标注：
+选择角色：[通用助手]
+然后再正式作答。`
+
+    if (enableLocalKb.value && promptInstruction) {
+      systemPromptStr += `\n\n以下是用户本地笔记库中相关的参考内容，如有需要请结合您所扮演角色的视角进行参考：\n${promptInstruction}`
+    }
+  } else {
+    matchedRole = chatRolesList.value.find(r => r.id === activeChatRoleId.value) || null
+    if (matchedRole) {
+      console.log(`🤖 [AI角色路由] 当前对话分配角色: ${matchedRole.name}`)
+      let roleInstructions = `${matchedRole.systemPrompt}\n\n当前任务：请以该角色的专业设定与视角，协助解答用户的问题。`
+      if (enableLocalKb.value && promptInstruction) {
+        roleInstructions += `\n${promptInstruction}`
+      }
+      systemPromptStr = roleInstructions
+    }
   }
 
   if (enableDeepThink.value) {
@@ -582,7 +817,7 @@ ${referenceText ? `\n${referenceText}\n` : ''}
 
   const promptMsgs: Message[] = [
     { role: 'system', content: systemPromptStr },
-    ...messages.value.filter(m => m.role === 'user' || m.role === 'assistant').slice(0, -1)
+    ...messages.value.filter(m => m.role === 'user' || m.role === 'assistant')
   ]
 
   // 🔍 完整调试日志
@@ -595,12 +830,46 @@ ${referenceText ? `\n${referenceText}\n` : ''}
   console.groupEnd()
 
   const currentModel = aiModel.value || 'Default Model'
-  messages.value.push({ role: 'assistant', content: '', modelName: currentModel })
+  const isAuto = activeChatRoleId.value === 'auto'
+  messages.value.push({ 
+    role: 'assistant', 
+    content: '', 
+    modelName: currentModel,
+    roleName: isAuto ? undefined : activeChatRole.value.name
+  })
   const aiMsgIndex = messages.value.length - 1
 
   try {
+    let receivedHeader = false
+    let currentContent = ''
     await callAiStream(promptMsgs, (chunk) => {
-      messages.value[aiMsgIndex].content += chunk
+      currentContent += chunk
+      
+      // 检测并解析首行的 "选择角色：[前端工程师]"
+      if (!receivedHeader && activeChatRoleId.value === 'auto') {
+        const firstLineEnd = currentContent.indexOf('\n')
+        const line = firstLineEnd !== -1 ? currentContent.slice(0, firstLineEnd) : currentContent
+        if (line.includes('选择角色：')) {
+          const match = line.match(/选择角色：\[(.*?)\]/)
+          if (match && match[1]) {
+            messages.value[aiMsgIndex].roleName = match[1].trim()
+            receivedHeader = true
+          }
+        }
+      }
+
+      // 过滤掉第一行 "选择角色：[xxx]" 在 UI 的渲染
+      let displayContent = currentContent
+      if (activeChatRoleId.value === 'auto' && displayContent.includes('选择角色：')) {
+        const firstLineEnd = displayContent.indexOf('\n')
+        if (firstLineEnd !== -1) {
+          displayContent = displayContent.slice(firstLineEnd).trimStart()
+        } else {
+          displayContent = ''
+        }
+      }
+
+      messages.value[aiMsgIndex].content = displayContent
       scrollToBottom()
     })
   } catch (e: any) {
@@ -738,8 +1007,9 @@ async function sendAgentMessage(text: string) {
       addAgentBubble(`✅ 已规划 **${tasks.length}** 个子任务：\n${list}`)
       for (const task of tasks) {
         if (task.status === 'pending') {
-          addAgentBubble(`🚀 启动 Worker：「${task.title}」...`)
-          const sp = `你是一个专业的代码助手，使用 ReAct 模式。任务：${task.description}`
+          const role = getRole(task.assignedWorker)
+          addAgentBubble(`🚀 启动 Worker：「${task.title}」... [分配角色: ${role.icon} ${role.name}]`)
+          const sp = `${role.systemPrompt}\n\n当前任务描述及 ReAct 要求：${task.description}`
           await ai.spawnWorker(ai.currentSessionId!, task, sp)
         }
       }
@@ -794,10 +1064,6 @@ async function handleDenyAll() {
   }
 }
 
-async function handlePromote(entryId: string) {
-  await ai.promoteKnowledge(entryId)
-}
-
 async function handleKillWorker(workerId: string) {
   await ai.killWorker(workerId)
 }
@@ -805,11 +1071,6 @@ async function handleKillWorker(workerId: string) {
 async function handleSelectWorkspace() {
   await ai.changeWorkspaceDialog()
   manualPath.value = ai.workspaceRoot
-}
-
-async function handleManualWorkspace() {
-  if (!manualPath.value.trim()) return
-  await ai.changeWorkspaceManual(manualPath.value.trim())
 }
 
 function startPolling() {
@@ -848,6 +1109,7 @@ watch(() => ai.drafts, (newDrafts) => {
 onMounted(async () => {
   loadCustomModels()
   loadConfig()
+  chatRolesList.value = loadAllRoles()
   // 只在 notes-ai-models 中有 ollama/vllm 配置时才拉取
   let hasOllama = false, hasVllm = false
   const saved = localStorage.getItem('notes-ai-models')
@@ -894,60 +1156,6 @@ onUnmounted(() => {
   }
 })
 
-const newSessionTitle = ref('')
-const plannerInput = ref('')
-
-async function handleCreateSession() {
-  const title = newSessionTitle.value.trim()
-  if (!title) return
-  const id = await ai.createSession(title)
-  if (id) {
-    newSessionTitle.value = ''
-    status.pushMessage('会话创建成功', 'success')
-  }
-}
-
-async function handlePlanTask() {
-  if (!ai.currentSessionId) {
-    status.pushMessage('请先选择或创建一个 Agent 会话', 'warn')
-    return
-  }
-  const request = plannerInput.value.trim()
-  if (!request) return
-  sending.value = true
-  try {
-    addAgentBubble('🧠 正在分析并拆解任务...')
-    const tasks = await ai.planTask(ai.currentSessionId, request)
-    if (tasks.length > 0) {
-      plannerInput.value = ''
-      const list = tasks.map(t => `  • **${t.title}** _(${statusLabel(t.status)})_`).join('\n')
-      addAgentBubble(`✅ 已规划 **${tasks.length}** 个子任务：\n${list}`)
-    } else {
-      addAgentBubble('⚠️ 任务规划返回空，请尝试更具体的描述。')
-    }
-  } catch (e: any) {
-    status.pushMessage(`规划任务失败: ${e.message}`, 'error')
-  } finally {
-    sending.value = false
-  }
-}
-
-async function handleStartTaskWorker(task: TaskNode) {
-  if (!ai.currentSessionId) return
-  addAgentBubble(`🚀 启动 Worker 执行任务：「${task.title}」...`)
-  const systemPrompt = `你是一个专业的代码助手，使用 ReAct 模式。任务：${task.description}`
-  try {
-    await invoke('ai_configure_llm', {
-      provider: aiProvider.value,
-      apiKey: aiApiKey.value,
-      baseUrl: aiEndpoint.value,
-      model: aiModel.value,
-    })
-    await ai.spawnWorker(ai.currentSessionId, task, systemPrompt)
-  } catch (e: any) {
-    status.pushMessage(`启动 Worker 失败: ${e.message}`, 'error')
-  }
-}
 </script>
 
 <template>
@@ -955,10 +1163,119 @@ async function handleStartTaskWorker(task: TaskNode) {
     <!-- 左侧：问答与聊天主面板 -->
     <div class="ai-chat-section">
       <div class="ai-chat-area">
+        <!-- Cline 风格智能体控制台 (聊天区域顶部) -->
+        <div class="cline-agent-console" v-if="ai.workers.length > 0">
+          <div class="console-header" @click="isConsoleExpanded = !isConsoleExpanded">
+            <div class="console-title">
+              <span class="console-icon">🤖</span>
+              <span>智能开发控制台</span>
+              <span class="console-badge" v-if="ai.activeWorkers.length > 0">
+                {{ ai.activeWorkers.length }} 个活跃代理
+              </span>
+              <span class="console-badge completed" v-else>
+                运行结束
+              </span>
+            </div>
+            <div class="console-actions">
+              <button 
+                v-if="ai.activeWorkers.length > 0" 
+                class="console-btn kill-all" 
+                @click.stop="handleKillAllWorkers"
+              >
+                ✕ 全部强杀
+              </button>
+              <span class="chevron-icon" :class="{ rotated: isConsoleExpanded }">▼</span>
+            </div>
+          </div>
+          
+          <div class="console-body" v-show="isConsoleExpanded">
+            <div v-for="w in ai.workers" :key="w.id" class="agent-card" :class="w.status">
+              <div class="agent-card-header" @click="toggleWorkerExpand(w.id)">
+                <div class="agent-info">
+                  <span class="agent-dot" :style="{ background: statusColors[w.status] }"></span>
+                  <span class="agent-role-badge" :title="getWorkerRole(w.taskId).description">
+                    {{ getWorkerRole(w.taskId).icon }} {{ getWorkerRole(w.taskId).name }}
+                  </span>
+                  <span class="agent-name">Worker-{{ w.id.slice(0, 8) }}</span>
+                  <span class="agent-task-title" :title="getTaskTitle(w.taskId)">
+                    「{{ getTaskTitle(w.taskId) }}」
+                  </span>
+                  <span class="agent-status-label" :style="{ color: statusColors[w.status] }">
+                    {{ statusLabel(w.status) }}
+                  </span>
+                </div>
+                <div class="agent-actions">
+                  <span class="agent-stats">
+                    Cost: ¥{{ (w.tokenCount * 0.000005).toFixed(4) }} ({{ w.toolCallCount }} 工具)
+                  </span>
+                  <button 
+                    v-if="w.status !== 'completed' && w.status !== 'failed' && w.status !== 'killed'"
+                    class="agent-kill-btn" 
+                    @click.stop="handleKillWorker(w.id)"
+                  >
+                    终止
+                  </button>
+                  <span class="chevron-icon" :class="{ rotated: expandedWorkers[w.id] }">▼</span>
+                </div>
+              </div>
+              
+              <div class="agent-card-body" v-show="expandedWorkers[w.id]">
+                <!-- ReAct 详细轨迹 -->
+                <div class="agent-history-log">
+                  <div v-for="step in w.history" :key="step.iteration" class="log-step">
+                    <div class="step-header">
+                      <span class="step-num">#{{ step.iteration }} 轮迭代</span>
+                      <span class="step-time">{{ formatTime(step.timestamp) }}</span>
+                    </div>
+                    
+                    <div class="step-section thought" v-if="step.thought">
+                      <div class="section-title">🧠 Thought</div>
+                      <pre class="section-content">{{ step.thought }}</pre>
+                    </div>
+                    
+                    <div class="step-section action" v-if="step.action">
+                      <div class="section-title">🔧 Call Tool: <code>{{ step.action.toolName }}</code></div>
+                      <div class="tool-args" v-if="step.action.arguments && Object.keys(step.action.arguments).length > 0">
+                        <strong>参数:</strong> <code>{{ JSON.stringify(step.action.arguments) }}</code>
+                      </div>
+                    </div>
+                    
+                    <div class="step-section observation" v-if="step.observation">
+                      <div class="section-title">👁️ Observation</div>
+                      <pre class="section-content">{{ step.observation }}</pre>
+                    </div>
+                  </div>
+                  
+                  <div class="log-current" v-if="w.currentThought && w.status !== 'completed' && w.status !== 'failed' && w.status !== 'killed'">
+                    <div class="step-header">
+                      <span class="step-num">正在执行/思考中...</span>
+                    </div>
+                    <div class="step-section thought">
+                      <pre class="section-content">{{ w.currentThought }}</pre>
+                    </div>
+                  </div>
+
+                  <div class="log-failed-reason" v-if="w.terminationReason">
+                    <div class="failed-reason-title">❌ 终止原因 / 异常信息</div>
+                    <pre class="failed-reason-content">{{ w.terminationReason }}</pre>
+                  </div>
+                  
+                  <div class="log-empty" v-if="(!w.history || w.history.length === 0) && !w.currentThought">
+                    暂无迭代历史日志
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- 消息滚动列表 -->
         <div class="chat-messages">
           <div v-for="(msg, i) in messages" :key="i" :class="['chat-bubble', msg.role]">
             <div class="bubble-sender">
+              <span v-if="msg.roleName" class="bubble-role-badge">
+                {{ msg.roleName }}
+              </span>
               {{ msg.role === 'user' ? '您' : (msg.role === 'system' ? '系统' : (msg.modelName || 'AI Copilot')) }}
             </div>
             <div class="bubble-content" v-html="msg.content.replace(/\n/g, '<br/>')"></div>
@@ -998,7 +1315,7 @@ async function handleStartTaskWorker(task: TaskNode) {
                 </svg>
                 <select v-model="selectedCombinedModel" @change="handleModelChange" class="ds-pill-select" title="切换 AI 模型">
                   <optgroup v-for="(models, providerName) in modelOptions" :key="providerName" :label="providerName">
-                    <option v-for="m in models" :key="m.name" :value="providerName.toLowerCase() + '/' + m.name">
+                    <option v-for="m in models" :key="m.name" :value="m.id">
                       {{ m.label }}
                     </option>
                   </optgroup>
@@ -1025,7 +1342,21 @@ async function handleStartTaskWorker(task: TaskNode) {
                   </svg>
                 </button>
               </div>
- <!-- DS 思维强度（仅 DS 模型显示） -->
+
+              <!-- AI 角色选择 / 智能体团队状态 -->
+              <div v-if="!enableAgentMode" class="ds-pill-select-wrap">
+                <select v-model="activeChatRoleId" class="ds-pill-select" style="max-width:92px" title="切换当前对话角色">
+                  <option value="auto">智能路由</option>
+                  <option v-for="r in chatRolesList" :key="r.id" :value="r.id">
+                    {{ r.name }}
+                  </option>
+                </select>
+              </div>
+              <div v-else class="ds-pill-select-wrap" style="color: var(--jc-color-accent); font-weight: bold; border-color: rgba(138, 88, 255, 0.3)">
+                <span class="ds-pill-text" style="font-size:10.5px;padding: 0 4px">智能体团队 (多角色协同)</span>
+              </div>
+
+              <!-- DS 思维强度（仅 DS 模型显示） -->
               <div v-if="aiProvider === 'deepseek'" class="ds-pill-select-wrap" style="gap:4px">
                 
                 <select v-model="reasoningEffort" @change="setReasoningEffort(reasoningEffort)" class="ds-pill-select" style="max-width:56px;font-size:10px" title="思维强度">
@@ -1113,22 +1444,6 @@ async function handleStartTaskWorker(task: TaskNode) {
             </div>
           </div>
         </div>
-
-        <!-- 极简活跃智能体进程状态栏 -->
-        <Transition name="fade-slide">
-          <div class="active-agents-ticker" v-if="ai.activeWorkers.length > 0">
-            <div v-for="w in ai.activeWorkers" :key="w.id" class="ticker-item">
-              <span class="ticker-dot" :style="{ background: statusColors[w.status] }"></span>
-              <span class="ticker-text">
-                <span class="ticker-worker-name">Worker-{{ w.id.slice(0, 8) }}</span>
-                <span class="ticker-worker-status">{{ statusLabel(w.status) }}</span>:
-                <span class="ticker-thought" v-if="w.currentThought">{{ w.currentThought }}</span>
-                <span class="ticker-thought" v-else>正在分配/思考中...</span>
-              </span>
-              <button class="ticker-kill-btn" @click="handleKillWorker(w.id)" title="强制终止">✕ 强杀</button>
-            </div>
-          </div>
-        </Transition>
       </div>
     </div>
 
@@ -1193,6 +1508,326 @@ async function handleStartTaskWorker(task: TaskNode) {
   gap: 12px;
 }
 
+/* Cline 风格智能体控制台 */
+.cline-agent-console {
+  background: var(--jc-bg-panel);
+  border: 1px solid var(--jc-border-default);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 4px;
+  display: flex;
+  flex-direction: column;
+  max-height: 280px;
+  flex-shrink: 0;
+
+  .console-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background: var(--jc-bg-input);
+    cursor: pointer;
+    border-bottom: 1px solid var(--jc-border-default);
+    user-select: none;
+
+    &:hover {
+      background: var(--jc-bg-hover);
+    }
+  }
+
+  .console-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--jc-text-highlight);
+
+    .console-icon {
+      font-size: 14px;
+    }
+
+    .console-badge {
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 10px;
+      background: rgba(138, 88, 255, 0.15);
+      color: var(--jc-color-accent);
+      font-weight: 500;
+
+      &.completed {
+        background: rgba(63, 185, 80, 0.15);
+        color: #3fb950;
+      }
+    }
+  }
+
+  .console-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+
+    .console-btn.kill-all {
+      background: rgba(248, 81, 73, 0.1);
+      border: 1px solid rgba(248, 81, 73, 0.3);
+      color: #f85149;
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: 500;
+
+      &:hover {
+        background: #f85149;
+        color: #fff;
+      }
+    }
+  }
+
+  .chevron-icon {
+    font-size: 8px;
+    color: var(--jc-text-secondary);
+    transition: transform 0.2s;
+
+    &.rotated {
+      transform: rotate(180deg);
+    }
+  }
+
+  .console-body {
+    overflow-y: auto;
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background: var(--jc-bg-panel);
+
+    &::-webkit-scrollbar {
+      width: 4px;
+    }
+    &::-webkit-scrollbar-thumb {
+      background: var(--jc-border-default);
+      border-radius: 2px;
+    }
+  }
+
+  .agent-card {
+    border: 1px solid var(--jc-border-default);
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--jc-bg-input);
+
+    &.thinking { border-left: 3px solid #58a6ff; }
+    &.acting { border-left: 3px solid #f0883e; }
+    &.observing { border-left: 3px solid #a371f7; }
+    &.waitingApproval { border-left: 3px solid #d29922; }
+    &.completed { border-left: 3px solid #3fb950; opacity: 0.85; }
+    &.failed { border-left: 3px solid #f85149; }
+    &.killed { border-left: 3px solid #8b949e; opacity: 0.75; }
+
+    .agent-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 10px;
+      cursor: pointer;
+      font-size: 11px;
+      user-select: none;
+
+      &:hover {
+        background: var(--jc-bg-hover);
+      }
+    }
+
+    .agent-info {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+
+      .agent-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+
+      .agent-role-badge {
+        font-size: 10px;
+        padding: 1px 6px;
+        background: rgba(var(--jc-color-accent-rgb, 138, 88, 255), 0.1);
+        border: 1px solid rgba(var(--jc-color-accent-rgb, 138, 88, 255), 0.2);
+        color: var(--jc-color-accent);
+        border-radius: 4px;
+        font-weight: 500;
+        white-space: nowrap;
+      }
+
+      .agent-name {
+        font-weight: 600;
+        color: var(--jc-text-primary);
+        font-family: monospace;
+      }
+
+      .agent-task-title {
+        color: var(--jc-text-secondary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 150px;
+      }
+
+      .agent-status-label {
+        font-weight: 500;
+        font-size: 10px;
+      }
+    }
+
+    .agent-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+
+      .agent-stats {
+        font-size: 10px;
+        color: var(--jc-text-secondary);
+      }
+
+      .agent-kill-btn {
+        background: transparent;
+        border: 1px solid var(--jc-border-default);
+        color: var(--jc-text-secondary);
+        font-size: 9px;
+        padding: 1px 4px;
+        border-radius: 3px;
+        cursor: pointer;
+
+        &:hover {
+          background: rgba(248, 81, 73, 0.1);
+          border-color: #f85149;
+          color: #f85149;
+        }
+      }
+    }
+
+    .agent-card-body {
+      border-top: 1px solid var(--jc-border-default);
+      background: var(--jc-bg-panel);
+      padding: 8px;
+    }
+
+    .agent-history-log {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      max-height: 200px;
+      overflow-y: auto;
+      font-family: monospace;
+      font-size: 10.5px;
+      padding-right: 4px;
+
+      &::-webkit-scrollbar {
+        width: 3px;
+      }
+      &::-webkit-scrollbar-thumb {
+        background: var(--jc-border-default);
+        border-radius: 1.5px;
+      }
+    }
+
+    .log-step {
+      border-bottom: 1px dashed var(--jc-border-default);
+      padding-bottom: 8px;
+      
+      &:last-child {
+        border-bottom: none;
+        padding-bottom: 0;
+      }
+    }
+
+    .step-header {
+      display: flex;
+      justify-content: space-between;
+      color: var(--jc-text-secondary);
+      margin-bottom: 4px;
+      font-size: 10px;
+
+      .step-num {
+        font-weight: bold;
+        color: var(--jc-color-accent);
+      }
+    }
+
+    .step-section {
+      margin-top: 4px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+
+      .section-title {
+        font-weight: 600;
+        color: var(--jc-text-primary);
+        font-size: 10.5px;
+      }
+
+      .section-content {
+        margin: 0;
+        padding: 4px 6px;
+        background: var(--jc-bg-input);
+        border: 1px solid var(--jc-border-default);
+        border-radius: 4px;
+        white-space: pre-wrap;
+        word-break: break-all;
+        color: var(--jc-text-primary);
+        max-height: 100px;
+        overflow-y: auto;
+      }
+    }
+
+    .log-current {
+      padding-top: 4px;
+      .step-num {
+        color: #58a6ff;
+        animation: pulse 1.5s infinite;
+      }
+      .section-content {
+        border-left: 2px solid #58a6ff;
+      }
+    }
+
+    .log-failed-reason {
+      margin-top: 6px;
+      padding: 6px;
+      background: rgba(248, 81, 73, 0.05);
+      border: 1px solid rgba(248, 81, 73, 0.2);
+      border-radius: 4px;
+
+      .failed-reason-title {
+        font-weight: bold;
+        color: #f85149;
+        margin-bottom: 2px;
+      }
+      .failed-reason-content {
+        margin: 0;
+        white-space: pre-wrap;
+        color: var(--jc-text-primary);
+      }
+    }
+
+    .log-empty {
+      text-align: center;
+      color: var(--jc-text-secondary);
+      padding: 12px;
+    }
+  }
+}
+
+@keyframes pulse {
+  0% { opacity: 0.6; }
+  50% { opacity: 1; }
+  100% { opacity: 0.6; }
+}
+
 .chat-messages {
   flex: 1;
   overflow-y: auto;
@@ -1224,6 +1859,21 @@ async function handleStartTaskWorker(task: TaskNode) {
     font-size: 11px;
     color: var(--jc-text-secondary);
     font-weight: 500;
+    display: flex;
+    align-items: center;
+  }
+
+  .bubble-role-badge {
+    font-size: 10px;
+    padding: 1px 6px;
+    background: rgba(var(--jc-color-accent-rgb, 138, 88, 255), 0.12);
+    border: 1px solid rgba(var(--jc-color-accent-rgb, 138, 88, 255), 0.25);
+    color: var(--jc-color-accent);
+    border-radius: 4px;
+    font-weight: bold;
+    margin-right: 4px;
+    display: inline-flex;
+    align-items: center;
   }
 
   .bubble-content {

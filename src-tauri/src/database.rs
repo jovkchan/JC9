@@ -2,7 +2,7 @@ use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -78,7 +78,7 @@ pub struct Note {
 fn default_visibility() -> String { "PRIVATE".into() }
 
 pub struct Database {
-    pub conn: Mutex<Connection>,
+    pub conn: Arc<Mutex<Connection>>,
 }
 
 impl Database {
@@ -91,7 +91,7 @@ impl Database {
         let conn = Connection::open(&db_path).map_err(|e| format!("cannot open db: {e}"))?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;")
             .map_err(|e| format!("pragma error: {e}"))?;
-        let db = Database { conn: Mutex::new(conn) };
+        let db = Database { conn: Arc::new(Mutex::new(conn)) };
         db.create_tables()?;
         db.ensure_user()?;
         if need_init { db.migrate_from_json()?; }
@@ -111,6 +111,34 @@ impl Database {
             CREATE TABLE IF NOT EXISTS tags (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, color TEXT NOT NULL DEFAULT '', FOREIGN KEY (user_id) REFERENCES users(id));
             CREATE TABLE IF NOT EXISTS resources (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, note_id TEXT, filename TEXT NOT NULL, file_path TEXT NOT NULL, size INTEGER NOT NULL DEFAULT 0, mime_type TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, FOREIGN KEY (user_id) REFERENCES users(id), FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE SET NULL);
             CREATE TABLE IF NOT EXISTS sync_log (id TEXT PRIMARY KEY, table_name TEXT NOT NULL, record_id TEXT NOT NULL, action TEXT NOT NULL, version INTEGER NOT NULL, synced INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS knowledge (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                tags TEXT NOT NULL,
+                entry_type TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                is_draft INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS ai_sessions (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                project_id TEXT,
+                task_description TEXT NOT NULL DEFAULT '',
+                token_count INTEGER NOT NULL DEFAULT 0,
+                cost_usd REAL NOT NULL DEFAULT 0.0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS embeddings (
+                id TEXT PRIMARY KEY,
+                source_id TEXT NOT NULL,
+                content TEXT NOT NULL,
+                embedding BLOB NOT NULL
+            );
         ").map_err(|e| format!("create tables: {e}"))?;
         let _ = conn.execute("ALTER TABLE notes ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0", []);
         Ok(())

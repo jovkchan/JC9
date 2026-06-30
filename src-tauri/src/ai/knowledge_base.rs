@@ -1,5 +1,4 @@
 use std::sync::{Arc, Mutex};
-use std::path::PathBuf;
 use rusqlite::{params, Connection};
 use chrono::{DateTime, Utc};
 use super::types::*;
@@ -13,44 +12,11 @@ pub struct KnowledgeBase {
 }
 
 impl KnowledgeBase {
-    pub fn new(db_path: PathBuf) -> Self {
-        let conn = Connection::open(&db_path).expect("无法打开知识库本地 SQLite 数据库");
-        conn.execute(
-            r#"CREATE TABLE IF NOT EXISTS knowledge (
-                id TEXT PRIMARY KEY,
-                title TEXT NOT NULL,
-                content TEXT NOT NULL,
-                tags TEXT NOT NULL,
-                entry_type TEXT NOT NULL,
-                confidence REAL NOT NULL,
-                is_draft INTEGER NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )"#,
-            [],
-        ).expect("无法初始化知识库本地表结构");
-
-        // Session 会话持久化表
-        conn.execute(
-            r#"CREATE TABLE IF NOT EXISTS ai_sessions (
-                id TEXT PRIMARY KEY,
-                title TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'active',
-                project_id TEXT,
-                task_description TEXT NOT NULL DEFAULT '',
-                token_count INTEGER NOT NULL DEFAULT 0,
-                cost_usd REAL NOT NULL DEFAULT 0.0,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )"#,
-            [],
-        ).expect("无法初始化 AI Sessions 表");
-
-        let conn_arc = Arc::new(Mutex::new(conn));
-        let vector_store = VectorStore::new(conn_arc.clone(), &db_path);
+    pub fn new(conn: Arc<Mutex<Connection>>) -> Self {
+        let vector_store = VectorStore::new(conn.clone());
 
         Self {
-            conn: conn_arc,
+            conn,
             vector_store,
             auto_promote_threshold: 0.7,
         }
@@ -250,6 +216,14 @@ impl KnowledgeBase {
             params![entry_id, Utc::now().to_rfc3339()],
         );
         rows.is_ok() && rows.unwrap() > 0
+    }
+
+    /// 删除知识条目及其向量嵌入（用于笔记永久删除时同步清理）
+    pub async fn remove_entry(&self, entry_id: &str) -> bool {
+        let conn = self.conn.lock().unwrap();
+        let _ = conn.execute("DELETE FROM embeddings WHERE source_id = ?1", params![entry_id]);
+        let _ = conn.execute("DELETE FROM vec_embeddings WHERE id IN (SELECT id FROM embeddings WHERE source_id = ?1)", params![entry_id]);
+        conn.execute("DELETE FROM knowledge WHERE id = ?1", params![entry_id]).is_ok()
     }
 
     pub async fn update_confidence(&self, entry_id: &str, confidence: f64) -> bool {

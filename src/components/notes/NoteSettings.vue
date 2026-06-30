@@ -4,6 +4,7 @@ import { useNotesStore } from '@/stores/notes'
 import { useStatusStore } from '@/stores/status'
 import { save, open } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
+import { loadAllRoles, saveAllRoles, type AgentRole } from '@/config/roles'
 
 defineProps<{
   show: boolean
@@ -16,7 +17,37 @@ const emit = defineEmits<{
 const store = useNotesStore()
 const status = useStatusStore()
 
-const activeTab = ref<'general' | 'ai' | 'backup'>('general')
+const activeTab = ref<'general' | 'ai' | 'ai-roles' | 'backup' | 'skills' | 'command' |'hook'|'plugin'|'mcp'>('general')
+
+// ── 解决拖拽选择文本触发弹窗关闭的 Bug ──
+let mousedownTarget: EventTarget | null = null
+let formMousedownTarget: EventTarget | null = null
+
+function handleMousedown(e: MouseEvent) {
+  mousedownTarget = e.target
+}
+
+function handleOverlayClick(e: MouseEvent) {
+  if (e.target === e.currentTarget && mousedownTarget === e.currentTarget) {
+    emit('close')
+  }
+}
+
+function handleFormMousedown(e: MouseEvent) {
+  formMousedownTarget = e.target
+}
+
+function handleModelOverlayClick(e: MouseEvent) {
+  if (e.target === e.currentTarget && formMousedownTarget === e.currentTarget) {
+    cancelModelForm()
+  }
+}
+
+function handleRoleOverlayClick(e: MouseEvent) {
+  if (e.target === e.currentTarget && formMousedownTarget === e.currentTarget) {
+    cancelRoleForm()
+  }
+}
 
 // ── 设置偏好状态 (存入 localStorage) ──
 const defaultFormat = ref<'markdown' | 'plain'>('markdown')
@@ -37,7 +68,6 @@ interface ModelConfig {
 }
 
 const modelConfigs = ref<ModelConfig[]>([])
-const editingModel = ref<ModelConfig | null>(null)
 const showModelForm = ref(false)
 const vllmModels = ref<string[]>([])
 const loadingModels = ref(false)
@@ -58,6 +88,59 @@ function blankModel(): ModelConfig {
 }
 
 const newModelForm = ref<ModelConfig>(blankModel())
+
+// ── AI 角色管理 ──
+const rolesList = ref<AgentRole[]>([])
+const showRoleForm = ref(false)
+
+function blankRole(): AgentRole {
+  return {
+    id: '',
+    name: '',
+    icon: '🤖',
+    description: '',
+    systemPrompt: '',
+    isCustom: true
+  }
+}
+
+const newRoleForm = ref<AgentRole>(blankRole())
+
+function addRole() {
+  newRoleForm.value = blankRole()
+  showRoleForm.value = true
+}
+
+function editRole(role: AgentRole) {
+  newRoleForm.value = { ...role }
+  showRoleForm.value = true
+}
+
+function deleteRole(id: string) {
+  rolesList.value = rolesList.value.filter(r => r.id !== id)
+}
+
+function saveRoleForm() {
+  const r = newRoleForm.value
+  if (!r.name.trim() || !r.systemPrompt.trim()) {
+    status.pushMessage('请填写角色名称和专属提示词', 'warn')
+    return
+  }
+  if (!r.id) {
+    r.id = 'custom_' + Date.now().toString()
+  }
+  const idx = rolesList.value.findIndex(role => role.id === r.id)
+  if (idx >= 0) {
+    rolesList.value[idx] = { ...r }
+  } else {
+    rolesList.value.push({ ...r })
+  }
+  showRoleForm.value = false
+}
+
+function cancelRoleForm() {
+  showRoleForm.value = false
+}
 
 // ── 备份与导入 ──
 
@@ -82,15 +165,22 @@ onMounted(() => {
       inputPrice: parseFloat(localStorage.getItem('notes-ai-input-price') || '3.0'),
       outputPrice: parseFloat(localStorage.getItem('notes-ai-output-price') || '6.0'),
       costLimit: parseFloat(localStorage.getItem('notes-ai-cost-limit') || '5.0'),
+      reasoningEffort: 'high',
     }
     modelConfigs.value = [legacy]
   }
+
+  // 加载 AI 角色配置
+  rolesList.value = loadAllRoles()
 })
 
 function saveSettings() {
   localStorage.setItem('notes-default-format', defaultFormat.value)
   localStorage.setItem('notes-default-visibility', defaultVisibility.value)
   localStorage.setItem('notes-ai-models', JSON.stringify(modelConfigs.value))
+  
+  // 保存 AI 角色配置
+  saveAllRoles(rolesList.value)
 
   // 兼容旧字段
   const first = modelConfigs.value[0]
@@ -239,10 +329,10 @@ async function importData() {
 </script>
 
 <template>
-  <div v-if="show" class="settings-overlay" @click.self="emit('close')">
+  <div v-if="show" class="settings-overlay" @mousedown="handleMousedown" @click="handleOverlayClick">
     <div class="settings-modal animate-slide-in">
       <div class="settings-header">
-        <span class="settings-title">备忘笔记设置</span>
+        <span class="settings-title">设置</span>
         <button class="settings-close-btn" @click="emit('close')">✕</button>
       </div>
 
@@ -253,7 +343,25 @@ async function importData() {
             通用设置
           </div>
           <div :class="['nav-item', { active: activeTab === 'ai' }]" @click="activeTab = 'ai'">
-            AI 助理配置
+            模型配置
+          </div>
+          <div :class="['nav-item', { active: activeTab === 'ai-roles' }]" @click="activeTab = 'ai-roles'">
+            智能体
+          </div>
+          <div :class="['nav-item', { active: activeTab === 'skills' }]" @click="activeTab = 'skills'">
+            技能
+          </div>
+          <div :class="['nav-item', { active: activeTab === 'command' }]" @click="activeTab = 'command'">
+            指令
+          </div>
+          <div :class="['nav-item', { active: activeTab === 'hook' }]" @click="activeTab = 'hook'">
+            钩子
+          </div>
+          <div :class="['nav-item', { active: activeTab === 'plugin' }]" @click="activeTab = 'plugin'">
+            插件
+          </div>
+          <div :class="['nav-item', { active: activeTab === 'mcp' }]" @click="activeTab = 'mcp'">
+            插件
           </div>
           <div :class="['nav-item', { active: activeTab === 'backup' }]" @click="activeTab = 'backup'">
             数据备份导入
@@ -314,7 +422,7 @@ async function importData() {
             <button class="add-model-btn" @click="addModel">+ 添加模型</button>
 
             <!-- 添加/编辑模型表单 -->
-            <div v-if="showModelForm" class="model-form-overlay" @click.self="cancelModelForm">
+            <div v-if="showModelForm" class="model-form-overlay" @mousedown="handleFormMousedown" @click="handleModelOverlayClick">
               <div class="model-form-card">
                 <h4>{{ newModelForm.id ? '编辑' : '添加' }}模型配置</h4>
                 <div class="form-group">
@@ -379,7 +487,59 @@ async function importData() {
             </div>
           </div>
 
-          <!-- 3. 数据备份导入 -->
+          <!-- 3. AI 角色管理 -->
+          <div v-if="activeTab === 'ai-roles'" class="settings-pane">
+            <h3 class="pane-title">AI 角色管理</h3>
+            <p class="pane-desc" style="margin-bottom:12px">配置您开发中使用的 AI 角色。内置预设角色不可删除，您可以编辑其提示词；您也可以添加自定义角色。</p>
+
+            <div class="roles-list-container">
+              <div class="roles-grid">
+                <div v-for="role in rolesList" :key="role.id" class="role-settings-card">
+                  <div class="role-card-top">
+                    <div class="role-card-info">
+                      <span class="role-card-name">{{ role.name }}</span>
+                      <span class="role-card-id">{{ role.id }}</span>
+                    </div>
+                    <span class="role-card-type" :class="{ custom: role.isCustom }">
+                      {{ role.isCustom ? '自定义' : '预置' }}
+                    </span>
+                  </div>
+                  <p class="role-card-desc">{{ role.description || '无介绍' }}</p>
+                  <div class="role-card-actions">
+                    <button class="role-btn edit" @click="editRole(role)">编辑</button>
+                    <button v-if="role.isCustom" class="role-btn del" @click="deleteRole(role.id)">删除</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <button class="add-role-btn" @click="addRole">+ 添加角色</button>
+
+            <!-- 添加/编辑角色表单 -->
+            <div v-if="showRoleForm" class="role-form-overlay" @mousedown="handleFormMousedown" @click="handleRoleOverlayClick">
+              <div class="role-form-card">
+                <h4>{{ newRoleForm.id ? '编辑' : '添加' }} AI 角色</h4>
+                <div class="form-group">
+                  <label>角色名称</label>
+                  <input v-model="newRoleForm.name" class="form-input" placeholder="例如：测试工程师" />
+                </div>
+                <div class="form-group">
+                  <label>角色介绍</label>
+                  <input v-model="newRoleForm.description" class="form-input" placeholder="简述该角色的核心职责" />
+                </div>
+                <div class="form-group">
+                  <label>专属系统提示词 (System Prompt)</label>
+                  <textarea v-model="newRoleForm.systemPrompt" class="form-textarea" placeholder="在此处输入详细的角色设定和 ReAct 指导性提示词..." rows="6"></textarea>
+                </div>
+                <div class="role-form-actions">
+                  <button class="footer-btn-cancel" @click="cancelRoleForm">取消</button>
+                  <button class="footer-btn-save" @click="saveRoleForm">确定</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 4. 数据备份导入 -->
           <div v-if="activeTab === 'backup'" class="settings-pane">
             <h3 class="pane-title">数据本地备份与导入恢复</h3>
             <p class="pane-desc">因为所有备忘均保存在本地 SQLite 数据库中，您可以导出 JSON 数据包保存至本地，也可以通过 JSON 备份包将所有记录恢复至本软件中。</p>
@@ -393,6 +553,11 @@ async function importData() {
               </button>
             </div>
           </div>
+          <div v-if="activeTab === 'skills'" class="settings-pane">创建可重用的技术文件，提供特定领域知识和工作流</div>
+          <div v-if="activeTab === 'command'" class="settings-pane">设置始终生效的指令，在整个工作区或用户配置文件中引导AI行为</div>
+          <div v-if="activeTab === 'hook'" class="settings-pane">配置由保存文件或运行任务等事件触发的自动操作</div>
+          <div v-if="activeTab === 'plugin'" class="settings-pane">安装和管理智能体插件，以添加更多工具，技能和集成</div>
+          <div v-if="activeTab === 'mcp'" class="settings-pane">连接外部工具服务器，通过自定义工具和数据源扩展AI功能</div>
         </main>
       </div>
 
@@ -418,9 +583,9 @@ async function importData() {
 .settings-modal {
   background: var(--jc-bg-elevated);
   border: 1px solid var(--jc-border-strong);
-  width: 580px;
-  max-width: 90%;
-  height: 400px;
+  width: 870px;
+  max-width: 95%;
+  height: 580px;
   display: flex;
   flex-direction: column;
   box-shadow: var(--jc-shadow-modal);
@@ -646,7 +811,7 @@ async function importData() {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: 240px;
+  max-height: 420px;
   overflow-y: auto;
   margin-bottom: 10px;
 }
@@ -672,21 +837,24 @@ async function importData() {
 
 .model-card-name {
   font-weight: 600;
-  color: var(--jc-text-primary);
+  font-size: 13px;
+  color: var(--jc-text-highlight);
 }
 
 .model-card-provider {
   font-size: 10px;
-  padding: 1px 6px;
+  padding: 2px 6px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--jc-text-secondary);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--jc-text-primary);
+  font-weight: 500;
 }
 
 .model-card-model {
   font-family: monospace;
-  font-size: 11px;
+  font-size: 12px;
   color: #58a6ff;
+  font-weight: 600;
 }
 
 .model-card-meta {
@@ -801,5 +969,199 @@ async function importData() {
 
 .form-half {
   flex: 1;
+}
+
+/* ── AI 角色管理样式 ── */
+.roles-list-container {
+  max-height: 420px;
+  overflow-y: auto;
+  margin-bottom: 10px;
+  padding-right: 4px;
+
+  &::-webkit-scrollbar {
+    width: 4px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: var(--jc-border-default);
+    border-radius: 2px;
+  }
+}
+
+.roles-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.role-settings-card {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--jc-border-default);
+  border-radius: 6px;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.role-card-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+}
+
+.role-card-icon {
+  font-size: 16px;
+}
+
+.role-card-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.role-card-name {
+  font-weight: 600;
+  color: var(--jc-text-primary);
+  font-size: 12px;
+}
+
+.role-card-id {
+  font-family: monospace;
+  font-size: 9px;
+  color: var(--jc-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100px;
+}
+
+.role-card-type {
+  font-size: 9px;
+  padding: 0px 4px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--jc-text-secondary);
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+
+  &.custom {
+    background: rgba(138, 88, 255, 0.15);
+    color: var(--jc-color-accent);
+  }
+}
+
+.role-card-desc {
+  margin: 0;
+  color: var(--jc-text-secondary);
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  min-height: 30px;
+}
+
+.role-card-actions {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+  margin-top: auto;
+  border-top: 1px solid rgba(255, 255, 255, 0.03);
+  padding-top: 4px;
+}
+
+.role-btn {
+  padding: 2px 6px;
+  border: 1px solid var(--jc-border-default);
+  border-radius: 4px;
+  font-size: 9.5px;
+  cursor: pointer;
+  background: var(--jc-bg-elevated);
+  color: var(--jc-text-primary);
+
+  &.edit:hover {
+    border-color: var(--jc-color-accent);
+    color: var(--jc-color-accent);
+  }
+
+  &.del:hover {
+    border-color: #f85149;
+    color: #f85149;
+  }
+}
+
+.add-role-btn {
+  width: 100%;
+  padding: 6px;
+  border: 1px dashed var(--jc-border-default);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--jc-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+
+  &:hover {
+    border-color: var(--jc-color-accent);
+    color: var(--jc-color-accent);
+  }
+}
+
+/* ── 角色配置表单弹窗 ── */
+.role-form-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.role-form-card {
+  background: var(--jc-bg-elevated);
+  border: 1px solid var(--jc-border-strong);
+  border-radius: 8px;
+  padding: 16px;
+  width: 380px;
+  max-height: 90%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+
+  h4 {
+    margin: 0;
+    font-size: 13px;
+    color: var(--jc-text-primary);
+  }
+
+  .form-textarea {
+    background: var(--jc-bg-input);
+    border: 1px solid var(--jc-border-default);
+    color: var(--jc-text-primary);
+    font-size: 11px;
+    padding: 6px 10px;
+    border-radius: 4px;
+    outline: none;
+    resize: vertical;
+    font-family: monospace;
+
+    &:focus {
+      border-color: var(--jc-color-accent);
+    }
+  }
+}
+
+.role-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
 }
 </style>

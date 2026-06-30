@@ -1,7 +1,8 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::path::PathBuf;
 use tokio::sync::RwLock;
 use chrono::Utc;
+use rusqlite::Connection;
 
 use super::types::*;
 use super::llm::{LlmProvider, MockLlmProvider, OpenAiProvider};
@@ -30,7 +31,7 @@ pub struct AgentManager {
 }
 
 impl AgentManager {
-    pub fn new(workspace_root: PathBuf, db_path: PathBuf, app_handle: Option<tauri::AppHandle>) -> Self {
+    pub fn new(workspace_root: PathBuf, conn: Arc<Mutex<Connection>>, app_handle: Option<tauri::AppHandle>) -> Self {
         let sandbox = Arc::new(tokio::sync::RwLock::new(SecuritySandbox::new(workspace_root.clone())));
         let blackboard = Arc::new(SharedBlackboard::new());
         let approval_queue = Arc::new(ApprovalQueue::new(app_handle.clone()));
@@ -53,7 +54,7 @@ impl AgentManager {
             Arc::new(MockLlmProvider::new())
         };
 
-        let knowledge_base = Arc::new(KnowledgeBase::new(db_path.clone()));
+        let knowledge_base = Arc::new(KnowledgeBase::new(conn));
 
         // 启动时从 SQLite 恢复历史会话
         let persisted_sessions = knowledge_base.load_sessions_blocking();

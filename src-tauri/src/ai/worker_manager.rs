@@ -82,6 +82,8 @@ impl WorkerManager {
             tool_call_count: 0, consecutive_errors: 0, last_error_hash: None,
             created_at: Utc::now(), last_active: Utc::now(), token_count: 0,
             cow_path: Some(temp_workspace.to_string_lossy().to_string()),
+            history: Vec::new(),
+            termination_reason: None,
         };
         self.workers.write().await.insert(worker_id.clone(), worker_state.clone());
 
@@ -112,10 +114,13 @@ impl WorkerManager {
         tokio::spawn(async move {
             match react_loop.run(enriched_system_prompt, task.description).await {
                 Ok(result) => {
+                    let state = react_loop.get_state().await;
                     let mut workers = workers_clone.write().await;
                     if let Some(w) = workers.get_mut(&wid) {
                         w.status = WorkerStatus::Completed;
                         w.last_active = Utc::now();
+                        w.history = state.history.clone();
+                        w.termination_reason = state.termination_reason.clone();
                         if let Some(ref handle) = app_handle_clone {
                             let _ = handle.emit("ai:worker-update", w.clone());
                         }
@@ -123,7 +128,6 @@ impl WorkerManager {
                     println!("🏁 [Worker] {} 完成 | result_len={}", &wid[..8], result.len());
 
                     // 1. 运行轨迹摘要提取并沉淀到知识库草稿箱
-                    let state = react_loop.get_state().await;
                     if let Ok(summary) = super::summarizer::Summarizer::summarize_run(provider_for_summary, &state.history).await {
                         // 写入共享黑板供其他 Worker 参考
                         blackboard_for_summary.write(
@@ -157,10 +161,13 @@ impl WorkerManager {
                     workspace_mgr.cleanup();
                 }
                 Err(e) => {
+                    let state = react_loop.get_state().await;
                     let mut workers = workers_clone.write().await;
                     if let Some(w) = workers.get_mut(&wid) {
                         w.status = WorkerStatus::Failed;
                         w.last_active = Utc::now();
+                        w.history = state.history.clone();
+                        w.termination_reason = Some(e.clone());
                         if let Some(ref handle) = app_handle_clone {
                             let _ = handle.emit("ai:worker-update", w.clone());
                         }

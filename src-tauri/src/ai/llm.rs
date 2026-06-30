@@ -28,16 +28,6 @@ impl LlmMessage {
         Self { role: MessageRole::Assistant, content, reasoning_content: None, tool_call_id: None, tool_calls: vec![] }
     }
     pub fn assistant_with_tool_calls(content: String, reasoning: Option<String>, calls: &[ToolCallRecord]) -> Self {
-        let tc_json: Vec<serde_json::Value> = calls.iter().map(|tc| {
-            serde_json::json!({
-                "id": tc.id,
-                "type": "function",
-                "function": {
-                    "name": tc.tool_name,
-                    "arguments": serde_json::to_string(&tc.arguments).unwrap_or_default(),
-                }
-            })
-        }).collect();
         Self {
             role: MessageRole::Assistant,
             content,

@@ -22,12 +22,12 @@ pub struct VectorStore {
 
 impl VectorStore {
     /// 创建向量存储，尝试加载 sqlite-vec 扩展
-    pub fn new(conn: std::sync::Arc<Mutex<Connection>>, db_path: &PathBuf) -> Self {
+    pub fn new(conn: std::sync::Arc<Mutex<Connection>>) -> Self {
         let mut has_sqlite_vec = false;
         let conn_guard = conn.lock().unwrap();
 
         // 尝试加载 sqlite-vec 扩展
-        let vec_dll_path = Self::find_vec_extension(db_path);
+        let vec_dll_path = Self::find_vec_extension();
         if let Some(dll_path) = &vec_dll_path {
             // 在 Windows 上，sqlite-vec 扩展名为 vec0.dll
             unsafe {
@@ -46,17 +46,6 @@ impl VectorStore {
         } else {
             println!("⚠️  未找到 sqlite-vec DLL，回退到纯 Rust 余弦相似度");
         }
-
-        // 创建向量表（兼容两种模式）
-        let _ = conn_guard.execute(
-            r#"CREATE TABLE IF NOT EXISTS embeddings (
-                id TEXT PRIMARY KEY,
-                source_id TEXT NOT NULL,
-                content TEXT NOT NULL,
-                embedding BLOB NOT NULL
-            )"#,
-            [],
-        );
 
         // 如果 sqlite-vec 加载成功，创建虚拟表
         if has_sqlite_vec {
@@ -85,21 +74,34 @@ impl VectorStore {
     }
 
     /// 查找 sqlite-vec 扩展 DLL
-    fn find_vec_extension(db_path: &PathBuf) -> Option<PathBuf> {
-        let candidates = vec![
-            // 与数据库同目录
-            db_path.parent().map(|p| p.join("vec0.dll")),
-            // 可执行文件同目录
-            std::env::current_exe().ok().map(|p| p.parent().map(|pp| pp.join("vec0.dll"))).flatten(),
-            // 项目 src-tauri 目录
-            db_path.parent().map(|p| p.join("src-tauri").join("vec0.dll")),
-            // 当前工作目录
-            Some(PathBuf::from("vec0.dll")),
-        ];
+    fn find_vec_extension() -> Option<PathBuf> {
+        // 搜索 vec0.dll 的候选路径
+        let cwd = std::env::current_dir().ok();
+        let exe_dir = std::env::current_exe().ok()
+            .and_then(|p| p.parent().map(|pp| pp.to_path_buf()));
 
-        for candidate in candidates.into_iter().flatten() {
+        let mut candidates: Vec<PathBuf> = Vec::new();
+
+        // 可执行文件同目录
+        if let Some(ref dir) = exe_dir {
+            candidates.push(dir.join("vec0.dll"));
+        }
+        // 当前工作目录
+        if let Some(ref dir) = cwd {
+            candidates.push(dir.join("vec0.dll"));
+        }
+        // src-tauri 子目录（从 cwd 或 exe_dir 向上找）
+        for base in [&cwd, &exe_dir].iter().filter_map(|p| p.as_ref()) {
+            candidates.push(base.join("src-tauri").join("vec0.dll"));
+            // 尝试父级的 src-tauri 目录
+            if let Some(parent) = base.parent() {
+                candidates.push(parent.join("src-tauri").join("vec0.dll"));
+            }
+        }
+
+        for candidate in &candidates {
             if candidate.exists() {
-                return Some(candidate);
+                return Some(candidate.clone());
             }
         }
         None

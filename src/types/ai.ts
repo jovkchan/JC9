@@ -76,6 +76,23 @@ export interface TaskNode {
   result: string | null
 }
 
+export interface ToolCallRecord {
+  id: string
+  toolName: string
+  arguments: Record<string, unknown>
+  result: unknown | null
+  status: 'pending' | 'approved' | 'denied' | 'executing' | 'success' | 'failed'
+  timestamp: string
+}
+
+export interface ReActStep {
+  iteration: number
+  thought: string
+  action: ToolCallRecord | null
+  observation: string | null
+  timestamp: string
+}
+
 export interface WorkerState {
   id: string
   sessionId: string
@@ -88,6 +105,8 @@ export interface WorkerState {
   createdAt: string
   lastActive: string
   tokenCount: number
+  history: ReActStep[]
+  terminationReason?: string | null
 }
 
 export interface ApprovalRequest {

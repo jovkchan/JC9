@@ -49,7 +49,7 @@ impl Planner {
     "description": "任务的具体描述及执行步骤",
     "status": "pending", // 可选: pending, inprogress, blocked, completed, failed
     "priority": 1, // 优先级：数字越小越优先，从 1 开始
-    "assignedWorker": null,
+    "assignedWorker": "根据任务类型分派合适角色，可选值必须是以下之一: product_manager | architect | frontend | backend | fullstack | algorithm_ai | copywriter | sop_engineer",
     "subTasks": [], // 子任务的 id 数组，非子任务填空数组
     "createdAt": "当前时间，由用户提供",
     "updatedAt": "当前时间，由用户提供",
@@ -114,7 +114,7 @@ impl Planner {
             description: format!("处理用户的原始需求并规划执行方案: {}", request),
             status: TaskStatus::InProgress,
             priority: 1,
-            assigned_worker: None,
+            assigned_worker: Some("product_manager".into()),
             sub_tasks: vec![sub1_id.clone(), sub2_id.clone()],
             created_at: Utc::now(),
             updated_at: Utc::now(),
@@ -129,7 +129,7 @@ impl Planner {
             description: "获取系统环境变量（已安全脱敏）及常用 CLI 工具的版本信息".into(),
             status: TaskStatus::Pending,
             priority: 2,
-            assigned_worker: None,
+            assigned_worker: Some("architect".into()),
             sub_tasks: vec![],
             created_at: Utc::now(),
             updated_at: Utc::now(),
@@ -144,7 +144,7 @@ impl Planner {
             description: "读取目标文件并进行修改与安全沙箱执行".into(),
             status: TaskStatus::Pending,
             priority: 2,
-            assigned_worker: None,
+            assigned_worker: Some("fullstack".into()),
             sub_tasks: vec![],
             created_at: Utc::now(),
             updated_at: Utc::now(),

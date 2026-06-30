@@ -71,10 +71,16 @@ impl ReActLoop {
 
     async fn update_worker_state<F>(&self, update_fn: F)
     where F: FnOnce(&mut WorkerState) {
+        let (history, term_reason) = {
+            let state = self.state.read().await;
+            (state.history.clone(), state.termination_reason.clone())
+        };
         let mut workers = self.workers.write().await;
         if let Some(w) = workers.get_mut(&self.worker_id) {
             update_fn(w);
             w.last_active = Utc::now();
+            w.history = history;
+            w.termination_reason = term_reason;
             if let Some(ref handle) = self.app_handle {
                 let _ = handle.emit("ai:worker-update", w.clone());
             }

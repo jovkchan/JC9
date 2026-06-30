@@ -9,6 +9,7 @@ use std::fs;
 use std::path::Path;
 use std::sync::Mutex;
 use tauri::{State, Manager};
+use chrono::{DateTime, Utc};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -31,6 +32,17 @@ pub struct ProjectInfo {
     pub name: String,
     pub language: String,
     pub suggest_commands: Vec<SuggestCommand>,
+}
+
+#[tauri::command]
+async fn fetch_url_html(url: String) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .build()
+        .map_err(|e| e.to_string())?;
+    let resp = client.get(&url).send().await.map_err(|e| e.to_string())?;
+    let html = resp.text().await.map_err(|e| e.to_string())?;
+    Ok(html)
 }
 
 #[tauri::command]
@@ -332,6 +344,29 @@ fn fetch_doc(command: String) -> String { get_cmd_help(&command) }
 
 // ── Notes ──
 
+/// 将 Note 转换为知识库条目，用于同步笔记到知识库
+fn note_to_kb_entry(note: &Note) -> ai::types::KbEntry {
+    use ai::types::{KbEntry, KbEntryType};
+    let parse_dt = |s: &str| -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339(s)
+            .map(|d| d.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now())
+    };
+    KbEntry {
+        id: format!("note_{}", note.id),
+        title: note.title.clone(),
+        content: note.content.clone(),
+        entry_type: KbEntryType::ConfigNote,
+        tags: note.tags.clone(),
+        source_session: None,
+        confidence: 0.85,  // 用户笔记可信度较高
+        is_draft: false,
+        created_at: parse_dt(&note.created_at),
+        updated_at: parse_dt(&note.updated_at),
+        embedding: None,
+    }
+}
+
 #[tauri::command]
 fn get_note_groups(state: State<'_, Mutex<AppState>>) -> Result<Vec<NoteGroup>, String> {
     state.lock().map_err(|e| e.to_string())?.db.get_note_groups()
@@ -353,18 +388,33 @@ fn get_notes(state: State<'_, Mutex<AppState>>, group_id: Option<String>) -> Res
 }
 
 #[tauri::command]
-fn save_note(state: State<'_, Mutex<AppState>>, note: Note) -> Result<(), String> {
-    state.lock().map_err(|e| e.to_string())?.db.save_note(&note)
+async fn save_note(state: State<'_, Mutex<AppState>>, note: Note) -> Result<(), String> {
+    let ai_manager = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.db.save_note(&note)?;
+        app_state.ai_manager.clone()
+    };
+    // 异步同步到知识库（已在外释放 AppState 锁，避免死锁）
+    let entry = note_to_kb_entry(&note);
+    ai_manager.knowledge_base().add_entry(entry).await;
+    Ok(())
 }
 
 #[tauri::command]
-fn delete_note(state: State<'_, Mutex<AppState>>, id: String, permanent: Option<bool>) -> Result<(), String> {
-    let db = &state.lock().map_err(|e| e.to_string())?.db;
-    if permanent.unwrap_or(false) {
-        db.permanently_delete_note(&id)
+async fn delete_note(state: State<'_, Mutex<AppState>>, id: String, permanent: Option<bool>) -> Result<(), String> {
+    let ai_manager = if permanent.unwrap_or(false) {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.db.permanently_delete_note(&id)?;
+        Some(app_state.ai_manager.clone())
     } else {
-        db.delete_note(&id)
+        state.lock().map_err(|e| e.to_string())?.db.delete_note(&id)?;
+        None
+    };
+    // 永久删除时同步清理知识库
+    if let Some(am) = ai_manager {
+        am.knowledge_base().remove_entry(&format!("note_{}", id)).await;
     }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1070,7 +1120,7 @@ pub fn run() {
     } else {
         cwd.clone()
     };
-    let kb_path = workspace.join("jc9_knowledge.db");
+    let db_conn = db.conn.clone();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -1078,7 +1128,7 @@ pub fn run() {
         .setup(move |app| {
             let ai_manager = std::sync::Arc::new(ai::agent_manager::AgentManager::new(
                 workspace,
-                kb_path,
+                db_conn,
                 Some(app.handle().clone()),
             ));
             app.manage(Mutex::new(AppState {
@@ -1086,6 +1136,28 @@ pub fn run() {
                 db,
                 ai_manager,
             }));
+
+            // 启动时回填历史笔记到知识库（异步，不影响启动速度）
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let state = app_handle.state::<Mutex<AppState>>();
+                let (notes, kb) = {
+                    let guard = state.lock().unwrap();
+                    let notes = guard.db.get_notes(None, false).unwrap_or_default();
+                    let kb = guard.ai_manager.clone();
+                    (notes, kb)
+                };
+                let mut count = 0usize;
+                for note in &notes {
+                    let entry = note_to_kb_entry(note);
+                    kb.knowledge_base().add_entry(entry).await;
+                    count += 1;
+                }
+                if count > 0 {
+                    println!("✅ 已回填 {} 条历史笔记到知识库", count);
+                }
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1110,6 +1182,7 @@ pub fn run() {
             write_file_binary,
             read_file_string,
             show_in_folder,
+            fetch_url_html,
             get_note_groups,
             save_note_group,
             delete_note_group,
