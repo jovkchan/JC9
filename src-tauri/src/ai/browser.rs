@@ -201,8 +201,45 @@ impl BrowserManager {
             BrowserWindowState::Open { label, .. } => {
                 if let Some(ref handle) = self.app_handle {
                     if let Some(window) = self.get_window(handle, label) {
-                        Self::eval_on_window(&window, js)?;
-                        Ok("ok".into())
+                        let req_id = uuid::Uuid::new_v4().to_string();
+                        let marker_val = format!("JC9_VAL_{}:", req_id);
+                        let marker_err = format!("JC9_ERR_{}:", req_id);
+
+                        let js_code = format!(
+                            r#"(function(){{
+                                var old = document.title;
+                                try {{
+                                    var res = (function(){{ return ({}); }})();
+                                    var res_str = typeof res === 'string' ? res : JSON.stringify(res);
+                                    document.title = "{}" + res_str;
+                                }} catch(e) {{
+                                    document.title = "{}" + e.toString();
+                                }}
+                                setTimeout(function() {{
+                                    if (document.title.indexOf("{}") === 0 || document.title.indexOf("{}") === 0) {{
+                                        document.title = old;
+                                    }}
+                                }}, 200);
+                            }})();"#,
+                            js, marker_val, marker_err, marker_val, marker_err
+                        );
+
+                        window.eval(&js_code).map_err(|e| format!("浏览器 JS 执行失败: {}", e))?;
+
+                        let start_time = std::time::Instant::now();
+                        loop {
+                            if start_time.elapsed().as_secs() > 5 {
+                                return Err("浏览器 JS 执行超时 (5s)".into());
+                            }
+                            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                            let current_title = window.title().unwrap_or_default();
+                            if current_title.starts_with(&marker_val) {
+                                return Ok(current_title[marker_val.len()..].to_string());
+                            }
+                            if current_title.starts_with(&marker_err) {
+                                return Err(current_title[marker_err.len()..].to_string());
+                            }
+                        }
                     } else {
                         Err("浏览器窗口已关闭".into())
                     }

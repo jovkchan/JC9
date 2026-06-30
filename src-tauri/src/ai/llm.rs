@@ -193,6 +193,16 @@ pub struct OpenAiProvider {
     client: reqwest::Client,
 }
 
+impl std::fmt::Debug for OpenAiProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpenAiProvider")
+            .field("base_url", &self.base_url)
+            .field("model", &self.model)
+            .field("api_key", &"[REDACTED]")
+            .finish()
+    }
+}
+
 impl OpenAiProvider {
     pub fn new(api_key: String, base_url: Option<String>, model: Option<String>, reasoning_effort_override: Option<String>) -> Self {
         let model = model.unwrap_or_else(|| "deepseek-v4-pro".into());
@@ -208,12 +218,18 @@ impl OpenAiProvider {
                 }
             });
 
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(60))
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .build()
+            .unwrap_or_default();
+
         Self {
             api_key,
             base_url,
             model,
             reasoning_effort: Arc::new(tokio::sync::RwLock::new(reasoning_effort)),
-            client: reqwest::Client::new(),
+            client,
         }
     }
 
@@ -310,14 +326,38 @@ impl LlmProvider for OpenAiProvider {
             url, self.model, messages.len(), tools.len(), current_effort
         );
 
-        let resp = self.client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| format!("LLM 请求失败: {e}"))?;
+        let mut attempts = 0;
+        let resp = loop {
+            attempts += 1;
+            let request_fut = self.client
+                .post(&url)
+                .header("Authorization", format!("Bearer {}", self.api_key))
+                .header("Content-Type", "application/json")
+                .json(&body)
+                .send();
+                
+            match request_fut.await {
+                Ok(r) => {
+                    let status = r.status();
+                    if (status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error()) && attempts < 3 {
+                        let delay = std::time::Duration::from_secs(1 << attempts);
+                        println!("⚠️  [LLM] 收到状态码 {}，将在 {} 秒后重试 (第 {} 次)...", status, delay.as_secs(), attempts);
+                        tokio::time::sleep(delay).await;
+                        continue;
+                    }
+                    break Ok(r);
+                }
+                Err(e) => {
+                    if attempts < 3 {
+                        let delay = std::time::Duration::from_secs(1 << attempts);
+                        println!("⚠️  [LLM] 请求连接失败 {}，将在 {} 秒后重试 (第 {} 次)...", e, delay.as_secs(), attempts);
+                        tokio::time::sleep(delay).await;
+                        continue;
+                    }
+                    break Err(e);
+                }
+            }
+        }.map_err(|e| format!("LLM 请求失败: {e}"))?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -373,13 +413,21 @@ impl LlmProvider for OpenAiProvider {
             input_tokens,
             output_tokens,
         );
+
+        fn sanitize_sensitive_content(text: &str) -> String {
+            let re_key = regex::Regex::new(r#"(?i)(key|password|secret|token|pass|auth|credential|private_key|api_key)\s*[:=]\s*['"a-zA-Z0-9_\-\.\+:]{8,}"#).unwrap();
+            re_key.replace_all(text, "$1=******").to_string()
+        }
+
         if let Some(ref t) = thought {
             let safe_len = t.char_indices().nth(200).map(|(i, _)| i).unwrap_or(t.len());
-            println!("💭 [LLM] reasoning: {}", &t[..safe_len]);
+            let redact_thought = sanitize_sensitive_content(&t[..safe_len]);
+            println!("💭 [LLM] reasoning: {}", redact_thought);
         }
         if !content.is_empty() {
             let safe_len = content.char_indices().nth(300).map(|(i, _)| i).unwrap_or(content.len());
-            println!("📝 [LLM] content: {}", &content[..safe_len]);
+            let redact_content = sanitize_sensitive_content(&content[..safe_len]);
+            println!("📝 [LLM] content: {}", redact_content);
         }
         for tc in &tool_calls {
             println!("🔧 [LLM] tool_call: {} ({})", tc.tool_name, tc.id);

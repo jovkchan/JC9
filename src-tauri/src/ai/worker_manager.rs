@@ -78,7 +78,8 @@ impl WorkerManager {
 
     /// 铺拉起一个并发 Worker 并绑定 COW 隔离开发空间
     pub async fn spawn_worker(&self, session_id: String, task: TaskNode, system_prompt: String) -> Result<String, String> {
-        let _permit = self.semaphore.acquire().await.map_err(|e| e.to_string())?;
+        let sem_clone = self.semaphore.clone();
+        let _permit = sem_clone.acquire_owned().await.map_err(|e| e.to_string())?;
         let worker_id = uuid::Uuid::new_v4().to_string();
 
         // 1. 初始化 COW 临时沙箱
@@ -196,6 +197,7 @@ impl WorkerManager {
         let session_id_clone = session_id.clone();
         
         tokio::spawn(async move {
+            let _permit = _permit;
             // 启动会话心跳（每 5 秒发射 ai:session-progress）
             let heartbeat_handle = {
                 let workers = workers_clone.clone();

@@ -19,13 +19,17 @@ impl HostDetector {
     }
 
     pub fn get_sanitized_env_vars(&self) -> Vec<EnvVarEntry> {
-        let sensitive_keywords = ["PASSWORD", "SECRET", "TOKEN", "KEY", "PWD", "AUTH", "CREDENTIAL", "PRIVATE"];
+        let sensitive_keywords = ["PASSWORD", "SECRET", "TOKEN", "KEY", "PWD", "AUTH", "CREDENTIAL", "PRIVATE", "PASS", "PASSWD", "CERT", "CERTIFICATE", "SESSION", "COOKIE", "OTP", "MFA"];
+        let allowed_keys = ["PATH", "HOME", "USERPROFILE", "SHELL", "LANG", "OS", "PROCESSOR_ARCHITECTURE", "TMP", "TEMP", "USER", "USERNAME"];
         let mut vars: Vec<(String, String)> = std::env::vars().collect();
         vars.sort_by(|a, b| a.0.cmp(&b.0));
-        vars.into_iter().map(|(key, value)| {
-            let is_sensitive = sensitive_keywords.iter().any(|kw| key.to_uppercase().contains(kw));
-            EnvVarEntry { key: key.clone(), value: if is_sensitive { "******".into() } else { value }, is_sensitive }
-        }).collect()
+        vars.into_iter()
+            .filter(|(key, _)| allowed_keys.iter().any(|&k| key.eq_ignore_ascii_case(k)))
+            .map(|(key, value)| {
+                let is_sensitive = sensitive_keywords.iter().any(|kw| key.to_uppercase().contains(kw))
+                    || (value.contains("://") && value.contains('@'));
+                EnvVarEntry { key: key.clone(), value: if is_sensitive { "******".into() } else { value }, is_sensitive }
+            }).collect()
     }
 
     pub fn generate_system_prompt(&self, env: &HostEnvironment) -> String {

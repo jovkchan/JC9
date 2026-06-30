@@ -218,6 +218,18 @@ impl ReActLoop {
         ];
 
         loop {
+            {
+                let workers = self.workers.read().await;
+                if let Some(w) = workers.get(&self.worker_id) {
+                    if w.status == WorkerStatus::Killed {
+                        let mut state = self.state.write().await;
+                        state.is_terminated = true;
+                        state.termination_reason = Some("智能体已被用户终止。".into());
+                        return Err("智能体已被用户终止。".into());
+                    }
+                }
+            }
+
             if self.loop_breaker.is_tripped().await {
                 let reason = self.loop_breaker.trip_reason().await;
                 let mut state = self.state.write().await;
@@ -551,31 +563,37 @@ impl ReActLoop {
                         }
                     } else if tool_call.tool_name == "run_command" {
                         let command_str = tool_call.arguments["command"].as_str().unwrap_or("");
-                        let mut cmd = if cfg!(target_os = "windows") {
-                            let mut c = std::process::Command::new("powershell");
-                            c.args(["-NoProfile", "-Command", command_str]);
-                            c
+                        let sandbox = self.tools.sandbox();
+                        if !sandbox.validate_command(command_str) {
+                            proxy_success = false;
+                            proxy_output = format!("【安全拦截】命令 '{}' 不在安全白名单中或包含黑名单模式，拒绝执行。", command_str);
                         } else {
-                            let mut c = std::process::Command::new("sh");
-                            c.args(["-c", command_str]);
-                            c
-                        };
-                        cmd.current_dir(&path_str_val);
-                        match cmd.output() {
-                            Ok(output) => {
-                                proxy_success = output.status.success();
-                                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                                let mut combined = stdout;
-                                if !stderr.is_empty() {
-                                    combined.push_str("\n【标准错误输出】:\n");
-                                    combined.push_str(&stderr);
+                            let mut cmd = if cfg!(target_os = "windows") {
+                                let mut c = std::process::Command::new("powershell");
+                                c.args(["-NoProfile", "-Command", command_str]);
+                                c
+                            } else {
+                                let mut c = std::process::Command::new("sh");
+                                c.args(["-c", command_str]);
+                                c
+                            };
+                            cmd.current_dir(&path_str_val);
+                            match cmd.output() {
+                                Ok(output) => {
+                                    proxy_success = output.status.success();
+                                    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                                    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                                    let mut combined = stdout;
+                                    if !stderr.is_empty() {
+                                        combined.push_str("\n【标准错误输出】:\n");
+                                        combined.push_str(&stderr);
+                                    }
+                                    proxy_output = combined;
                                 }
-                                proxy_output = combined;
-                            }
-                            Err(e) => {
-                                proxy_success = false;
-                                proxy_output = format!("越界工作目录命令执行失败: {}", e);
+                                Err(e) => {
+                                    proxy_success = false;
+                                    proxy_output = format!("越界工作目录命令执行失败: {}", e);
+                                }
                             }
                         }
                     } else {

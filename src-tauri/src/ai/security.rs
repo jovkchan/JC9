@@ -179,14 +179,14 @@ impl SecuritySandbox {
             start
         };
 
-        for allowed in &self.command_whitelist {
-            if main_cmd == allowed.to_lowercase() {
-                return true;
+        let path = std::path::Path::new(&main_cmd);
+        if let Some(file_name) = path.file_name().and_then(|f| f.to_str()) {
+            let base_name = file_name.strip_suffix(".exe").unwrap_or(file_name).to_lowercase();
+            for allowed in &self.command_whitelist {
+                if base_name == allowed.to_lowercase() {
+                    return true;
+                }
             }
-        }
-
-        if main_cmd.contains('/') || main_cmd.contains('\\') || main_cmd.ends_with(".exe") {
-            return true;
         }
 
         false

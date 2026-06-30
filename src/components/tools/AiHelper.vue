@@ -798,33 +798,20 @@ async function doSendMessage(text: string) {
     systemPromptStr = '你是一个通用 AI 助手。请直接、简洁地回答用户的问题。不要说"作为XX助手"之类的话，直接回答问题即可。'
   }
 
-  // ── 根据选定角色或智能路由匹配专属提示词 ──
+  // ── 智能路由：根据选定的角色匹配专属提示词 ──
   let matchedRole: AgentRole | null = null
   if (activeChatRoleId.value === 'auto') {
-    const rolesListStr = chatRolesList.value
-      .map(r => `- ${r.id} (${r.name} - ${r.description})`)
-      .join('\n')
-
-    // 训练大模型作为“天才调度员”，让其自适应分析并选择最适合解答此问题的专家身份
-    systemPromptStr = `你是一个极其聪明的天才协调官与首席调度专家（Master Planner & Router）。
-根据用户的提问，你需要从以下角色列表中，选择一个最适合且最专业地解答当前问题的角色：
-${rolesListStr}
-
-【重要输出指令】
-你必须在回答的最开始第一行，按照以下指定格式标注你本次判定并决定担任的角色：
-选择角色：[前端工程师]
-
-接着换行，并以你选定的角色的专业设定、知识视角和专属工作准则去深入、精彩地解答用户的问题。如果在角色列表中未找到绝对对口的角色，第一行请标注：
-选择角色：[通用助手]
-然后再正式作答。`
-
+    // 不做角色分配，直接简洁回答
+    systemPromptStr = `你是 JC9 本地桌面应用中的 AI 助手，运行在用户的电脑上。
+你可以直接读取、写入用户电脑上的本地文件（通过 Agent 模式的工具）。
+如果用户请求涉及操作本地文件、代码、终端命令，请告知用户开启"Agent 模式"（顶部的闪电按钮）来执行。
+如果用户只是提问或聊天，请直接、简洁地回答问题，不要说"作为XX助手"之类的话。`
     if (enableLocalKb.value && promptInstruction) {
-      systemPromptStr += `\n\n以下是用户本地笔记库中相关的参考内容，如有需要请结合您所扮演角色的视角进行参考：\n${promptInstruction}`
+      systemPromptStr += `\n\n以下是用户本地笔记库中相关的参考内容：\n${promptInstruction}`
     }
   } else {
     matchedRole = chatRolesList.value.find(r => r.id === activeChatRoleId.value) || null
     if (matchedRole) {
-      console.log(`🤖 [AI角色路由] 当前对话分配角色: ${matchedRole.name}`)
       let roleInstructions = `${matchedRole.systemPrompt}\n\n当前任务：请以该角色的专业设定与视角，协助解答用户的问题。`
       if (enableLocalKb.value && promptInstruction) {
         roleInstructions += `\n${promptInstruction}`
@@ -987,14 +974,8 @@ async function sendAgentMessage(text: string) {
   console.group('🤖 Agent 模式')
   console.log('任务:', text)
 
-  // 意图检测：非编码任务走普通对话
-  const codingKeywords = /编写|添加|修复|创建|修改|重构|实现|优化|配置|安装|部署|调试|写一个|改一下|帮我写|生成|代码|文件|组件|模块|接口|函数|类|类型|测试|构建|打包|编译|提交|合并|分支|npm|cargo|git|vue|react|rust|typescript|python|依赖|import|export|package|运行|启动|检查|报错|错误/i
-  if (!codingKeywords.test(text)) {
-    console.log('📋 非编码任务，走普通对话')
-    console.groupEnd()
-    await doSendMessage(text)
-    return
-  }
+  // 意图检测：Agent 模式下全部走 Agent 管道，不再判断是否编码任务
+  // 用户主动开启了 Agent 模式，就应该始终使用 Agent
 
   console.log('模型:', `${aiProvider.value}/${aiModel.value}`)
 

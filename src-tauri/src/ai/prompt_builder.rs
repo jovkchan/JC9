@@ -59,20 +59,29 @@ impl PromptBuilder {
     pub fn build(&self, user_system_prompt: &str) -> String {
         let mut sections: Vec<(String, usize)> = Vec::new();
 
-        // 1. 身份与核心指令
+        // 1. 核心指令 — 直接聚焦工具调用，去掉角色扮演
         sections.push((
-            self.build_identity_section(user_system_prompt),
+            self.build_core_instruction(user_system_prompt),
             0,
         ));
 
-        // 2. 宿主环境
+        // 2. 宿主环境简讯
         if let Some(ref hp) = self.host_prompt {
-            sections.push((hp.clone(), 0));
+            // 只保留关键信息，去掉冗长描述
+            let compact: String = hp.lines()
+                .filter(|l| l.contains(':') || l.contains("系统") || l.contains("目录"))
+                .take(15)
+                .collect::<Vec<_>>()
+                .join("\n");
+            if !compact.is_empty() {
+                sections.push((format!("## 环境\n{}", compact), 0));
+            }
         }
 
-        // 3. Repo Map（项目结构）
+        // 3. Repo Map 精简版
         if let Some(ref rm) = self.repo_map {
-            sections.push((rm.clone(), 0));
+            let short: String = rm.lines().take(40).collect::<Vec<_>>().join("\n");
+            sections.push((short, 0));
         }
 
         // 4. 可用工具列表
@@ -80,14 +89,24 @@ impl PromptBuilder {
             sections.push((self.build_tools_section(), 0));
         }
 
-        // 5. 安全约束
+        // 5. 安全约束（精简）
         if let Some(ref sr) = self.safety_rules {
-            sections.push((sr.clone(), 0));
+            let short: String = sr.lines()
+                .filter(|l| l.contains('-') || l.contains('·'))
+                .take(8)
+                .collect::<Vec<_>>()
+                .join("\n");
+            if !short.is_empty() {
+                sections.push((format!("## 安全\n{}", short), 0));
+            }
         }
 
-        // 6. 成本提醒
+        // 6. 成本约束（精简）
         if let Some(ref cc) = self.cost_config {
-            sections.push((self.build_cost_section(cc), 0));
+            sections.push((format!(
+                "## 成本\n上限 ¥{:.2}，当前已用请留意。超限自动熔断。",
+                cc.cost_limit
+            ), 0));
         }
 
         // 计算各区块 Token 估算值（按 4 chars ≈ 1 token 粗略估算）
@@ -127,34 +146,22 @@ impl PromptBuilder {
 
     // ── 私有方法 ──
 
-    fn build_identity_section(&self, user_prompt: &str) -> String {
+    fn build_core_instruction(&self, user_prompt: &str) -> String {
         format!(
             "## 身份\n\
              你是 JC9 AI 编码助手，一个集成在桌面应用中的智能编程代理。\n\
-             你可以执行文件读写、代码搜索、终端命令、代码编辑等操作。\n\
-             请直接、精确地完成任务，避免冗长的解释。\n\
-             每次工具调用后仔细阅读返回结果，根据观察调整下一步行动。\n\n\
-             ## 用户指令\n{}\n",
+             你可以执行文件读写、代码搜索、终端命令、代码编辑等操作。\n\n\
+             ## 规则\n\
+             - 如果是**需要操作代码/文件/终端**的请求 → 直接调用可用工具来完成，不要描述计划，直接动手。\n\
+             - 如果是**不需要工具的简单问答**（如询问概念、解释问题、闲聊）→ 直接回答，不要调用任何工具。\n\
+             - 每次工具调用后仔细阅读返回结果，根据观察调整下一步。\n\
+             - 避免冗长的解释，精确完成任务。\n\n\
+             ## 用户请求\n{}\n",
             user_prompt
         )
     }
 
     fn build_tools_section(&self) -> String {
         self.build_compact_tool_list()
-    }
-
-    fn build_cost_section(&self, config: &CostConfig) -> String {
-        format!(
-            "## 成本约束\n\
-             - 输入 Token 单价（缓存）: ${:.4}/M tokens\n\
-             - 输入 Token 单价（非缓存）: ${:.4}/M tokens\n\
-             - 输出 Token 单价: ${:.4}/M tokens\n\
-             - 总成本上限: ¥{:.2}\n\
-             - 当超出预算时系统会自动熔断，请在预算内高效完成任务\n",
-            config.input_cached_cost_per_m,
-            config.input_uncached_cost_per_m,
-            config.output_cost_per_m,
-            config.cost_limit,
-        )
     }
 }

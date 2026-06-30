@@ -60,7 +60,10 @@ impl KnowledgeBase {
             KbEntryType::Takeaway => "takeaway",
         };
 
-        let conn = self.conn.lock().unwrap();
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return entry.id,
+        };
         let _ = conn.execute(
             r#"INSERT OR REPLACE INTO knowledge 
             (id, title, content, tags, entry_type, confidence, is_draft, created_at, updated_at) 
@@ -211,7 +214,10 @@ impl KnowledgeBase {
     }
 
     pub async fn promote(&self, entry_id: &str) -> bool {
-        let conn = self.conn.lock().unwrap();
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
         let rows = conn.execute(
             "UPDATE knowledge SET is_draft = 0, updated_at = ?2 WHERE id = ?1",
             params![entry_id, Utc::now().to_rfc3339()],
@@ -221,7 +227,10 @@ impl KnowledgeBase {
 
     /// 删除知识条目及其向量嵌入（用于笔记永久删除时同步清理）
     pub async fn remove_entry(&self, entry_id: &str) -> bool {
-        let conn = self.conn.lock().unwrap();
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
         let _ = conn.execute("DELETE FROM embeddings WHERE source_id = ?1", params![entry_id]);
         let _ = conn.execute("DELETE FROM vec_embeddings WHERE id IN (SELECT id FROM embeddings WHERE source_id = ?1)", params![entry_id]);
         conn.execute("DELETE FROM knowledge WHERE id = ?1", params![entry_id]).is_ok()
@@ -229,7 +238,10 @@ impl KnowledgeBase {
 
     pub async fn update_confidence(&self, entry_id: &str, confidence: f64) -> bool {
         let is_draft = if confidence >= self.auto_promote_threshold { 0 } else { 1 };
-        let conn = self.conn.lock().unwrap();
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
         let rows = conn.execute(
             "UPDATE knowledge SET confidence = ?2, is_draft = ?3, updated_at = ?4 WHERE id = ?1",
             params![entry_id, confidence, is_draft, Utc::now().to_rfc3339()],
@@ -242,29 +254,44 @@ impl KnowledgeBase {
     }
 
     pub async fn list_drafts(&self) -> Vec<KbEntry> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return vec![],
+        };
+        let mut stmt = match conn.prepare(
             "SELECT id, title, content, tags, entry_type, confidence, is_draft, created_at, updated_at FROM knowledge WHERE is_draft = 1"
-        ).unwrap();
-        self.query_to_vector(&mut stmt)
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        self.query_to_vector(&mut stmt).unwrap_or_default()
     }
 
     async fn get_entries_internal(&self, include_drafts: bool) -> Vec<KbEntry> {
-        let conn = self.conn.lock().unwrap();
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return vec![],
+        };
         let sql = if include_drafts {
             "SELECT id, title, content, tags, entry_type, confidence, is_draft, created_at, updated_at FROM knowledge"
         } else {
             "SELECT id, title, content, tags, entry_type, confidence, is_draft, created_at, updated_at FROM knowledge WHERE is_draft = 0"
         };
-        let mut stmt = conn.prepare(sql).unwrap();
-        self.query_to_vector(&mut stmt)
+        let mut stmt = match conn.prepare(sql) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        self.query_to_vector(&mut stmt).unwrap_or_default()
     }
 
     // ── Session 会话持久化 ──
 
     /// 保存/更新一个 AI 会话
     pub async fn save_session(&self, session: &AiSession) -> bool {
-        let conn = self.conn.lock().unwrap();
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
         let status_str = match session.status {
             SessionStatus::Active => "active",
             SessionStatus::Paused => "paused",
@@ -298,7 +325,10 @@ impl KnowledgeBase {
 
     /// 同步版本：加载所有 AI 会话（内部使用，无需 async 运行时）
     pub fn load_sessions_blocking(&self) -> Vec<AiSession> {
-        let conn = self.conn.lock().unwrap();
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return vec![],
+        };
         let mut stmt = match conn.prepare(
             "SELECT id, title, status, project_id, task_description, token_count, cost_usd, created_at, updated_at FROM ai_sessions ORDER BY updated_at DESC"
         ) {
@@ -338,12 +368,15 @@ impl KnowledgeBase {
 
     /// 删除一个会话
     pub async fn delete_session(&self, session_id: &str) -> bool {
-        let conn = self.conn.lock().unwrap();
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
         conn.execute("DELETE FROM ai_sessions WHERE id = ?1", params![session_id])
             .is_ok()
     }
 
-    fn query_to_vector(&self, stmt: &mut rusqlite::Statement) -> Vec<KbEntry> {
+    fn query_to_vector(&self, stmt: &mut rusqlite::Statement) -> Result<Vec<KbEntry>, String> {
         let entries_iter = stmt.query_map([], |row| {
             let tags_str: String = row.get(3)?;
             let tags = if tags_str.is_empty() { vec![] } else { tags_str.split(',').map(|s| s.to_string()).collect() };
@@ -374,7 +407,7 @@ impl KnowledgeBase {
                 updated_at: DateTime::parse_from_rfc3339(&updated_at_str).map(|d| d.with_timezone(&Utc)).unwrap_or_else(|_| Utc::now()),
                 embedding: None,
             })
-        }).unwrap();
+        }).map_err(|e| e.to_string())?;
 
         let mut all_entries = Vec::new();
         for entry in entries_iter {
@@ -382,6 +415,6 @@ impl KnowledgeBase {
                 all_entries.push(e);
             }
         }
-        all_entries
+        Ok(all_entries)
     }
 }
