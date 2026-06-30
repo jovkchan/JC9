@@ -1,0 +1,8 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^cargo check 2>&1; \\$LASTEXITCODE$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}

@@ -184,6 +184,24 @@ export const useAiStore = defineStore('ai', () => {
     }
   }
 
+  async function connectMcpServerStdio(name: string, command: string, args: string[]) {
+    try {
+      await invoke('ai_connect_mcp_stdio', { name, command, args })
+      await loadMcpServers()
+    } catch (e) {
+      error.value = String(e)
+    }
+  }
+
+  async function disconnectMcpServer(name: string) {
+    try {
+      await invoke('ai_disconnect_mcp_server', { name })
+      await loadMcpServers()
+    } catch (e) {
+      error.value = String(e)
+    }
+  }
+
   async function loadMcpServers() {
     try {
       mcpServers.value = await invoke<McpServer[]>('ai_list_mcp_servers')
@@ -320,6 +338,8 @@ export const useAiStore = defineStore('ai', () => {
     addKnowledge,
     connectMcpServer,
     loadMcpServers,
+    connectMcpServerStdio,
+    disconnectMcpServer,
     loadDrafts,
     promoteKnowledge,
     loadWorkspaceRoot,

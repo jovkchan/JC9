@@ -102,6 +102,17 @@ impl ApprovalQueue {
         } else { false }
     }
 
+    /// 拒绝所有待审批请求
+    pub async fn deny_all(&self) {
+        let ids: Vec<String> = {
+            let pending = self.pending.read().await;
+            pending.keys().cloned().collect()
+        };
+        for id in ids {
+            self.deny(&id).await;
+        }
+    }
+
     pub async fn get_pending(&self) -> Vec<ApprovalRequest> { self.pending.read().await.values().cloned().collect() }
     pub async fn get_resolved(&self) -> Vec<ApprovalRequest> { self.resolved.read().await.clone() }
     pub async fn set_auto_approve_low_risk(&self, enabled: bool) { *self.auto_approve_low_risk.write().await = enabled; }

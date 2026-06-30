@@ -254,7 +254,7 @@ onUnmounted(() => {
 
     <!-- Tool content -->
     <div v-for="(t,i) in store.toolTabs" :key="'tlc'+t.id" class="content" v-show="store.activeTabType==='tool'&&i===store.activeToolIndex">
-      <div class="bar"><code class="cmdtext">工具箱: {{ t.title }}</code></div>
+      
       <div class="tool-view-body">
         <JsonFormatter v-if="t.toolType === 'json'" />
         <Base64Tool v-else-if="t.toolType === 'base64'" />

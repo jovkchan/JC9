@@ -139,9 +139,13 @@ export interface KbEntry {
 export interface McpServer {
   id: string
   name: string
-  url: string
-  status: 'connected' | 'disconnected' | 'error'
-  tools: unknown[]
+  transport: 'sse' | 'stdio'
+  url?: string | null
+  command?: string | null
+  args?: string[] | null
+  status: 'connected' | 'disconnected' | 'error' | 'connecting'
+  tools: { name: string; description: string; inputSchema: unknown }[]
+  errorMessage?: string | null
 }
 
 export interface ToolCall {

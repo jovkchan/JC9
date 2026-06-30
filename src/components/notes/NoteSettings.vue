@@ -5,6 +5,7 @@ import { useStatusStore } from '@/stores/status'
 import { save, open } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
 import { loadAllRoles, saveAllRoles, type AgentRole } from '@/config/roles'
+import { useAiStore } from '@/stores/ai'
 
 defineProps<{
   show: boolean
@@ -16,6 +17,7 @@ const emit = defineEmits<{
 
 const store = useNotesStore()
 const status = useStatusStore()
+const aiStore = useAiStore()
 
 const activeTab = ref<'general' | 'ai' | 'ai-roles' | 'backup' | 'skills' | 'command' |'hook'|'plugin'|'mcp'>('general')
 
@@ -172,6 +174,9 @@ onMounted(() => {
 
   // 加载 AI 角色配置
   rolesList.value = loadAllRoles()
+
+  // 加载 MCP 服务器列表
+  aiStore.loadMcpServers()
 })
 
 function saveSettings() {
@@ -262,6 +267,173 @@ async function fetchVllmModelsForm() {
     }
   } catch { /* ignore */ }
   finally { loadingModels.value = false }
+}
+
+// ── MCP 服务器管理 ──
+const showMcpForm = ref(false)
+const connecting = ref(false)
+const mcpViewMode = ref<'list' | 'json'>('list')
+const mcpJsonConfig = ref('')
+const applyingJson = ref(false)
+const mcpJsonError = ref('')
+const mcpForm = ref({
+  transport: 'sse' as 'sse' | 'stdio',
+  name: '',
+  url: '',
+  command: '',
+  argsText: '',
+})
+
+function statusLabel(s: string): string {
+  const map: Record<string, string> = {
+    connected: '已连接',
+    disconnected: '已断开',
+    connecting: '连接中',
+    error: '错误',
+  }
+  return map[s] || s
+}
+
+function handleMcpOverlayClick(e: MouseEvent) {
+  if (e.target === e.currentTarget && formMousedownTarget === e.currentTarget) {
+    showMcpForm.value = false
+  }
+}
+
+async function saveMcpForm() {
+  const f = mcpForm.value
+  if (!f.name.trim()) {
+    status.pushMessage('请填写服务器名称', 'warn')
+    return
+  }
+  connecting.value = true
+  try {
+    if (f.transport === 'sse') {
+      if (!f.url.trim()) {
+        status.pushMessage('请填写 SSE URL', 'warn')
+        return
+      }
+      await aiStore.connectMcpServer(f.name.trim(), f.url.trim())
+    } else {
+      if (!f.command.trim()) {
+        status.pushMessage('请填写启动命令', 'warn')
+        return
+      }
+      const args = f.argsText.split(',').map(a => a.trim()).filter(Boolean)
+      await aiStore.connectMcpServerStdio(f.name.trim(), f.command.trim(), args)
+    }
+    showMcpForm.value = false
+    status.pushMessage(`已连接 MCP 服务器: ${f.name}`, 'success')
+  } catch (e) {
+    status.pushMessage(`连接失败: ${e}`, 'error')
+  } finally {
+    connecting.value = false
+  }
+}
+
+async function disconnectMcp(name: string) {
+  try {
+    await aiStore.disconnectMcpServer(name)
+    status.pushMessage(`已断开 MCP 服务器: ${name}`, 'success')
+  } catch (e) {
+    status.pushMessage(`断开失败: ${e}`, 'error')
+  }
+}
+
+function switchToJsonMode() {
+  // 将当前服务器列表导出为 JSON 格式
+  const config: Record<string, any> = { mcpServers: {} }
+  for (const srv of aiStore.mcpServers) {
+    if (srv.transport === 'stdio') {
+      config.mcpServers[srv.name] = {
+        command: srv.command,
+        args: srv.args,
+      }
+    } else {
+      config.mcpServers[srv.name] = {
+        url: srv.url,
+      }
+    }
+  }
+  mcpJsonConfig.value = JSON.stringify(config, null, 2)
+  mcpJsonError.value = ''
+  mcpViewMode.value = 'json'
+}
+
+function validateAndParseMcpJson(text: string): { mcpServers: Record<string, any> } | null {
+  try {
+    const parsed = JSON.parse(text)
+    if (!parsed.mcpServers || typeof parsed.mcpServers !== 'object') {
+      throw new Error('缺少 "mcpServers" 顶层字段')
+    }
+    for (const [name, cfg] of Object.entries(parsed.mcpServers)) {
+      const c = cfg as any
+      if (typeof c !== 'object' || c === null) {
+        throw new Error(`服务器 "${name}" 配置无效`)
+      }
+      if (!c.url && !c.command) {
+        throw new Error(`服务器 "${name}" 需要提供 "url"（SSE）或 "command"（Stdio）`)
+      }
+    }
+    return parsed
+  } catch (e: any) {
+    mcpJsonError.value = `JSON 解析错误: ${e.message}`
+    return null
+  }
+}
+
+async function applyMcpJson() {
+  applyingJson.value = true
+  mcpJsonError.value = ''
+  try {
+    // 先断开所有现有连接
+    for (const srv of aiStore.mcpServers) {
+      await aiStore.disconnectMcpServer(srv.name)
+    }
+
+    // 等待断开生效
+    await new Promise(r => setTimeout(r, 300))
+
+    // 解析 JSON
+    const config = validateAndParseMcpJson(mcpJsonConfig.value)
+    if (!config) {
+      applyingJson.value = false
+      return
+    }
+
+    // 逐个连接
+    let connected = 0
+    let failed = 0
+    for (const [name, cfg] of Object.entries(config.mcpServers)) {
+      try {
+        if (cfg.url) {
+          await aiStore.connectMcpServer(name, cfg.url)
+        } else if (cfg.command) {
+          const args: string[] = cfg.args || []
+          await aiStore.connectMcpServerStdio(name, cfg.command, args)
+        }
+        connected++
+      } catch (e) {
+        failed++
+        console.error(`连接 MCP 服务器 "${name}" 失败:`, e)
+      }
+    }
+
+    await aiStore.loadMcpServers()
+    status.pushMessage(`JSON 配置应用完成: ${connected} 成功, ${failed} 失败`, failed > 0 ? 'warn' : 'success')
+  } catch (e: any) {
+    mcpJsonError.value = `应用配置失败: ${e.message}`
+  } finally {
+    applyingJson.value = false
+  }
+}
+
+async function disconnectAllMcp() {
+  for (const srv of aiStore.mcpServers) {
+    await aiStore.disconnectMcpServer(srv.name)
+  }
+  await aiStore.loadMcpServers()
+  status.pushMessage('已断开所有 MCP 服务器', 'success')
 }
 
 // ── 备份与导出 ──
@@ -361,7 +533,7 @@ async function importData() {
             插件
           </div>
           <div :class="['nav-item', { active: activeTab === 'mcp' }]" @click="activeTab = 'mcp'">
-            插件
+            MCP
           </div>
           <div :class="['nav-item', { active: activeTab === 'backup' }]" @click="activeTab = 'backup'">
             数据备份导入
@@ -557,7 +729,115 @@ async function importData() {
           <div v-if="activeTab === 'command'" class="settings-pane">设置始终生效的指令，在整个工作区或用户配置文件中引导AI行为</div>
           <div v-if="activeTab === 'hook'" class="settings-pane">配置由保存文件或运行任务等事件触发的自动操作</div>
           <div v-if="activeTab === 'plugin'" class="settings-pane">安装和管理智能体插件，以添加更多工具，技能和集成</div>
-          <div v-if="activeTab === 'mcp'" class="settings-pane">连接外部工具服务器，通过自定义工具和数据源扩展AI功能</div>
+          <!-- 7. MCP 服务器管理 -->
+          <div v-if="activeTab === 'mcp'" class="settings-pane">
+            <h3 class="pane-title">MCP 服务器管理</h3>
+            <p class="pane-desc" style="margin-bottom:12px">连接外部 MCP（Model Context Protocol）服务器，通过自定义工具和数据源扩展 AI Agent 能力。</p>
+
+            <!-- 模式切换 -->
+            <div class="mcp-mode-toggle">
+              <button :class="['mcp-mode-btn', { active: mcpViewMode === 'list' }]" @click="mcpViewMode = 'list'">服务器列表</button>
+              <button :class="['mcp-mode-btn', { active: mcpViewMode === 'json' }]" @click="switchToJsonMode">JSON 配置</button>
+            </div>
+
+            <!-- ── 列表模式 ── -->
+            <template v-if="mcpViewMode === 'list'">
+              <div class="mcp-server-list">
+                <div v-for="srv in aiStore.mcpServers" :key="srv.id" class="mcp-server-card">
+                  <div class="mcp-server-top">
+                    <div class="mcp-server-info">
+                      <span class="mcp-server-name">{{ srv.name }}</span>
+                      <span :class="['mcp-server-status', srv.status]">
+                        {{ statusLabel(srv.status) }}
+                      </span>
+                      <span class="mcp-server-transport">{{ srv.transport === 'sse' ? 'SSE' : 'Stdio' }}</span>
+                    </div>
+                    <button class="mcp-server-disconnect" @click="disconnectMcp(srv.name)" title="断开连接">✕</button>
+                  </div>
+                  <div v-if="srv.url" class="mcp-server-url">{{ srv.url }}</div>
+                  <div v-if="srv.command" class="mcp-server-url">{{ srv.command }} {{ srv.args?.join(' ') }}</div>
+                  <div v-if="srv.errorMessage" class="mcp-server-error">{{ srv.errorMessage }}</div>
+                  <div v-if="srv.tools && srv.tools.length > 0" class="mcp-server-tools">
+                    <div class="mcp-tools-label">工具列表 ({{ srv.tools.length }})</div>
+                    <div class="mcp-tools-grid">
+                      <div v-for="tool in srv.tools" :key="tool.name" class="mcp-tool-chip" :title="tool.description || tool.name">
+                        {{ tool.name }}
+                      </div>
+                    </div>
+                  </div>
+                  <div v-else class="mcp-server-tools">
+                    <span class="mcp-tools-empty">暂无工具</span>
+                  </div>
+                </div>
+                <div v-if="aiStore.mcpServers.length === 0" class="empty-hint">尚未连接任何 MCP 服务器</div>
+              </div>
+
+              <button class="add-mcp-btn" @click="showMcpForm = true">+ 连接 MCP 服务器</button>
+
+              <!-- 添加 MCP 表单弹窗 -->
+              <div v-if="showMcpForm" class="mcp-form-overlay" @mousedown="handleFormMousedown" @click="handleMcpOverlayClick">
+                <div class="mcp-form-card">
+                  <h4>连接 MCP 服务器</h4>
+                  <div class="form-group">
+                    <label>连接方式</label>
+                    <select v-model="mcpForm.transport" class="form-select">
+                      <option value="sse">SSE（远程服务器）</option>
+                      <option value="stdio">Stdio（本地进程）</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label>服务器名称</label>
+                    <input v-model="mcpForm.name" class="form-input" placeholder="例如：my-filesystem-server" />
+                  </div>
+                  <template v-if="mcpForm.transport === 'sse'">
+                    <div class="form-group">
+                      <label>SSE URL</label>
+                      <input v-model="mcpForm.url" class="form-input" placeholder="https://example.com/mcp" />
+                    </div>
+                  </template>
+                  <template v-if="mcpForm.transport === 'stdio'">
+                    <div class="form-group">
+                      <label>启动命令</label>
+                      <input v-model="mcpForm.command" class="form-input" placeholder="例如：npx" />
+                    </div>
+                    <div class="form-group">
+                      <label>参数</label>
+                      <input v-model="mcpForm.argsText" class="form-input" placeholder="例如：@modelcontextprotocol/server-filesystem, ." />
+                      <span class="help-text">多个参数用逗号分隔</span>
+                    </div>
+                  </template>
+                  <div class="mcp-form-actions">
+                    <button class="footer-btn-cancel" @click="showMcpForm = false">取消</button>
+                    <button class="footer-btn-save" :disabled="connecting" @click="saveMcpForm">
+                      {{ connecting ? '连接中...' : '连接' }}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </template>
+
+            <!-- ── JSON 配置模式 ── -->
+            <template v-if="mcpViewMode === 'json'">
+              <p class="pane-desc" style="margin-bottom:8px">
+                编辑符合 MCP 规范的 JSON 配置，点击应用后自动连接所有服务器。
+                格式参考：
+                <code style="font-size:10px">{ "mcpServers": { "name": { "command": "...", "args": [...] } } }</code>
+              </p>
+              <textarea
+                v-model="mcpJsonConfig"
+                class="mcp-json-editor"
+                spellcheck="false"
+                placeholder='{\n  "mcpServers": {\n    "filesystem": {\n      "command": "npx",\n      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."]\n    },\n    "remote-api": {\n      "url": "https://api.example.com/mcp"\n    }\n  }\n}'
+              ></textarea>
+              <div class="mcp-json-actions">
+                <button class="mcp-json-apply" @click="applyMcpJson" :disabled="applyingJson">
+                  {{ applyingJson ? '应用中...' : '应用 JSON 配置' }}
+                </button>
+                <button class="mcp-json-clear" @click="disconnectAllMcp">断开全部</button>
+              </div>
+              <div v-if="mcpJsonError" class="mcp-server-error">{{ mcpJsonError }}</div>
+            </template>
+          </div>
         </main>
       </div>
 
@@ -1163,5 +1443,286 @@ async function importData() {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 4px;
+}
+
+/* ── MCP 服务器管理 ── */
+.mcp-server-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+  margin-bottom: 10px;
+}
+
+.mcp-server-card {
+  border: 1px solid var(--jc-border-default);
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mcp-server-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mcp-server-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mcp-server-name {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--jc-text-highlight);
+}
+
+.mcp-server-status {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+
+  &.connected { background: rgba(63, 185, 80, 0.15); color: #3fb950; }
+  &.connecting { background: rgba(210, 153, 34, 0.15); color: #d29922; }
+  &.error { background: rgba(248, 81, 73, 0.15); color: #f85149; }
+  &.disconnected { background: rgba(139, 148, 158, 0.15); color: #8b949e; }
+}
+
+.mcp-server-transport {
+  font-size: 9px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--jc-text-secondary);
+  font-family: monospace;
+}
+
+.mcp-server-disconnect {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--jc-text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+
+  &:hover {
+    color: #f85149;
+    border-color: #f85149;
+  }
+}
+
+.mcp-server-url {
+  font-size: 10px;
+  font-family: monospace;
+  color: var(--jc-text-secondary);
+  word-break: break-all;
+}
+
+.mcp-server-error {
+  font-size: 10px;
+  color: #f85149;
+  background: rgba(248, 81, 73, 0.08);
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.mcp-server-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mcp-tools-label {
+  font-size: 10px;
+  color: var(--jc-text-secondary);
+  font-weight: 500;
+}
+
+.mcp-tools-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.mcp-tool-chip {
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(88, 166, 255, 0.1);
+  color: #58a6ff;
+  font-family: monospace;
+  cursor: default;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  &:hover {
+    background: rgba(88, 166, 255, 0.2);
+  }
+}
+
+.mcp-tools-empty {
+  font-size: 10px;
+  color: var(--jc-text-secondary);
+  opacity: 0.6;
+}
+
+.add-mcp-btn {
+  width: 100%;
+  padding: 6px;
+  border: 1px dashed var(--jc-border-default);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--jc-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+
+  &:hover {
+    border-color: var(--jc-color-accent);
+    color: var(--jc-color-accent);
+  }
+}
+
+/* MCP 表单弹窗 */
+.mcp-form-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.mcp-form-card {
+  background: var(--jc-bg-elevated);
+  border: 1px solid var(--jc-border-strong);
+  border-radius: 8px;
+  padding: 16px;
+  width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+
+  h4 {
+    margin: 0;
+    font-size: 13px;
+    color: var(--jc-text-primary);
+  }
+}
+
+.mcp-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.footer-btn-save:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── MCP 模式切换 ── */
+.mcp-mode-toggle {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.mcp-mode-btn {
+  flex: 1;
+  padding: 5px 10px;
+  border: 1px solid var(--jc-border-default);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--jc-text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+
+  &:hover {
+    border-color: var(--jc-color-accent);
+    color: var(--jc-text-primary);
+  }
+
+  &.active {
+    background: rgba(88, 166, 255, 0.1);
+    border-color: var(--jc-color-accent);
+    color: var(--jc-color-accent);
+    font-weight: 600;
+  }
+}
+
+/* ── MCP JSON 编辑器 ── */
+.mcp-json-editor {
+  width: 100%;
+  min-height: 260px;
+  background: var(--jc-bg-input);
+  border: 1px solid var(--jc-border-default);
+  color: var(--jc-text-primary);
+  font-family: monospace;
+  font-size: 11px;
+  padding: 10px;
+  border-radius: 4px;
+  resize: vertical;
+  outline: none;
+  line-height: 1.5;
+  tab-size: 2;
+
+  &:focus {
+    border-color: var(--jc-color-accent);
+  }
+
+  &::placeholder {
+    color: var(--jc-text-secondary);
+    opacity: 0.4;
+  }
+}
+
+.mcp-json-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.mcp-json-apply {
+  flex: 1;
+  padding: 6px 12px;
+  background: var(--jc-color-accent);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+
+  &:hover { opacity: 0.9; }
+  &:disabled { opacity: 0.5; cursor: not-allowed; }
+}
+
+.mcp-json-clear {
+  padding: 6px 12px;
+  background: transparent;
+  color: var(--jc-text-secondary);
+  border: 1px solid var(--jc-border-default);
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+
+  &:hover {
+    color: #f85149;
+    border-color: #f85149;
+  }
 }
 </style>

@@ -911,6 +911,16 @@ async fn ai_deny_request(state: State<'_, Mutex<AppState>>, request_id: String) 
 }
 
 #[tauri::command]
+async fn ai_deny_all_approvals(state: State<'_, Mutex<AppState>>) -> Result<(), String> {
+    let ai_manager = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.ai_manager.clone()
+    };
+    ai_manager.approval_queue().deny_all().await;
+    Ok(())
+}
+
+#[tauri::command]
 async fn ai_search_knowledge(
     state: State<'_, Mutex<AppState>>,
     query: String,
@@ -984,6 +994,33 @@ async fn ai_list_mcp_servers(
         app_state.ai_manager.clone()
     };
     Ok(ai_manager.mcp_client().list_servers().await)
+}
+
+#[tauri::command]
+async fn ai_connect_mcp_stdio(
+    state: State<'_, Mutex<AppState>>,
+    name: String,
+    command: String,
+    args: Vec<String>,
+) -> Result<(), String> {
+    let ai_manager = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.ai_manager.clone()
+    };
+    ai_manager.mcp_client().connect_stdio(name, command, args).await
+}
+
+#[tauri::command]
+async fn ai_disconnect_mcp_server(
+    state: State<'_, Mutex<AppState>>,
+    name: String,
+) -> Result<(), String> {
+    let ai_manager = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.ai_manager.clone()
+    };
+    ai_manager.mcp_client().disconnect(&name).await;
+    Ok(())
 }
 
 #[tauri::command]
@@ -1127,8 +1164,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
             let ai_manager = std::sync::Arc::new(ai::agent_manager::AgentManager::new(
-                workspace,
-                db_conn,
+                workspace.clone(),
+                db_conn.clone(),
                 Some(app.handle().clone()),
             ));
             app.manage(Mutex::new(AppState {
@@ -1137,9 +1174,19 @@ pub fn run() {
                 ai_manager,
             }));
 
-            // 启动时回填历史笔记到知识库（异步，不影响启动速度）
+            // 启动时回填历史笔记到知识库
             let app_handle = app.handle().clone();
+            let db_conn_clone = db_conn.clone();
+            let skills_dir = workspace.join(".jc9");
             tauri::async_runtime::spawn(async move {
+                // 1. 同步技能文件到知识库
+                let loader = ai::skill_loader::SkillLoader::new(skills_dir, db_conn_clone);
+                let skill_count = loader.sync_all().await;
+                if skill_count > 0 {
+                    println!("✅ 已同步 {} 个技能到知识库", skill_count);
+                }
+
+                // 2. 回填历史笔记
                 let state = app_handle.state::<Mutex<AppState>>();
                 let (notes, kb) = {
                     let guard = state.lock().unwrap();
@@ -1202,12 +1249,15 @@ pub fn run() {
             ai_get_pending_approvals,
             ai_approve_request,
             ai_deny_request,
+            ai_deny_all_approvals,
             ai_search_knowledge,
             ai_semantic_search,
             ai_vec_status,
             ai_add_knowledge,
             ai_connect_mcp_server,
             ai_list_mcp_servers,
+            ai_connect_mcp_stdio,
+            ai_disconnect_mcp_server,
             ai_list_drafts,
             ai_promote_knowledge,
             ai_update_cost_config,

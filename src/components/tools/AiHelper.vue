@@ -5,7 +5,7 @@ import { useStatusStore } from '@/stores/status'
 import { useAiStore } from '@/stores/ai'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import type { WorkerState, ApprovalRequest } from '@/types/ai'
+import type { WorkerState, ApprovalRequest, KbEntry } from '@/types/ai'
 import { getRole, loadAllRoles, type AgentRole } from '@/config/roles'
 
 const notesStore = useNotesStore()
@@ -50,6 +50,20 @@ const activeChatRole = computed(() => {
 const pollTimer = ref<number | null>(null)
 const manualPath = ref('')
 const showModelSettingsModal = ref(false)
+const showSessionPopup = ref(false)
+const newSessionTitle = ref('')
+const kbSearchQuery = ref('')
+const kbSearchResults = ref<KbEntry[]>([])
+
+async function searchKnowledgeBase() {
+  if (!kbSearchQuery.value.trim()) return
+  try {
+    kbSearchResults.value = await invoke<KbEntry[]>('ai_search_knowledge', {
+      query: kbSearchQuery.value.trim(),
+      limit: 8,
+    })
+  } catch { /* ignore */ }
+}
 const isConsoleExpanded = ref(true)
 const expandedWorkers = ref<Record<string, boolean>>({})
 
@@ -89,6 +103,15 @@ const localConfig = ref({
   outputCostPerM: 6.0,
   costLimit: 5.0
 })
+
+const inputTextarea = ref<HTMLTextAreaElement | null>(null)
+
+function autoResizeTextarea() {
+  const el = inputTextarea.value
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = Math.min(el.scrollHeight, 480) + 'px'
+}
 
 const statusColors: Record<string, string> = {
   thinking: '#58a6ff',
@@ -1068,6 +1091,17 @@ async function handleKillWorker(workerId: string) {
   await ai.killWorker(workerId)
 }
 
+function selectSession(id: string) {
+  ai.currentSessionId = id
+  showSessionPopup.value = false
+}
+
+async function handleCreateSessionPopup() {
+  if (!newSessionTitle.value.trim()) return
+  await ai.createSession(newSessionTitle.value.trim())
+  newSessionTitle.value = ''
+}
+
 async function handleSelectWorkspace() {
   await ai.changeWorkspaceDialog()
   manualPath.value = ai.workspaceRoot
@@ -1158,8 +1192,14 @@ onUnmounted(() => {
 
 </script>
 
-<template>
-  <div class="ai-helper-container">
+<template><div class="ai-helper-container">
+    <div class="ai-top-bar">
+      <button class="top-session-btn" @click="showSessionPopup = true" :title="ai.currentSession?.title || '选择会话'">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+        </svg>
+      </button>
+    </div>
     <!-- 左侧：问答与聊天主面板 -->
     <div class="ai-chat-section">
       <div class="ai-chat-area">
@@ -1266,6 +1306,31 @@ onUnmounted(() => {
                 </div>
               </div>
             </div>
+
+            <!-- ── 任务树面板 ── -->
+            <div class="console-section" v-if="ai.taskTree.length > 0">
+              <div class="console-section-title">📋 任务树 ({{ ai.taskTree.length }})</div>
+              <div class="task-tree-compact">
+                <div v-for="task in ai.taskTree" :key="task.id" class="task-node-compact">
+                  <span :class="['task-status-dot', task.status]"></span>
+                  <span class="task-title-compact">{{ task.title }}</span>
+                  <span class="task-status-label">{{ statusLabel(task.status) }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- ── 知识库搜索面板 ── -->
+            <div class="console-section" v-if="ai.workers.length > 0">
+              <div class="console-section-title">🔍 知识库</div>
+              <div class="kb-search-compact">
+                <input v-model="kbSearchQuery" class="kb-search-input" placeholder="搜索知识库..." @keyup.enter="searchKnowledgeBase" />
+                <button class="kb-search-btn" @click="searchKnowledgeBase">搜索</button>
+              </div>
+              <div v-for="entry in kbSearchResults" :key="entry.id" class="kb-result-item">
+                <div class="kb-result-title">{{ entry.title }}</div>
+                <div class="kb-result-preview">{{ entry.content.slice(0, 80) }}...</div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1294,12 +1359,14 @@ onUnmounted(() => {
         <!-- 一体化输入卡片 -->
         <div class="ds-input-card" :class="{ 'focused': isFocused, 'has-content': userInput.trim().length > 0 }">
           <textarea 
+            ref="inputTextarea"
             v-model="userInput" 
             :placeholder="placeholderText" 
             class="ds-textarea"
             @focus="isFocused = true"
             @blur="isFocused = false"
             @keydown.enter.prevent="handleEnterKey"
+            @input="autoResizeTextarea"
           ></textarea>
           
           <div class="ds-control-bar">
@@ -1343,7 +1410,83 @@ onUnmounted(() => {
                 </button>
               </div>
 
-              <!-- AI 角色选择 / 智能体团队状态 -->
+             
+
+              <!-- DS 思维强度（仅 DS 模型显示） -->
+              <div v-if="aiProvider === 'deepseek'" class="ds-pill-select-wrap" style="gap:4px">
+                
+                <select v-model="reasoningEffort" @change="setReasoningEffort(reasoningEffort)" class="ds-pill-select" style="max-width:56px;font-size:10px" title="思维强度">
+                  <option value="high">标准</option>
+                  <option value="max">深度</option>
+                  <option value="off">关闭</option>
+                </select>
+              </div>
+              <!-- 会话居中弹窗 -->
+              <div v-if="showSessionPopup" class="session-overlay" @click="showSessionPopup = false">
+                <div class="session-modal" @click.stop>
+                  <div class="session-modal-header">
+                    <span>会话列表</span>
+                    <button class="session-modal-close" @click="showSessionPopup = false">✕</button>
+                  </div>
+                  <div class="session-modal-body">
+                    <div class="session-create-row">
+                      <input v-model="newSessionTitle" class="session-input" placeholder="新建会话名称..." @keyup.enter="handleCreateSessionPopup" />
+                      <button class="session-create-btn" @click="handleCreateSessionPopup">＋</button>
+                    </div>
+                    <div v-for="s in ai.sessions" :key="s.id" :class="['session-item', { active: s.id === ai.currentSessionId }]" @click="selectSession(s.id)">
+                      <span class="session-dot" :class="s.status"></span>
+                      <span class="session-name">{{ s.title }}</span>
+                      <span class="session-date">{{ new Date(s.updatedAt).toLocaleDateString() }}</span>
+                    </div>
+                    <div v-if="ai.sessions.length === 0" class="session-empty">暂无会话，请新建</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 工作区 -->
+              <div class="ds-pill-select-wrap workspace">
+                <button class="ds-pill-inline-btn workspace-btn" @click="handleSelectWorkspace" :title="ai.workspaceRoot || '选择工作区'">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;flex-shrink:0">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                  </svg>
+                  {{ workspaceShortName }}
+                </button>
+              </div>
+
+              <!-- 深度思考 -->
+              <div class="ds-pill-select-wrap" :class="{ active: enableDeepThink }">
+                <button class="ds-pill-inline-btn" @click="enableDeepThink = !enableDeepThink" :title="enableDeepThink ? '关闭深度思考' : '开启深度思考'">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;flex-shrink:0">
+                    <ellipse cx="12" cy="12" rx="3" ry="9" transform="rotate(45 12 12)"></ellipse>
+                    <ellipse cx="12" cy="12" rx="3" ry="9" transform="rotate(-45 12 12)"></ellipse>
+                    <circle cx="12" cy="12" r="1.5" fill="currentColor"></circle>
+                  </svg>
+                  深度思考
+                </button>
+              </div>
+              
+              <!-- 本地知识库 -->
+              <div class="ds-pill-select-wrap" :class="{ active: enableLocalKb }">
+                <button class="ds-pill-inline-btn" @click="enableLocalKb = !enableLocalKb" :title="enableLocalKb ? '关闭本地知识库' : '开启本地知识库'">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;flex-shrink:0">
+                    <circle cx="12" cy="12" r="9"></circle>
+                    <line x1="2" y1="12" x2="22" y2="12"></line>
+                    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                  </svg>
+                  本地知识库
+                </button>
+              </div>
+
+              <!-- Agent 模式 -->
+              <div class="ds-pill-select-wrap" :class="{ active: enableAgentMode }">
+                <button class="ds-pill-inline-btn" @click="enableAgentMode = !enableAgentMode" title="开启后直接描述编码任务，自动规划并执行">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;flex-shrink:0">
+                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                  </svg>
+                  Agent
+                </button>
+              </div>
+               <!-- AI 角色选择 / 智能体团队状态 -->
               <div v-if="!enableAgentMode" class="ds-pill-select-wrap">
                 <select v-model="activeChatRoleId" class="ds-pill-select" style="max-width:92px" title="切换当前对话角色">
                   <option value="auto">智能路由</option>
@@ -1355,70 +1498,6 @@ onUnmounted(() => {
               <div v-else class="ds-pill-select-wrap" style="color: var(--jc-color-accent); font-weight: bold; border-color: rgba(138, 88, 255, 0.3)">
                 <span class="ds-pill-text" style="font-size:10.5px;padding: 0 4px">智能体团队 (多角色协同)</span>
               </div>
-
-              <!-- DS 思维强度（仅 DS 模型显示） -->
-              <div v-if="aiProvider === 'deepseek'" class="ds-pill-select-wrap" style="gap:4px">
-                
-                <select v-model="reasoningEffort" @change="setReasoningEffort(reasoningEffort)" class="ds-pill-select" style="max-width:56px;font-size:10px" title="思维强度">
-                  <option value="high">标准</option>
-                  <option value="max">深度</option>
-                  <option value="off">关闭</option>
-                </select>
-              </div>
-              <!-- 工作区 -->
-              <button 
-                class="ds-pill-btn workspace-btn" 
-                @click="handleSelectWorkspace"
-                :title="ai.workspaceRoot || '选择工作区'"
-              >
-                <svg class="ds-pill-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-                </svg>
-                {{ workspaceShortName }}
-              </button>
-
-              <!-- 深度思考 -->
-              <button 
-                class="ds-pill-btn deep-think" 
-                :class="{ active: enableDeepThink }" 
-                @click="enableDeepThink = !enableDeepThink"
-              >
-                <svg class="ds-pill-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <ellipse cx="12" cy="12" rx="3" ry="9" transform="rotate(45 12 12)"></ellipse>
-                  <ellipse cx="12" cy="12" rx="3" ry="9" transform="rotate(-45 12 12)"></ellipse>
-                  <circle cx="12" cy="12" r="1.5" fill="currentColor"></circle>
-                </svg>
-                深度思考
-              </button>
-              
-              <!-- 本地知识库 -->
-              <button 
-                class="ds-pill-btn local-kb" 
-                :class="{ active: enableLocalKb }" 
-                @click="enableLocalKb = !enableLocalKb"
-              >
-                <svg class="ds-pill-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <circle cx="12" cy="12" r="9"></circle>
-                  <line x1="2" y1="12" x2="22" y2="12"></line>
-                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
-                </svg>
-                本地知识库
-              </button>
-
-              <!-- Agent 模式 -->
-              <button 
-                class="ds-pill-btn agent-mode" 
-                :class="{ active: enableAgentMode }" 
-                @click="enableAgentMode = !enableAgentMode"
-                title="开启后直接描述编码任务，自动规划并执行"
-              >
-                <svg class="ds-pill-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
-                </svg>
-                Agent
-              </button>
-
-             
             </div>
             
             <div class="ds-actions">
@@ -1484,10 +1563,39 @@ onUnmounted(() => {
 <style scoped lang="scss">
 .ai-helper-container {
   display: flex;
+  flex-direction: column;
   flex: 1;
   height: 100%;
   overflow: hidden;
   background: var(--jc-bg-app);
+}
+
+.ai-top-bar {
+  display: flex;
+  align-items: center;
+  padding: 2px 14px;
+  background: var(--jc-bg-panel);
+  border-bottom: 1px solid var(--jc-border-default);
+  gap: 8px;
+  flex-shrink: 0;
+      justify-content: flex-end;
+}
+
+.top-session-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  background: transparent;
+  border: none;
+  color: var(--jc-text-secondary);
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.15s;
+}
+.top-session-btn:hover {
+  color: var(--jc-color-accent);
 }
 
 /* 左侧聊天区域 */
@@ -1504,8 +1612,8 @@ onUnmounted(() => {
   flex-direction: column;
   flex: 1;
   min-height: 0;
-  padding: 14px;
-  gap: 12px;
+  padding: 2px;
+  gap: 2px;
 }
 
 /* Cline 风格智能体控制台 */
@@ -1833,11 +1941,11 @@ onUnmounted(() => {
   overflow-y: auto;
   border: 1px solid var(--jc-border-default);
   background: var(--jc-bg-panel);
-  border-radius: 8px;
-  padding: 16px;
+  border-radius: 2px;
+  padding: 4px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 6px;
 
   &::-webkit-scrollbar {
     width: 4px;
@@ -1958,8 +2066,8 @@ onUnmounted(() => {
   flex-direction: column;
   background: var(--jc-bg-elevated);
   border: 1px solid var(--jc-border-default);
-  border-radius: 16px;
-  padding: 10px 14px;
+  border-radius: 4px;
+  padding: 5px 14px;
   gap: 8px;
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
@@ -1973,7 +2081,7 @@ onUnmounted(() => {
   .ds-textarea {
     width: 100%;
     min-height: 48px;
-    max-height: 120px;
+    max-height: 200px;
     background: transparent;
     border: none;
     resize: none;
@@ -1996,13 +2104,20 @@ onUnmounted(() => {
   .ds-pill-select-wrap {
     display: inline-flex;
     align-items: center;
-    background: var(--jc-bg-btn);
-    border: 1px solid var(--jc-border-default);
-    padding: 0 10px;
-    height: 28px;
-    border-radius: 20px;
+    gap: 3px;
+
+    padding: 0 6px;
+    height: 22px;
     color: var(--jc-text-secondary);
     position: relative;
+    transition: all 0.15s;
+
+    &:hover { color: var(--jc-text-primary); border-color: var(--jc-border-strong); }
+    &.active {
+      border-color: var(--jc-color-accent, #8a58ff);
+      color: var(--jc-color-accent, #8a58ff);
+    }
+    &.workspace { max-width: 130px; overflow: hidden; }
 
     .model-icon { width: 14px; height: 14px; margin-right: 4px; flex-shrink: 0; }
     .ds-pill-select {
@@ -2039,41 +2154,25 @@ onUnmounted(() => {
     }
   }
 
-  .ds-pill-btn {
+  .ds-pill-inline-btn {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    background: var(--jc-bg-btn);
-    border: 1px solid var(--jc-border-default);
-    color: var(--jc-text-secondary);
-    padding: 5px 12px;
-    font-size: 11.5px;
-    border-radius: 20px;
-    cursor: pointer;
+    gap: 3px;
+    background: transparent;
+    border: none;
+    color: inherit;
+    font-size: 10.5px;
     font-weight: 500;
-
-    .ds-pill-icon { width: 14px; height: 14px; flex-shrink: 0; }
-    &:hover { background: var(--jc-bg-hover); color: var(--jc-text-primary); }
-    &.active {
-      background: rgba(138, 88, 255, 0.09);
-      border-color: var(--jc-color-accent, #8a58ff);
-      color: var(--jc-color-accent, #8a58ff);
-    }
-    &.agent-mode.active {
-      background: rgba(240, 136, 62, 0.12);
-      border-color: #f0883e;
-      color: #f0883e;
-    }
-    &.workspace-btn {
-      max-width: 130px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    &.model-settings-btn {
-      font-size: 14px;
-      padding: 4px 8px;
-    }
+    cursor: pointer;
+    padding: 0;
+    white-space: nowrap;
+    outline: none;
+  }
+  .workspace-btn {
+    max-width: 100px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .ds-actions { display: flex; align-items: center; gap: 8px; }
@@ -2438,5 +2537,237 @@ onUnmounted(() => {
       background: rgba(248, 81, 73, 0.1);
     }
   }
+}
+
+/* ── 会话居中弹窗 ── */
+.session-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  padding: 20px;
+}
+
+.session-modal {
+  width: 100%;
+  max-width: 420px;
+  max-height: 70vh;
+  background: var(--jc-bg-elevated);
+  border: 1px solid var(--jc-border-strong);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.session-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--jc-border-default);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--jc-text-primary);
+}
+
+.session-modal-close {
+  background: none;
+  border: none;
+  color: var(--jc-text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  &:hover { color: var(--jc-color-error); background: rgba(248,81,73,0.08); }
+}
+
+.session-modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px;
+}
+
+.session-create-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.session-input {
+  flex: 1;
+  background: var(--jc-bg-input);
+  border: 1px solid var(--jc-border-default);
+  color: var(--jc-text-primary);
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 5px;
+  outline: none;
+  &:focus { border-color: var(--jc-color-accent); }
+}
+
+.session-create-btn {
+  background: var(--jc-color-accent);
+  color: #fff;
+  border: none;
+  width: 30px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  &:hover { opacity: 0.9; }
+}
+
+.session-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--jc-text-primary);
+  transition: background 0.15s;
+  &:hover { background: var(--jc-bg-hover); }
+  &.active { background: var(--jc-bg-selected); color: var(--jc-color-accent); }
+}
+
+.session-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  &.active { background: #3fb950; }
+  &.completed { background: #8b949e; }
+  &.failed { background: #f85149; }
+}
+
+.session-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-date {
+  font-size: 10px;
+  color: var(--jc-text-secondary);
+  flex-shrink: 0;
+}
+
+.session-empty {
+  text-align: center;
+  color: var(--jc-text-secondary);
+  font-size: 12px;
+  padding: 24px;
+}
+
+/* ── 控制台内嵌面板 ── */
+.console-section {
+  border-top: 1px solid var(--jc-border-default);
+  padding: 8px 10px;
+}
+
+.console-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--jc-text-secondary);
+  margin-bottom: 6px;
+}
+
+/* 任务树 */
+.task-tree-compact {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.task-node-compact {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  background: var(--jc-bg-input);
+  border-radius: 4px;
+  font-size: 10px;
+}
+
+.task-status-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  &.pending { background: #8b949e; }
+  &.inProgress { background: #58a6ff; }
+  &.completed { background: #3fb950; }
+  &.failed { background: #f85149; }
+  &.blocked { background: #d29922; }
+}
+
+.task-title-compact {
+  flex: 1;
+  color: var(--jc-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-status-label {
+  font-size: 9px;
+  color: var(--jc-text-secondary);
+}
+
+/* 知识库搜索 */
+.kb-search-compact {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.kb-search-input {
+  flex: 1;
+  background: var(--jc-bg-input);
+  border: 1px solid var(--jc-border-default);
+  color: var(--jc-text-primary);
+  font-size: 10px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  outline: none;
+  &:focus { border-color: var(--jc-color-accent); }
+}
+
+.kb-search-btn {
+  padding: 4px 8px;
+  background: var(--jc-bg-btn);
+  border: 1px solid var(--jc-border-default);
+  border-radius: 4px;
+  color: var(--jc-text-secondary);
+  font-size: 10px;
+  cursor: pointer;
+  &:hover { color: var(--jc-text-primary); border-color: var(--jc-color-accent); }
+}
+
+.kb-result-item {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--jc-border-default);
+  &:last-child { border-bottom: none; }
+}
+
+.kb-result-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--jc-text-primary);
+}
+
+.kb-result-preview {
+  font-size: 9px;
+  color: var(--jc-text-secondary);
+  margin-top: 1px;
 }
 </style>

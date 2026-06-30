@@ -3,6 +3,7 @@ dist/
 memos/
 docs/
 target/
+cline/
 *.log
 .DS_Store
 Thumbs.db
