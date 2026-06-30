@@ -360,3 +360,75 @@ pub struct CliVersion {
     pub name: String,
     pub version: String,
 }
+
+// ══════════════════════════════════════════════════════════════
+// 事件流类型（Phase 4.4）
+// ══════════════════════════════════════════════════════════════
+
+/// ai:thought 事件载荷 - Agent 思考内容流式推送
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThoughtEvent {
+    pub worker_id: String,
+    pub session_id: String,
+    pub iteration: u32,
+    pub thought: String,
+    pub timestamp: String,
+}
+
+/// ai:observation 事件载荷 - 工具执行结果推送
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObservationEvent {
+    pub worker_id: String,
+    pub session_id: String,
+    pub iteration: u32,
+    pub tool_name: String,
+    pub success: bool,
+    pub observation: String,
+    pub timestamp: String,
+}
+
+/// ai:checkpoint 事件载荷 - Checkpoint 保存通知
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckpointEvent {
+    pub worker_id: String,
+    pub session_id: String,
+    pub iteration: u32,
+    pub thought: String,
+    pub has_action: bool,
+    pub has_observation: bool,
+    pub timestamp: String,
+}
+
+/// ai:cost-update 事件载荷 - Token 消耗更新
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CostUpdateEvent {
+    pub worker_id: String,
+    pub session_id: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub total_tokens: u64,
+    pub cost_cny: f64,
+    pub cost_usd: f64,
+    pub cost_limit_cny: f64,
+    pub is_circuit_broken: bool,
+    pub timestamp: String,
+}
+
+/// ai:session-progress 事件载荷 - 会话进度心跳
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionProgressEvent {
+    pub worker_id: String,
+    pub session_id: String,
+    pub status: String,
+    pub iteration: u32,
+    pub tool_call_count: u32,
+    pub total_tokens: u64,
+    pub cost_cny: f64,
+    pub elapsed_seconds: u64,
+    pub timestamp: String,
+}

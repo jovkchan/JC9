@@ -162,6 +162,16 @@ impl Database {
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS tracing_events (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                worker_id TEXT,
+                event_type TEXT NOT NULL,
+                event_data TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_tracing_events_session ON tracing_events(session_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_tracing_events_type ON tracing_events(event_type, created_at);
         ").map_err(|e| format!("create tables: {e}"))?;
         let _ = conn.execute("ALTER TABLE notes ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0", []);
         Ok(())

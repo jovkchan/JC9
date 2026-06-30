@@ -22,6 +22,9 @@ pub mod prompt_builder;
 pub mod repo_map;
 pub mod skill_loader;
 pub mod frontend_tool;
+pub mod guardrails;
+pub mod tracer;
+pub mod browser;
 
 pub use types::*;
 pub use llm::{LlmProvider, LlmMessage, LlmResponse, MockLlmProvider, OpenAiProvider};
@@ -40,3 +43,6 @@ pub use diff_merge::DiffMergeEngine;
 pub use mcp_client::McpClient;
 pub use planner::Planner;
 pub use frontend_tool::{FrontendProxyTool, pending_calls};
+pub use guardrails::{Guardrails, GuardrailLevel};
+pub use tracer::{Tracer, TraceEvent, TraceEventType};
+pub use browser::BrowserManager;

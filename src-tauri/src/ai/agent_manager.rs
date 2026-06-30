@@ -13,6 +13,8 @@ use super::knowledge_base::KnowledgeBase;
 use super::security::SecuritySandbox;
 use super::host_detector::HostDetector;
 use super::mcp_client::McpClient;
+use super::tracer::{Tracer, TraceEventType};
+use super::browser::BrowserManager;
 
 /// AI 状态与生命周期管理器 - 聚合所有 AI 核心子系统
 pub struct AgentManager {
@@ -28,6 +30,8 @@ pub struct AgentManager {
     cost_config: Arc<tokio::sync::RwLock<CostConfig>>,
     workspace_root: Arc<tokio::sync::RwLock<PathBuf>>,
     app_handle: Option<tauri::AppHandle>,
+    tracer: Arc<Tracer>,
+    browser_manager: Arc<BrowserManager>,
 }
 
 impl AgentManager {
@@ -55,13 +59,15 @@ impl AgentManager {
         };
 
         let knowledge_base = Arc::new(KnowledgeBase::new(conn.clone()));
+        let tracer = Arc::new(Tracer::new(Some(conn.clone())));
 
         // 启动时从 SQLite 恢复历史会话
         let persisted_sessions = knowledge_base.load_sessions_blocking();
 
         let provider: Arc<tokio::sync::RwLock<Arc<dyn LlmProvider>>> = Arc::new(tokio::sync::RwLock::new(provider_raw.clone()));
 
-        let mcp_client = Arc::new(McpClient::new());
+        let browser_manager = Arc::new(BrowserManager::new(app_handle.clone()));
+        let mcp_client = Arc::new(McpClient::new(app_handle.clone()));
         let worker_manager = Arc::new(tokio::sync::RwLock::new(Arc::new(WorkerManager::new(
             provider_raw,
             blackboard.clone(),
@@ -74,6 +80,8 @@ impl AgentManager {
             app_handle.clone(),
             Some(conn.clone()),
             mcp_client.clone(),
+            tracer.clone(),
+            browser_manager.clone(),
         ))));
 
         Self {
@@ -89,6 +97,8 @@ impl AgentManager {
             cost_config,
             workspace_root: workspace_root_lock,
             app_handle,
+            tracer,
+            browser_manager,
         }
     }
 
@@ -100,6 +110,7 @@ impl AgentManager {
     /// 创建一个新会话（并持久化到 SQLite）
     pub async fn create_session(&self, title: String) -> String {
         let id = uuid::Uuid::new_v4().to_string();
+        let session_title = title.clone();
         let session = AiSession {
             id: id.clone(),
             title,
@@ -113,6 +124,12 @@ impl AgentManager {
         };
         self.knowledge_base.save_session(&session).await;
         self.sessions.write().await.push(session);
+
+        // 追踪：会话创建
+        self.tracer.record(&id, None, TraceEventType::SessionCreated, serde_json::json!({
+            "title": session_title,
+        })).await;
+
         id
     }
 
@@ -151,16 +168,35 @@ impl AgentManager {
         &self.mcp_client
     }
 
+    pub fn tracer(&self) -> &Arc<Tracer> {
+        &self.tracer
+    }
+
+    pub fn browser_manager(&self) -> &Arc<BrowserManager> {
+        &self.browser_manager
+    }
+
     pub async fn plan_task(&self, session_id: String, request: String) -> Vec<TaskNode> {
         self.update_session_task(&session_id, request.clone()).await;
         let provider = self.provider.read().await.clone();
-        let nodes = super::planner::Planner::plan(provider, self.blackboard.clone(), session_id, request).await;
+        let nodes = super::planner::Planner::plan(provider, self.blackboard.clone(), session_id.clone(), request).await;
         if let Some(ref handle) = self.app_handle {
             use tauri::Emitter;
             for node in &nodes {
                 let _ = handle.emit("ai:task-update", node.clone());
             }
         }
+
+        // 追踪：任务规划
+        self.tracer.record(&session_id, None, TraceEventType::TaskPlanned, serde_json::json!({
+            "task_count": nodes.len(),
+            "tasks": nodes.iter().map(|n| serde_json::json!({
+                "id": n.id,
+                "title": n.title,
+                "status": format!("{:?}", n.status),
+            })).collect::<Vec<_>>(),
+        })).await;
+
         nodes
     }
 
@@ -192,6 +228,8 @@ impl AgentManager {
             self.app_handle.clone(),
             None,
             self.mcp_client.clone(),
+            self.tracer.clone(),
+            self.browser_manager.clone(),
         ));
         *self.provider.write().await = new_provider;
         *self.worker_manager.write().await = new_wm;

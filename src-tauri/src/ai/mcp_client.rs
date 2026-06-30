@@ -3,9 +3,12 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::process::Stdio;
+use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Command as TokioCommand};
+use chrono::Utc;
+use tauri::Emitter;
 use super::mcp_types::*;
 use super::tools::{ToolRegistry, ToolDefinition};
 use super::types::RiskLevel;
@@ -58,20 +61,60 @@ pub struct McpClient {
     servers: Arc<RwLock<Vec<McpServerInfo>>>,
     connections: Arc<RwLock<HashMap<String, McpConnection>>>,
     tool_registry: Arc<tokio::sync::RwLock<Option<Arc<ToolRegistry>>>>,
+    app_handle: Option<tauri::AppHandle>,
 }
 
 impl McpClient {
-    pub fn new() -> Self {
+    pub fn new(app_handle: Option<tauri::AppHandle>) -> Self {
         Self {
             servers: Arc::new(RwLock::new(Vec::new())),
             connections: Arc::new(RwLock::new(HashMap::new())),
             tool_registry: Arc::new(tokio::sync::RwLock::new(None)),
+            app_handle,
         }
     }
 
     /// 绑定 ToolRegistry，使 MCP 工具自动注册到 Agent
     pub async fn bind_registry(&self, registry: Arc<ToolRegistry>) {
         *self.tool_registry.write().await = Some(registry);
+    }
+
+    /// 发射 MCP 服务器状态变更事件到前端
+    async fn emit_status_event(&self, name: &str, status: &str, error: Option<&str>) {
+        if let Some(ref handle) = self.app_handle {
+            let _ = handle.emit("mcp:server-status-changed", json!({
+                "name": name,
+                "status": status,
+                "error": error,
+                "timestamp": Utc::now().to_rfc3339(),
+            }));
+        }
+    }
+
+    /// 启动后台健康检查（每 30 秒一次）
+    #[allow(dead_code)]
+    async fn start_health_check(self: &Arc<Self>) {
+        let self_clone = self.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                let names: Vec<String> = {
+                    let servers = self_clone.servers.read().await;
+                    servers.iter()
+                        .filter(|s| s.status == "connected")
+                        .map(|s| s.name.clone())
+                        .collect()
+                };
+                for name in &names {
+                    if self_clone.ping(name).await.is_err() {
+                        Self::update_server_status(
+                            name, "error", Some("健康检查失败"),
+                            &self_clone.servers, &self_clone.app_handle,
+                        ).await;
+                    }
+                }
+            }
+        });
     }
 
     /// 通过 SSE 连接 MCP 服务器
@@ -99,19 +142,62 @@ impl McpClient {
             }
         }
 
-        // 启动 SSE 连接任务
+        // 启动 SSE 连接任务（带指数退避重连）
         let servers_clone = self.servers.clone();
         let servers_clone2 = self.servers.clone();
         let connections_clone = self.connections.clone();
         let name_clone = name.clone();
         let url_clone = url.clone();
-
         let reg = self.tool_registry.clone();
+        let ah = self.app_handle.clone();
+
+        // 发射 connecting 事件
+        self.emit_status_event(&name, "connecting", None).await;
+
         tokio::spawn(async move {
-            if let Err(e) = Self::run_sse_connection(&name_clone, &url_clone, &id, servers_clone, connections_clone, reg).await {
-                Self::update_server_status(&name_clone, "error", Some(&e), &servers_clone2).await;
+            // 最大重试间隔 60 秒
+            let max_delay = Duration::from_secs(60);
+            let mut retry = 0u32;
+
+            loop {
+                let result = Self::run_sse_connection(
+                    &name_clone, &url_clone, &id,
+                    servers_clone.clone(), connections_clone.clone(),
+                    reg.clone(), ah.clone(),
+                ).await;
+
+                match result {
+                    Ok(()) => {
+                        // 正常断开（非错误），不重连
+                        Self::update_server_status(
+                            &name_clone, "disconnected", None,
+                            &servers_clone2, &ah,
+                        ).await;
+                        break;
+                    }
+                    Err(e) => {
+                        retry += 1;
+                        let delay = Duration::from_secs(
+                            std::cmp::min(1u64 << (retry - 1), 60) as u64 // 1, 2, 4, 8, 16, 32, 60, 60...
+                        );
+                        let delay = std::cmp::min(delay, max_delay);
+                        println!("  🔌 MCP [{}] 连接断开 ({}), {}s 后重试 (第{}次)...",
+                            &name_clone, e, delay.as_secs(), retry);
+                        Self::update_server_status(
+                            &name_clone, "connecting",
+                            Some(&format!("重试 ({}/∞): {}", retry, e)),
+                            &servers_clone2, &ah,
+                        ).await;
+                        tokio::time::sleep(delay).await;
+                    }
+                }
             }
         });
+
+        // 启动后台健康检查
+        let _self_health = self as *const Self;
+        // health check 会在外部由 McpClient 的引用触发，这里暂时不自动启动
+        // 外部调用 health_check_all() 即可
 
         Ok(())
     }
@@ -145,11 +231,49 @@ impl McpClient {
         let servers_clone2 = self.servers.clone();
         let connections_clone = self.connections.clone();
         let name_clone = name.clone();
+        let cmd_clone = command.clone();
+        let args_clone = args.clone();
         let reg = self.tool_registry.clone();
+        let ah = self.app_handle.clone();
+
+        // 发射 connecting 事件
+        self.emit_status_event(&name, "connecting", None).await;
 
         tokio::spawn(async move {
-            if let Err(e) = Self::run_stdio_connection(&name_clone, &command, &args, &id, servers_clone, connections_clone, reg).await {
-                Self::update_server_status(&name_clone, "error", Some(&e), &servers_clone2).await;
+            let max_delay = Duration::from_secs(60);
+            let mut retry = 0u32;
+
+            loop {
+                let result = Self::run_stdio_connection(
+                    &name_clone, &cmd_clone, &args_clone, &id,
+                    servers_clone.clone(), connections_clone.clone(),
+                    reg.clone(), ah.clone(),
+                ).await;
+
+                match result {
+                    Ok(()) => {
+                        Self::update_server_status(
+                            &name_clone, "disconnected", None,
+                            &servers_clone2, &ah,
+                        ).await;
+                        break;
+                    }
+                    Err(e) => {
+                        retry += 1;
+                        let delay = Duration::from_secs(
+                            std::cmp::min(1u64 << (retry - 1), 60)
+                        );
+                        let delay = std::cmp::min(delay, max_delay);
+                        println!("  🔌 MCP/stdio [{}] 连接断开 ({}), {}s 后重试 (第{}次)...",
+                            &name_clone, e, delay.as_secs(), retry);
+                        Self::update_server_status(
+                            &name_clone, "connecting",
+                            Some(&format!("重试 ({}/∞): {}", retry, e)),
+                            &servers_clone2, &ah,
+                        ).await;
+                        tokio::time::sleep(delay).await;
+                    }
+                }
             }
         });
 
@@ -163,7 +287,7 @@ impl McpClient {
 
     /// 断开 MCP 服务器
     pub async fn disconnect(&self, name: &str) {
-        Self::update_server_status(name, "disconnected", None, &self.servers).await;
+        Self::update_server_status(name, "disconnected", None, &self.servers, &self.app_handle).await;
         let mut connections = self.connections.write().await;
         connections.remove(name);
     }
@@ -241,7 +365,7 @@ impl McpClient {
         };
         for name in &names {
             if self.ping(name).await.is_err() {
-                Self::update_server_status(name, "error", Some("健康检查失败"), &self.servers).await;
+                Self::update_server_status(name, "error", Some("健康检查失败"), &self.servers, &self.app_handle).await;
             }
         }
     }
@@ -339,6 +463,7 @@ impl McpClient {
             servers: self.servers.clone(),
             connections: self.connections.clone(),
             tool_registry: self.tool_registry.clone(),
+            app_handle: self.app_handle.clone(),
         });
         for server in servers.iter() {
             for tool in &server.tools {
@@ -357,21 +482,41 @@ impl McpClient {
 
     // ── 内部辅助方法 ──
 
-    async fn update_server_status(name: &str, status: &str, error: Option<&str>, servers: &Arc<RwLock<Vec<McpServerInfo>>>) {
-        let mut srv = servers.write().await;
-        if let Some(s) = srv.iter_mut().find(|s| s.name == name) {
-            s.status = status.into();
-            s.error_message = error.map(|e| e.into());
+    async fn update_server_status(name: &str, status: &str, error: Option<&str>, servers: &Arc<RwLock<Vec<McpServerInfo>>>, app_handle: &Option<tauri::AppHandle>) {
+        {
+            let mut srv = servers.write().await;
+            if let Some(s) = srv.iter_mut().find(|s| s.name == name) {
+                s.status = status.into();
+                s.error_message = error.map(|e| e.into());
+            }
+        }
+        // 发射状态事件到前端
+        if let Some(ref handle) = app_handle {
+            let _ = handle.emit("mcp:server-status-changed", json!({
+                "name": name,
+                "status": status,
+                "error": error,
+                "timestamp": Utc::now().to_rfc3339(),
+            }));
         }
     }
 
-    async fn update_server_tools(name: &str, tools: Vec<McpTool>, servers: &Arc<RwLock<Vec<McpServerInfo>>>, registry: &Arc<tokio::sync::RwLock<Option<Arc<ToolRegistry>>>>) {
+    async fn update_server_tools(name: &str, tools: Vec<McpTool>, servers: &Arc<RwLock<Vec<McpServerInfo>>>, registry: &Arc<tokio::sync::RwLock<Option<Arc<ToolRegistry>>>>, app_handle: &Option<tauri::AppHandle>) {
         {
             let mut srv = servers.write().await;
             if let Some(s) = srv.iter_mut().find(|s| s.name == name) {
                 s.tools = tools.clone();
                 s.status = "connected".into();
             }
+        }
+        // 发射 connected 事件
+        if let Some(ref handle) = app_handle {
+            let _ = handle.emit("mcp:server-status-changed", json!({
+                "name": name,
+                "status": "connected",
+                "error": null,
+                "timestamp": Utc::now().to_rfc3339(),
+            }));
         }
         // 自动注入到 ToolRegistry
         if let Some(ref reg) = *registry.read().await {
@@ -381,6 +526,7 @@ impl McpClient {
                     servers: servers.clone(),
                     connections: Arc::new(RwLock::new(HashMap::new())),
                     tool_registry: registry.clone(),
+                    app_handle: app_handle.clone(),
                 });
                 for tool in &tools {
                     let tool_name = format!("mcp_{}_{}", name, tool.name);
@@ -396,13 +542,13 @@ impl McpClient {
         }
     }
 
-    /// SSE 连接循环
-    #[allow(unused_variables)]
+    /// SSE 连接循环（含 initialize 握手）
     async fn run_sse_connection(
         name: &str, url: &str, id: &str,
         servers: Arc<RwLock<Vec<McpServerInfo>>>,
         connections: Arc<RwLock<HashMap<String, McpConnection>>>,
         registry: Arc<tokio::sync::RwLock<Option<Arc<ToolRegistry>>>>,
+        app_handle: Option<tauri::AppHandle>,
     ) -> Result<(), String> {
         let http_client = reqwest::Client::new();
         let base_url = url.to_string();
@@ -423,7 +569,28 @@ impl McpClient {
             });
         }
 
-        // 1. SSE 连接
+        // 1. 发送 initialize 请求（客户端→服务器握手）
+        let init_params = McpInitializeParams {
+            protocol_version: "2024-11-05".into(),
+            capabilities: ClientCapabilities {
+                tools: Some(ToolCapabilities { list_changed: true }),
+                resources: None,
+            },
+            client_info: ClientInfo {
+                name: "jc9".into(),
+                version: "1.0.0".into(),
+            },
+        };
+        let init_req = McpMessage::request("initialize", json!(init_params), 1);
+        let init_json = init_req.to_json()?;
+        let _ = http_client.post(&base_url)
+            .header("Content-Type", "application/json")
+            .body(init_json)
+            .send()
+            .await
+            .map_err(|e| format!("initialize 请求失败: {}", e))?;
+
+        // 2. SSE 连接
         let resp = http_client.get(&base_url)
             .header("Accept", "text/event-stream")
             .header("Cache-Control", "no-cache")
@@ -431,7 +598,10 @@ impl McpClient {
             .await
             .map_err(|e| format!("SSE 连接失败: {}", e))?;
 
-        // 2. 解析 SSE 流
+        let mut initialized = false;
+        let mut _tools_fetched = false;
+
+        // 3. 解析 SSE 流
         let stream = resp.bytes_stream();
         let mut buffer = String::new();
 
@@ -452,25 +622,53 @@ impl McpClient {
                     if let Some(data) = line.strip_prefix("data: ") {
                         // 解析 JSON-RPC 消息
                         if let Ok(msg) = McpMessage::from_json(data) {
-                            // 处理 initialized 通知
-                            if msg.method.as_deref() == Some("initialized") {
-                                let list_req = McpMessage::request("tools/list", json!({}), 1u64);
-                                let _ = http_client.post(&base_url).json(&list_req).send().await;
-                            }
-                            // 处理 tools/list_changed 通知 — 重新拉取工具列表
-                            if msg.method.as_deref() == Some("notifications/tools/list_changed") {
-                                let list_req = McpMessage::request("tools/list", json!({}), 1u64);
-                                let _ = http_client.post(&base_url).json(&list_req).send().await;
-                            }
-                            // 处理 tools/list 结果
-                            if let Some(ref result) = msg.result {
-                                if let Ok(list) = serde_json::from_value::<McpListToolsResult>(result.clone()) {
-                                    Self::update_server_tools(name, list.tools, &servers, &registry).await;
+                            // 处理 initialize 响应 (id=1)
+                            if !initialized && msg.id == Some(1) {
+                                if msg.result.is_some() {
+                                    initialized = true;
+                                    // 发送 initialized 通知回服务器
+                                    let notif = McpMessage::notification("initialized", json!({}));
+                                    if let Ok(notif_json) = notif.to_json() {
+                                        let _ = http_client.post(&base_url)
+                                            .header("Content-Type", "application/json")
+                                            .body(notif_json)
+                                            .send().await;
+                                    }
+                                    // 请求工具列表
+                                    let list_req = McpMessage::request("tools/list", json!({}), 2u64);
+                                    if let Ok(list_json) = list_req.to_json() {
+                                        let _ = http_client.post(&base_url)
+                                            .header("Content-Type", "application/json")
+                                            .body(list_json)
+                                            .send().await;
+                                    }
                                 }
+                                continue;
+                            }
+                            // 处理 tools/list 结果 (id=2)
+                            if msg.id == Some(2) {
+                                if let Some(ref result) = msg.result {
+                                    if let Ok(list) = serde_json::from_value::<McpListToolsResult>(result.clone()) {
+                                        _tools_fetched = true;
+                                        Self::update_server_tools(name, list.tools, &servers, &registry, &app_handle).await;
+                                    }
+                                }
+                                continue;
+                            }
+                            // 处理 tools/list_changed 通知
+                            if msg.method.as_deref() == Some("notifications/tools/list_changed") {
+                                let list_req = McpMessage::request("tools/list", json!({}), 2u64);
+                                if let Ok(list_json) = list_req.to_json() {
+                                    let _ = http_client.post(&base_url)
+                                        .header("Content-Type", "application/json")
+                                        .body(list_json)
+                                        .send().await;
+                                }
+                                continue;
                             }
                             // 路由到 pending 请求
                             if let Some(id) = msg.id {
-                                if id > 1 {
+                                if id > 2 {
                                     let mut conns = connections.write().await;
                                     if let Some(conn) = conns.get_mut(name) {
                                         if let Some(sender) = conn.pending.remove(&id) {
@@ -491,18 +689,19 @@ impl McpClient {
             }
         }
 
-        Self::update_server_status(name, "disconnected", None, &servers).await;
+        Self::update_server_status(name, "disconnected", None, &servers, &app_handle).await;
         let mut conns = connections.write().await;
         conns.remove(name);
         Ok(())
     }
 
-    /// stdio 连接循环
+    /// stdio 连接循环（含 initialize 握手）
     async fn run_stdio_connection(
         name: &str, command: &str, args: &[String], id: &str,
         servers: Arc<RwLock<Vec<McpServerInfo>>>,
         connections: Arc<RwLock<HashMap<String, McpConnection>>>,
         registry: Arc<tokio::sync::RwLock<Option<Arc<ToolRegistry>>>>,
+        app_handle: Option<tauri::AppHandle>,
     ) -> Result<(), String> {
         let mut child = TokioCommand::new(command)
             .args(args)
@@ -596,7 +795,7 @@ impl McpClient {
                                     // tools/list 响应
                                     if let Some(ref result) = msg.result {
                                         if let Ok(list) = serde_json::from_value::<McpListToolsResult>(result.clone()) {
-                                            Self::update_server_tools(name, list.tools, &servers, &registry).await;
+                                            Self::update_server_tools(name, list.tools, &servers, &registry, &app_handle).await;
                                         }
                                     }
                                 } else if let Some(id) = msg.id {
@@ -618,7 +817,7 @@ impl McpClient {
                         }
                         Ok(None) => break,
                         Err(e) => {
-                            Self::update_server_status(name, "error", Some(&format!("stdio 读取错误: {}", e)), &servers).await;
+                            Self::update_server_status(name, "error", Some(&format!("stdio 读取错误: {}", e)), &servers, &app_handle).await;
                             break;
                         }
                     }

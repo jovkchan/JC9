@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 use tokio::sync::{RwLock, Semaphore};
 use std::collections::HashMap;
+use std::time::Instant;
 use chrono::Utc;
 use std::path::PathBuf;
 use tauri::Emitter;
@@ -20,6 +21,9 @@ use super::knowledge_base::KnowledgeBase;
 use super::prompt_builder::PromptBuilder;
 use super::repo_map::RepoMap;
 use super::mcp_client::McpClient;
+use super::tracer::{Tracer, TraceEventType};
+use super::browser::{BrowserManager, BrowserNavigateTool, BrowserClickTool, BrowserTypeTool,
+    BrowserGetHtmlTool, BrowserGetTextTool, BrowserScreenshotTool, BrowserCloseTool};
 
 /// Worker 管理器 - 并发控制、Worker 生命周期与 COW 隔离环境调度
 pub struct WorkerManager {
@@ -36,6 +40,8 @@ pub struct WorkerManager {
     db_conn: Option<Arc<Mutex<Connection>>>,
     mcp_client: Arc<McpClient>,
     frontend_tools: Arc<RwLock<HashMap<String, ToolDefinition>>>,
+    tracer: Arc<Tracer>,
+    browser_manager: Arc<BrowserManager>,
 }
 
 impl WorkerManager {
@@ -51,6 +57,8 @@ impl WorkerManager {
         app_handle: Option<tauri::AppHandle>,
         db_conn: Option<Arc<Mutex<Connection>>>,
         mcp_client: Arc<McpClient>,
+        tracer: Arc<Tracer>,
+        browser_manager: Arc<BrowserManager>,
     ) -> Self {
         Self {
             workers: Arc::new(RwLock::new(HashMap::new())),
@@ -58,6 +66,8 @@ impl WorkerManager {
             provider, blackboard, approval_queue, knowledge_base, workspace_root, cost_config, max_iterations,
             app_handle, db_conn, mcp_client,
             frontend_tools: Arc::new(RwLock::new(HashMap::new())),
+            tracer,
+            browser_manager,
         }
     }
 
@@ -94,6 +104,23 @@ impl WorkerManager {
                     let tool = Arc::new(super::frontend_tool::FrontendProxyTool::new(def.clone(), handle.clone())) as Arc<dyn super::tools::Tool>;
                     worker_tools.register(name.clone(), tool).await;
                 }
+            }
+        }
+
+        // 注册浏览器操控工具
+        {
+            let bm = self.browser_manager.clone();
+            let tools: Vec<(String, Arc<dyn super::tools::Tool>)> = vec![
+                ("browser_navigate".into(), Arc::new(BrowserNavigateTool::new(bm.clone())) as Arc<dyn super::tools::Tool>),
+                ("browser_click".into(), Arc::new(BrowserClickTool::new(bm.clone()))),
+                ("browser_type".into(), Arc::new(BrowserTypeTool::new(bm.clone()))),
+                ("browser_get_html".into(), Arc::new(BrowserGetHtmlTool::new(bm.clone()))),
+                ("browser_get_text".into(), Arc::new(BrowserGetTextTool::new(bm.clone()))),
+                ("browser_screenshot".into(), Arc::new(BrowserScreenshotTool::new(bm.clone()))),
+                ("browser_close".into(), Arc::new(BrowserCloseTool::new(bm))),
+            ];
+            for (name, tool) in tools {
+                worker_tools.register(name, tool).await;
             }
         }
 
@@ -137,14 +164,23 @@ impl WorkerManager {
             let _ = handle.emit("ai:worker-update", worker_state);
         }
 
+        // 追踪：Worker 启动
+        self.tracer.record(&session_id, Some(&worker_id), TraceEventType::WorkerSpawned, serde_json::json!({
+            "worker_id": worker_id,
+            "task_title": task.title,
+            "task_id": task.id,
+            "cow_path": temp_workspace.to_string_lossy(),
+        })).await;
+
         let current_cost_config = self.cost_config.read().await.clone();
         let loop_breaker = Arc::new(LoopBreaker::new(worker_id.clone()));
+        let session_id_for_loop = session_id.clone();
         let react_loop = ReActLoop::new(
-            worker_id.clone(), session_id, self.provider.clone(), worker_tools,
+            worker_id.clone(), session_id_for_loop, self.provider.clone(), worker_tools,
             self.blackboard.clone(), loop_breaker, self.approval_queue.clone(),
             current_cost_config, self.max_iterations,
             self.workers.clone(), self.app_handle.clone(),
-            self.db_conn.clone(),
+            self.db_conn.clone(), self.tracer.clone(),
         );
 
         let workers_clone = self.workers.clone();
@@ -157,9 +193,55 @@ impl WorkerManager {
         let task_id_for_summary = task.id.clone();
         let task_title = task.title.clone();
         let app_handle_clone = self.app_handle.clone();
+        let session_id_clone = session_id.clone();
         
         tokio::spawn(async move {
-            match react_loop.run(enriched_system_prompt, task.description).await {
+            // 启动会话心跳（每 5 秒发射 ai:session-progress）
+            let heartbeat_handle = {
+                let workers = workers_clone.clone();
+                let wid = wid.clone();
+                let sid = session_id_clone.clone();
+                let ah = app_handle_clone.clone();
+                let start = Instant::now();
+                tokio::spawn(async move {
+                    loop {
+                        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                        let should_stop = {
+                            let map = workers.read().await;
+                            match map.get(&wid) {
+                                Some(w) if w.status == WorkerStatus::Thinking
+                                    || w.status == WorkerStatus::CallingTool
+                                    || w.status == WorkerStatus::Observing
+                                    || w.status == WorkerStatus::WaitingApproval => {
+                                    if let Some(ref h) = ah {
+                                        let event = SessionProgressEvent {
+                                            worker_id: wid.clone(),
+                                            session_id: sid.clone(),
+                                            status: format!("{:?}", w.status).to_lowercase(),
+                                            iteration: (w.history.len()) as u32,
+                                            tool_call_count: w.tool_call_count,
+                                            total_tokens: w.token_count,
+                                            cost_cny: 0.0, // cost_tracker 在 ReActLoop 里，简化处理
+                                            elapsed_seconds: start.elapsed().as_secs(),
+                                            timestamp: Utc::now().to_rfc3339(),
+                                        };
+                                        let _ = h.emit("ai:session-progress", event);
+                                    }
+                                    false // continue heartbeat
+                                }
+                                _ => true, // worker done/killed, stop heartbeat
+                            }
+                        };
+                        if should_stop { break; }
+                    }
+                })
+            };
+
+            let result = react_loop.run(enriched_system_prompt, task.description).await;
+            // 停止心跳
+            heartbeat_handle.abort();
+
+            match result {
                 Ok(result) => {
                     let state = react_loop.get_state().await;
                     let mut workers = workers_clone.write().await;
@@ -244,6 +326,15 @@ impl WorkerManager {
             if let Some(ref handle) = self.app_handle {
                 let _ = handle.emit("ai:worker-update", w.clone());
             }
+
+            // 追踪：Worker 被杀死
+            self.tracer.record(&w.session_id, Some(id), TraceEventType::WorkerKilled, serde_json::json!({
+                "worker_id": id,
+                "task_id": w.task_id,
+                "tool_call_count": w.tool_call_count,
+                "reason": "user_killed",
+            })).await;
+
             true
         } else { false }
     }

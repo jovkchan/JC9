@@ -1144,6 +1144,46 @@ async fn ai_list_drafts(state: State<'_, Mutex<AppState>>) -> Result<Vec<ai::typ
     Ok(ai_manager.knowledge_base().list_drafts().await)
 }
 
+/// 查询会话追踪事件链
+#[tauri::command]
+async fn ai_get_trace_events(state: State<'_, Mutex<AppState>>, session_id: String) -> Result<Vec<ai::tracer::TraceEvent>, String> {
+    let ai_manager = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.ai_manager.clone()
+    };
+    Ok(ai_manager.tracer().get_session_events(&session_id).await)
+}
+
+/// 按事件类型过滤查询
+#[tauri::command]
+async fn ai_get_trace_events_by_type(state: State<'_, Mutex<AppState>>, session_id: String, event_type: String) -> Result<Vec<ai::tracer::TraceEvent>, String> {
+    let ai_manager = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.ai_manager.clone()
+    };
+    Ok(ai_manager.tracer().get_events_by_type(&session_id, &event_type).await)
+}
+
+/// 获取最近的 N 条追踪事件（全局）
+#[tauri::command]
+async fn ai_get_recent_trace_events(state: State<'_, Mutex<AppState>>, limit: usize) -> Result<Vec<ai::tracer::TraceEvent>, String> {
+    let ai_manager = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.ai_manager.clone()
+    };
+    Ok(ai_manager.tracer().get_recent_events(limit).await)
+}
+
+/// 打开浏览器窗口（手动入口）
+#[tauri::command]
+async fn ai_browser_navigate(state: State<'_, Mutex<AppState>>, url: String) -> Result<String, String> {
+    let ai_manager = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.ai_manager.clone()
+    };
+    ai_manager.browser_manager().navigate(&url).await
+}
+
 #[tauri::command]
 async fn ai_promote_knowledge(state: State<'_, Mutex<AppState>>, entry_id: String) -> Result<bool, String> {
     let ai_manager = {
@@ -1392,6 +1432,10 @@ pub fn run() {
             ai_reconnect_mcp_servers,
             ai_list_drafts,
             ai_promote_knowledge,
+            ai_get_trace_events,
+            ai_get_trace_events_by_type,
+            ai_get_recent_trace_events,
+            ai_browser_navigate,
             ai_update_cost_config,
             ai_set_reasoning_effort,
             ai_configure_llm,

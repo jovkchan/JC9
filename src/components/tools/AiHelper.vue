@@ -1107,6 +1107,35 @@ async function handleSelectWorkspace() {
   manualPath.value = ai.workspaceRoot
 }
 
+const browserUrlInput = ref('https://google.com')
+const showBrowserDialog = ref(false)
+
+async function handleBrowserOpen() {
+  // 如果已经有打开过的 URL，直接使用；否则弹出对话框
+  if (browserUrlInput.value && browserUrlInput.value.startsWith('http')) {
+    try {
+      await invoke('ai_browser_navigate', { url: browserUrlInput.value })
+    } catch {
+      showBrowserDialog.value = true
+    }
+  } else {
+    showBrowserDialog.value = true
+  }
+}
+
+async function handleBrowserConfirm() {
+  if (!browserUrlInput.value.trim()) return
+  if (!browserUrlInput.value.startsWith('http')) {
+    browserUrlInput.value = 'https://' + browserUrlInput.value
+  }
+  try {
+    await invoke('ai_browser_navigate', { url: browserUrlInput.value })
+    showBrowserDialog.value = false
+  } catch (e: any) {
+    console.error('打开浏览器失败:', e)
+  }
+}
+
 function startPolling() {
   pollTimer.value = window.setInterval(async () => {
     loadCustomModels()
@@ -1198,6 +1227,13 @@ onUnmounted(() => {
       <button class="top-session-btn" @click="showSessionPopup = true" :title="ai.currentSession?.title || '选择会话'">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px">
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+        </svg>
+      </button>
+      <button class="top-browser-btn" @click="handleBrowserOpen" title="打开浏览器">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="2" y1="12" x2="22" y2="12"></line>
+          <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
         </svg>
       </button>
     </div>
@@ -1444,6 +1480,21 @@ onUnmounted(() => {
                 </div>
               </div>
 
+              <!-- 浏览器 URL 输入弹窗 -->
+              <div v-if="showBrowserDialog" class="session-overlay" @click="showBrowserDialog = false">
+                <div class="browser-modal" @click.stop>
+                  <div class="session-modal-header">
+                    <span>🌐 打开浏览器</span>
+                    <button class="session-modal-close" @click="showBrowserDialog = false">✕</button>
+                  </div>
+                  <div class="browser-modal-body">
+                    <input v-model="browserUrlInput" class="browser-url-input" placeholder="输入 URL..."
+                      @keyup.enter="handleBrowserConfirm" @click.stop />
+                    <button class="browser-go-btn" @click="handleBrowserConfirm">打开</button>
+                  </div>
+                </div>
+              </div>
+
               <!-- 工作区 -->
               <div class="ds-pill-select-wrap workspace">
                 <button class="ds-pill-inline-btn workspace-btn" @click="handleSelectWorkspace" :title="ai.workspaceRoot || '选择工作区'">
@@ -1597,6 +1648,66 @@ onUnmounted(() => {
 }
 .top-session-btn:hover {
   color: var(--jc-color-accent);
+}
+
+.top-browser-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  background: transparent;
+  border: none;
+  color: var(--jc-text-secondary);
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.15s;
+  margin-left: 4px;
+}
+.top-browser-btn:hover {
+  color: var(--jc-color-accent);
+}
+
+.browser-modal {
+  background: var(--jc-surface);
+  border: 1px solid var(--jc-border);
+  border-radius: 8px;
+  padding: 0;
+  width: 400px;
+  max-width: 90vw;
+  box-shadow: var(--jc-shadow-lg);
+}
+.browser-modal-body {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px 16px;
+}
+.browser-url-input {
+  flex: 1;
+  background: var(--jc-bg-secondary);
+  border: 1px solid var(--jc-border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  color: var(--jc-text);
+  font-size: 13px;
+  outline: none;
+}
+.browser-url-input:focus {
+  border-color: var(--jc-color-accent);
+}
+.browser-go-btn {
+  background: var(--jc-color-accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity 0.15s;
+}
+.browser-go-btn:hover {
+  opacity: 0.85;
 }
 
 /* 左侧聊天区域 */

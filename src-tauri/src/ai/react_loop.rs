@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::RwLock;
 use chrono::Utc;
 use std::collections::HashMap;
+use std::time::Instant;
 use tauri::Emitter;
 use rusqlite::Connection;
 use super::types::*;
@@ -10,8 +11,34 @@ use super::tools::{ToolRegistry, ToolResult};
 use super::blackboard::SharedBlackboard;
 use super::loop_breaker::LoopBreaker;
 use super::approval::ApprovalQueue;
+use super::guardrails::{Guardrails, GuardrailLevel};
+use super::tracer::{Tracer, TraceEventType};
 
 /// ReAct 循环引擎 - Thought → Action → Observation
+/// 事件限频器 - 控制高频事件（thought/observation）的发射频率
+struct EventRateLimiter {
+    last_emit: Arc<RwLock<HashMap<String, Instant>>>,
+    min_interval_ms: u64,
+}
+
+impl EventRateLimiter {
+    fn new(min_interval_ms: u64) -> Self {
+        Self { last_emit: Arc::new(RwLock::new(HashMap::new())), min_interval_ms }
+    }
+
+    async fn can_emit(&self, event_key: &str) -> bool {
+        let now = Instant::now();
+        let mut map = self.last_emit.write().await;
+        if let Some(last) = map.get(event_key) {
+            if now.duration_since(*last).as_millis() < self.min_interval_ms as u128 {
+                return false;
+            }
+        }
+        map.insert(event_key.to_string(), now);
+        true
+    }
+}
+
 pub struct ReActLoop {
     worker_id: String,
     session_id: String,
@@ -28,6 +55,10 @@ pub struct ReActLoop {
     workers: Arc<RwLock<HashMap<String, WorkerState>>>,
     app_handle: Option<tauri::AppHandle>,
     db_conn: Option<Arc<Mutex<Connection>>>,
+    #[allow(dead_code)]
+    started_at: Instant,
+    rate_limiter: Arc<EventRateLimiter>,
+    tracer: Arc<Tracer>,
 }
 
 impl ReActLoop {
@@ -44,6 +75,7 @@ impl ReActLoop {
         workers: Arc<RwLock<HashMap<String, WorkerState>>>,
         app_handle: Option<tauri::AppHandle>,
         db_conn: Option<Arc<Mutex<Connection>>>,
+        tracer: Arc<Tracer>,
     ) -> Self {
         let state = ReActState {
             worker_id: worker_id.clone(),
@@ -70,6 +102,9 @@ impl ReActLoop {
             workers,
             app_handle,
             db_conn,
+            started_at: Instant::now(),
+            rate_limiter: Arc::new(EventRateLimiter::new(100)), // 100ms = 最多 10 次/秒
+            tracer,
         }
     }
 
@@ -88,6 +123,74 @@ impl ReActLoop {
             if let Some(ref handle) = self.app_handle {
                 let _ = handle.emit("ai:worker-update", w.clone());
             }
+        }
+    }
+
+    /// 发射 ai:thought 事件（限频：每 100ms 最多一次）
+    async fn emit_thought_event(&self, thought: &str, iteration: u32) {
+        if !self.rate_limiter.can_emit(&format!("thought:{}", self.worker_id)).await { return; }
+        if let Some(ref handle) = self.app_handle {
+            let event = ThoughtEvent {
+                worker_id: self.worker_id.clone(),
+                session_id: self.session_id.clone(),
+                iteration,
+                thought: thought.to_string(),
+                timestamp: Utc::now().to_rfc3339(),
+            };
+            let _ = handle.emit("ai:thought", event);
+        }
+    }
+
+    /// 发射 ai:observation 事件（限频：每 100ms 最多一次）
+    async fn emit_observation_event(&self, tool_name: &str, success: bool, observation: &str, iteration: u32) {
+        if !self.rate_limiter.can_emit(&format!("obs:{}", self.worker_id)).await { return; }
+        if let Some(ref handle) = self.app_handle {
+            let event = ObservationEvent {
+                worker_id: self.worker_id.clone(),
+                session_id: self.session_id.clone(),
+                iteration,
+                tool_name: tool_name.to_string(),
+                success,
+                observation: observation.to_string(),
+                timestamp: Utc::now().to_rfc3339(),
+            };
+            let _ = handle.emit("ai:observation", event);
+        }
+    }
+
+    /// 发射 ai:checkpoint 事件（无需限频）
+    async fn emit_checkpoint_event(&self, thought: &str, has_action: bool, has_observation: bool, iteration: u32) {
+        if let Some(ref handle) = self.app_handle {
+            let event = CheckpointEvent {
+                worker_id: self.worker_id.clone(),
+                session_id: self.session_id.clone(),
+                iteration,
+                thought: thought.to_string(),
+                has_action,
+                has_observation,
+                timestamp: Utc::now().to_rfc3339(),
+            };
+            let _ = handle.emit("ai:checkpoint", event);
+        }
+    }
+
+    /// 发射 ai:cost-update 事件（无需限频）
+    async fn emit_cost_update_event(&self) {
+        if let Some(ref handle) = self.app_handle {
+            let tracker = self.cost_tracker.read().await;
+            let event = CostUpdateEvent {
+                worker_id: self.worker_id.clone(),
+                session_id: self.session_id.clone(),
+                input_tokens: tracker.input_tokens,
+                output_tokens: tracker.output_tokens,
+                total_tokens: tracker.input_tokens + tracker.output_tokens,
+                cost_cny: tracker.total_cost_cny,
+                cost_usd: tracker.total_cost_usd,
+                cost_limit_cny: tracker.cost_limit_usd,
+                is_circuit_broken: tracker.is_circuit_broken,
+                timestamp: Utc::now().to_rfc3339(),
+            };
+            let _ = handle.emit("ai:cost-update", event);
         }
     }
 
@@ -181,6 +284,29 @@ impl ReActLoop {
                 w.token_count += input_t + output_t;
             }).await;
 
+            // 发射事件: ai:thought + ai:cost-update
+            self.emit_thought_event(&thought, iteration).await;
+            self.emit_cost_update_event().await;
+
+            // 追踪：成本更新 + 思考内容
+            {
+                let tracker = self.cost_tracker.read().await;
+                self.tracer.record(&self.session_id, Some(&self.worker_id), TraceEventType::CostUpdated, serde_json::json!({
+                    "input_tokens": tracker.input_tokens,
+                    "output_tokens": tracker.output_tokens,
+                    "cost_cny": tracker.total_cost_cny,
+                    "cost_usd": tracker.total_cost_usd,
+                    "is_circuit_broken": tracker.is_circuit_broken,
+                    "iteration": iteration,
+                })).await;
+            }
+            if !thought.is_empty() {
+                self.tracer.record(&self.session_id, Some(&self.worker_id), TraceEventType::Thought, serde_json::json!({
+                    "thought": thought,
+                    "iteration": iteration,
+                })).await;
+            }
+
             println!(
                 "🔄 [ReAct] Worker={} iter={} | thought={:.80} | tool_calls={}",
                 self.worker_id, iteration, thought, response.tool_calls.len()
@@ -193,6 +319,7 @@ impl ReActLoop {
                 };
                 self.state.write().await.history.push(step);
                 self.save_checkpoint(&thought, None, Some("任务完成")).await;
+                self.emit_checkpoint_event(&thought, false, true, iteration).await;
 
                 self.update_worker_state(|w| {
                     w.status = WorkerStatus::Completed;
@@ -297,10 +424,54 @@ impl ReActLoop {
                     }
                 }
 
+                // ← Guardrails 预校验（在工具执行前拦截明显错误的参数）
+                let guardrails = Guardrails::new(self.tools.sandbox());
+                match guardrails.validate(&tool_call.tool_name, &tool_call.arguments).await {
+                    GuardrailLevel::Error(msg) => {
+                        let guardrail_err = format!("【Guardrails 拦截】{}", msg);
+                        println!("  🛡️ [Guardrails] {} blocked: {}", tool_call.tool_name, msg);
+                        observations.push(format!("[{}] {}", tool_call.tool_name, guardrail_err));
+                        messages.push(LlmMessage::tool_with_id(
+                            format!("[{}] {}", tool_call.tool_name, guardrail_err),
+                            tool_call.id.clone(),
+                        ));
+                        self.update_worker_state(|w| {
+                            w.consecutive_errors += 1;
+                        }).await;
+                        continue;
+                    }
+                    GuardrailLevel::Warning(msg) => {
+                        println!("  🛡️ [Guardrails] {} warning: {}", tool_call.tool_name, msg);
+                        // Warning 不阻塞，仅日志记录
+                    }
+                    GuardrailLevel::Critical(msg) => {
+                        // Critical 应当已在审批阶段处理，此处作为兜底
+                        let guardrail_err = format!("【Guardrails 严重拦截】{}", msg);
+                        println!("  🛡️ [Guardrails] {} critical: {}", tool_call.tool_name, msg);
+                        observations.push(format!("[{}] {}", tool_call.tool_name, guardrail_err));
+                        messages.push(LlmMessage::tool_with_id(
+                            format!("[{}] {}", tool_call.tool_name, guardrail_err),
+                            tool_call.id.clone(),
+                        ));
+                        self.update_worker_state(|w| {
+                            w.consecutive_errors += 1;
+                        }).await;
+                        continue;
+                    }
+                    GuardrailLevel::Pass => {}
+                }
+
                 // 准备执行工具
                 self.update_worker_state(|w| {
                     w.status = WorkerStatus::CallingTool;
                 }).await;
+
+                // 追踪：工具调用开始
+                self.tracer.record(&self.session_id, Some(&self.worker_id), TraceEventType::ToolInvocation, serde_json::json!({
+                    "tool_name": tool_call.tool_name,
+                    "arguments": tool_call.arguments,
+                    "iteration": iteration,
+                })).await;
 
                 // 2. 检查工具次数限制并可能注入警告词
                 let warning_needed = self.loop_breaker.record_tool_call().await;
@@ -423,6 +594,15 @@ impl ReActLoop {
                     self.tools.execute(&tool_call.tool_name, &tool_call.arguments).await
                 };
 
+                // 追踪：工具调用结果
+                self.tracer.record(&self.session_id, Some(&self.worker_id), TraceEventType::ToolResult, serde_json::json!({
+                    "tool_name": tool_call.tool_name,
+                    "success": result.success,
+                    "output_length": result.output.len(),
+                    "has_error": result.error.is_some(),
+                    "iteration": iteration,
+                })).await;
+
                 // 更新 Worker 状态为 Observing 并记录调用数与连续错误数
                 self.update_worker_state(|w| {
                     w.status = WorkerStatus::Observing;
@@ -457,6 +637,9 @@ impl ReActLoop {
                     format!("[{}] {}", tool_call.tool_name, obs),
                     tool_call.id.clone(),
                 ));
+
+                // 发射事件: ai:observation
+                self.emit_observation_event(&tool_call.tool_name, result.success, &obs, iteration).await;
             }
 
             let step = ReActStep {
@@ -465,6 +648,7 @@ impl ReActLoop {
             };
             let obs_joined = observations.join("\n");
             self.save_checkpoint(&step.thought, step.action.as_ref(), Some(&obs_joined)).await;
+            self.emit_checkpoint_event(&step.thought, step.action.is_some(), !obs_joined.is_empty(), iteration).await;
             self.state.write().await.history.push(step);
         }
     }
