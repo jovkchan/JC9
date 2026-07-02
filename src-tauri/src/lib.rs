@@ -1298,6 +1298,122 @@ async fn ai_select_workspace_dialog(
     Ok(selected_path)
 }
 
+/// 技能信息（全局 ~/.agents/skills/ + 项目 .jc9/skills/）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemSkillInfo {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    pub path: String,
+    pub file_size: u64,
+    pub enabled: bool,
+    /// "system" = 全局 ~/.agents/skills/，"project" = 项目 .jc9/skills/
+    pub source: String,
+}
+
+#[tauri::command]
+fn list_system_skills(workspace_root: String) -> Result<Vec<SystemSkillInfo>, String> {
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+
+    let mut skills = Vec::new();
+
+    // 1. 全局技能：~/.agents/skills/
+    let global_dir = home.join(".agents").join("skills");
+    scan_skills_dir(&global_dir, "system", &mut skills);
+
+    // 2. 项目技能：<workspace>/.jc9/skills/
+    let project_dir = std::path::PathBuf::from(&workspace_root).join(".jc9").join("skills");
+    scan_skills_dir(&project_dir, "project", &mut skills);
+
+    skills.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(skills)
+}
+
+/// 扫描指定目录下的技能
+fn scan_skills_dir(dir: &std::path::Path, source: &str, skills: &mut Vec<SystemSkillInfo>) {
+    if !dir.exists() || !dir.is_dir() {
+        return;
+    }
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let skill_md = path.join("SKILL.md");
+            if !skill_md.exists() {
+                continue;
+            }
+            let content = match std::fs::read_to_string(&skill_md) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            let (name, version, description, fm_enabled) = parse_skill_frontmatter(&content);
+
+            let dir_name = path.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+
+            let file_size = std::fs::metadata(&skill_md)
+                .map(|m| m.len())
+                .unwrap_or(0);
+
+            let disabled_marker = path.join(".disabled");
+            let enabled = fm_enabled && !disabled_marker.exists();
+
+            skills.push(SystemSkillInfo {
+                id: dir_name.clone(),
+                name: if name.is_empty() { dir_name } else { name },
+                version,
+                description,
+                path: path.to_string_lossy().to_string(),
+                file_size,
+                enabled,
+                source: source.to_string(),
+            });
+        }
+    }
+}
+
+/// 解析 SKILL.md 的 YAML frontmatter，提取 name、version、description 和 enabled 状态
+fn parse_skill_frontmatter(content: &str) -> (String, String, String, bool) {
+    let text = content.trim_start();
+    if !text.starts_with("---") {
+        return (String::new(), String::new(), String::new(), true);
+    }
+    let after_first = &text[3..];
+    if let Some(end) = after_first.find("\n---") {
+        let fm = &after_first[..end];
+        let mut name = String::new();
+        let mut version = String::new();
+        let mut description = String::new();
+        let mut enabled = true;
+        for line in fm.lines() {
+            let trimmed = line.trim();
+            if let Some(value) = trimmed.strip_prefix("name:") {
+                name = value.trim().trim_matches('"').to_string();
+            } else if let Some(value) = trimmed.strip_prefix("version:") {
+                version = value.trim().trim_matches('"').to_string();
+            } else if let Some(value) = trimmed.strip_prefix("description:") {
+                description = value.trim().trim_matches('"').to_string();
+                if description == ">" || description == "|" {
+                    description = String::new();
+                }
+            } else if let Some(value) = trimmed.strip_prefix("enabled:") {
+                let v = value.trim().to_lowercase();
+                enabled = v != "false" && v != "0" && v != "no";
+            }
+        }
+        (name, version, description, enabled)
+    } else {
+        (String::new(), String::new(), String::new(), true)
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let db = Database::new().expect("无法初始化数据库");
@@ -1444,6 +1560,7 @@ pub fn run() {
             ai_select_workspace_dialog,
             ai_register_frontend_tool,
             ai_submit_frontend_tool_result,
+            list_system_skills,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

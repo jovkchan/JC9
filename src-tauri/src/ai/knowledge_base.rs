@@ -131,15 +131,32 @@ impl KnowledgeBase {
         }
     }
 
-    /// 搜索内容相似的知识条目
+    /// 搜索内容相似的知识条目（向量 ANN 预过滤 + 关键词精排）
     async fn find_similar_entries(&self, content: &str, limit: usize) -> Vec<KbEntry> {
-        let all = self.get_entries_internal(true).await;
+        // 1. 尝试向量语义搜索获取候选 ID（ANN 预过滤）
+        let candidate_ids: Option<Vec<String>> = {
+            let vec_results = self.vector_store.semantic_search(content, limit * 5).await;
+            if !vec_results.is_empty() {
+                Some(vec_results.into_iter().map(|(id, _, _)| id).collect())
+            } else {
+                None
+            }
+        };
+
+        // 2. 根据候选 ID 加载条目（或加载全部作为回退）
+        let candidates: Vec<KbEntry> = if let Some(ref ids) = candidate_ids {
+            self.get_entries_by_ids(ids).await
+        } else {
+            // 向量搜索不可用时回退到全量关键词匹配
+            self.get_entries_internal(true).await
+        };
+
         let query_lower = content.to_lowercase();
         let query_terms: Vec<&str> = query_lower.split_whitespace()
             .filter(|w| w.len() > 2)
             .collect();
 
-        let mut scored: Vec<(f64, KbEntry)> = all.into_iter()
+        let mut scored: Vec<(f64, KbEntry)> = candidates.into_iter()
             .map(|e| {
                 let content_lower = e.content.to_lowercase();
                 let mut score = 0.0;
@@ -156,6 +173,59 @@ impl KnowledgeBase {
 
         scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
         scored.into_iter().take(limit).map(|(_, e)| e).collect()
+    }
+
+    /// 按 ID 批量加载知识条目
+    async fn get_entries_by_ids(&self, ids: &[String]) -> Vec<KbEntry> {
+        if ids.is_empty() {
+            return vec![];
+        }
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return vec![],
+        };
+        let placeholders: Vec<String> = ids.iter().enumerate().map(|(i, _)| format!("?{}", i + 1)).collect();
+        let sql = format!(
+            "SELECT id, title, content, tags, entry_type, confidence, is_draft, created_at, updated_at FROM knowledge WHERE id IN ({})",
+            placeholders.join(",")
+        );
+        let mut stmt = match conn.prepare(&sql) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        let params: Vec<&dyn rusqlite::types::ToSql> = ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+        let rows = match stmt.query_map(params.as_slice(), |row| {
+            let tags_str: String = row.get(3)?;
+            let tags = if tags_str.is_empty() { vec![] } else { tags_str.split(',').map(|s| s.to_string()).collect() };
+            let entry_type_str: String = row.get(4)?;
+            let entry_type = match entry_type_str.as_str() {
+                "config_note" => KbEntryType::ConfigNote,
+                "solution" => KbEntryType::Solution,
+                "pitfall_note" => KbEntryType::PitfallNote,
+                "pattern" => KbEntryType::Pattern,
+                "api_reference" => KbEntryType::ApiReference,
+                _ => KbEntryType::Takeaway,
+            };
+            let created_at_str: String = row.get(7)?;
+            let updated_at_str: String = row.get(8)?;
+            Ok(KbEntry {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                content: row.get(2)?,
+                entry_type,
+                tags,
+                source_session: None,
+                confidence: row.get(5)?,
+                is_draft: row.get::<_, i32>(6)? != 0,
+                created_at: chrono::DateTime::parse_from_rfc3339(&created_at_str).map(|d| d.with_timezone(&chrono::Utc)).unwrap_or_else(|_| chrono::Utc::now()),
+                updated_at: chrono::DateTime::parse_from_rfc3339(&updated_at_str).map(|d| d.with_timezone(&chrono::Utc)).unwrap_or_else(|_| chrono::Utc::now()),
+                embedding: None,
+            })
+        }) {
+            Ok(r) => r,
+            Err(_) => return vec![],
+        };
+        rows.filter_map(|r| r.ok()).collect()
     }
 
     /// 纯 Rust TF-IDF 相关字频匹配检索算法
@@ -231,8 +301,9 @@ impl KnowledgeBase {
             Ok(c) => c,
             Err(_) => return false,
         };
-        let _ = conn.execute("DELETE FROM embeddings WHERE source_id = ?1", params![entry_id]);
+        // 注意：必须先删 vec_embeddings（依赖 embeddings 表的 id），再删 embeddings，最后删 knowledge
         let _ = conn.execute("DELETE FROM vec_embeddings WHERE id IN (SELECT id FROM embeddings WHERE source_id = ?1)", params![entry_id]);
+        let _ = conn.execute("DELETE FROM embeddings WHERE source_id = ?1", params![entry_id]);
         conn.execute("DELETE FROM knowledge WHERE id = ?1", params![entry_id]).is_ok()
     }
 

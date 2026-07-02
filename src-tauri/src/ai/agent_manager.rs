@@ -32,6 +32,7 @@ pub struct AgentManager {
     app_handle: Option<tauri::AppHandle>,
     tracer: Arc<Tracer>,
     browser_manager: Arc<BrowserManager>,
+    conn: Arc<Mutex<Connection>>,
 }
 
 impl AgentManager {
@@ -99,6 +100,7 @@ impl AgentManager {
             app_handle,
             tracer,
             browser_manager,
+            conn,
         }
     }
 
@@ -226,7 +228,7 @@ impl AgentManager {
             self.cost_config.clone(),
             10, 15,
             self.app_handle.clone(),
-            None,
+            Some(self.conn.clone()),
             self.mcp_client.clone(),
             self.tracer.clone(),
             self.browser_manager.clone(),
@@ -249,13 +251,10 @@ impl AgentManager {
     }
 
     pub async fn update_workspace_root(&self, new_root: PathBuf) {
-        {
-            let mut root = self.workspace_root.write().await;
-            *root = new_root.clone();
-        }
-        {
-            let mut sandbox = self.sandbox.write().await;
-            sandbox.update_workspace_root(new_root);
-        }
+        // 同时获取两把写锁，避免竞态窗口导致其他线程读到不一致状态
+        let mut root = self.workspace_root.write().await;
+        let mut sandbox = self.sandbox.write().await;
+        *root = new_root.clone();
+        sandbox.update_workspace_root(new_root);
     }
 }

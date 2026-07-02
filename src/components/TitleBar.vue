@@ -12,6 +12,7 @@ let unlistenResized: (() => void) | null = null
 onMounted(async () => {
   const t = document.documentElement.getAttribute('data-theme')
   if (t === 'light' || t === 'dark') theme.value = t
+  localStorage.setItem('jc9-theme', theme.value)
 
   try {
     maximized.value = await win.isMaximized()
@@ -30,6 +31,7 @@ onUnmounted(() => {
 function toggleTheme() {
   theme.value = theme.value === 'dark' ? 'light' : 'dark'
   document.documentElement.setAttribute('data-theme', theme.value)
+  localStorage.setItem('jc9-theme', theme.value)
 }
 
 async function toggleAlwaysOnTop() {
@@ -49,6 +51,41 @@ async function doMaximize() {
 async function doClose() {
   try { await win.close() } catch {}
 }
+
+async function openAiAgent() {
+  try {
+    const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow')
+    // 先尝试获取已有窗口
+    const existing = await WebviewWindow.getByLabel('ai-agent')
+    if (existing) {
+      try {
+        await existing.show()
+        await existing.setFocus()
+        return
+      } catch {
+        // 窗口已关闭，getByLabel 返回残引用，忽略直接新建
+      }
+    }
+    // 创建新窗口（若 label 已存在 Tauri 会自动聚焦）
+    const win = new WebviewWindow('ai-agent', {
+      url: '/',
+      title: 'JC9 AI Agent',
+      width: 1300,
+      height: 800,
+      minWidth: 900,
+      minHeight: 600,
+      decorations: false,
+    })
+    win.once('tauri://created', () => {
+      console.log('AI Agent window created')
+    })
+    win.once('tauri://error', (e) => {
+      console.error('AI Agent window error:', e)
+    })
+  } catch (e) {
+    console.error('Failed to open AI Agent window:', e)
+  }
+}
 </script>
 
 <template>
@@ -64,6 +101,11 @@ async function doClose() {
       <span class="tb-title">jc9</span>
     </div>
     <div class="tb-controls">
+      <button class="tb-btn ai-agent-btn" @click="openAiAgent" title="AI Agent">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+        </svg>
+      </button>
       <button class="tb-btn" :class="{on:atop}" @click="toggleAlwaysOnTop" title="置顶">
         <svg viewBox="0 0 1024 1024" width="14" height="14" fill="currentColor"><path d="M681.003149 829.646642c-5.14681 8.823103-12.744482 14.705172-22.91556 17.401121-10.171077 2.695948-19.729439 1.470517-28.552542-3.55375L410.550526 716.90699l-168.496763 231.60646c-2.941034 3.676293-6.862414 6.249698-11.396509 7.230043-4.534095 1.225431-8.823103 0.612716-12.867025-1.715603l-0.490173-0.36763c-9.190733-5.391896-12.009224-12.989569-8.455474-23.160646l104.161636-269.96245L106.76618 541.547813c-8.823103-5.14681-14.705172-12.744482-17.401121-22.91556-2.695948-10.171077-1.470517-19.729439 3.55375-28.552542 24.140991-41.787197 59.188318-71.810257 105.264524-89.946636 46.076206-18.013836 85.902714-17.40112 119.602066 2.083233L468.758499 140.831874c-17.76875-10.29362-29.165258-25.488965-34.802241-45.953663-5.391896-20.219612-3.063578-39.458878 7.1075-57.227628 10.29362-17.76875 25.488965-29.165258 45.953663-34.80224 20.219612-5.391896 39.458878-3.186121 57.227628 7.1075l326.699906 188.593831c17.76875 10.29362 29.165258 25.488965 34.802241 45.953663 5.391896 20.342155 3.186121 39.458878-7.1075 57.227628s-25.488965 29.165258-45.953663 34.802241c-20.464698 5.636983-39.458878 3.186121-57.227628-7.1075L644.607848 590.810139c33.699353 19.484353 54.286594 53.673878 61.516637 102.446033 7.475129 49.01724-0.857802 94.480731-25.121336 136.39047zM441.676474 451.846263l131.978919-228.665425c2.695948-4.656638 3.55375-9.558362 2.205776-14.337543-1.347974-4.901724-4.411552-8.578017-9.06819-11.273965-4.656638-2.695948-9.558362-3.55375-14.337542-2.205776-4.901724 1.347974-8.578017 4.411552-11.273966 9.068189L409.202552 433.097169c-2.695948 4.656638-3.55375 9.558362-2.205776 14.337543 1.347974 4.901724 4.411552 8.578017 9.06819 11.273965 4.656638 2.695948 9.558362 3.55375 14.337542 2.205776 4.656638-1.347974 8.578017-4.289009 11.273966-9.06819z"/></svg>
       </button>

@@ -189,6 +189,20 @@ impl SkillLoader {
 
     /// 将技能写入 knowledge 表（UPSERT）
     fn upsert_skill(&self, skill: &SkillDoc) -> bool {
+        // 安全校验：限制技能内容最大长度（64KB）
+        if skill.content.len() > 65536 {
+            eprintln!("❌ [SkillLoader] 技能 '{}' 内容超过 64KB 限制，跳过", skill.name);
+            return false;
+        }
+        // 安全校验：检测可能的提示词注入模式
+        let suspicious_patterns = ["ignore all previous instructions", "you are now", "system prompt:", "忽略以上所有指令", "你现在是"];
+        let content_lower = skill.content.to_lowercase();
+        for pattern in &suspicious_patterns {
+            if content_lower.contains(pattern) {
+                eprintln!("⚠️ [SkillLoader] 技能 '{}' 内容包含可疑指令模式 '{}'，已标记但允许写入", skill.name, pattern);
+            }
+        }
+
         let now = Utc::now().to_rfc3339();
         let conn = match self.conn.lock() {
             Ok(c) => c,

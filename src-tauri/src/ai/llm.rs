@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use secrecy::{ExposeSecret, Secret};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -186,7 +187,7 @@ impl LlmProvider for MockLlmProvider {
 
 /// OpenAI 兼容 Provider（完整支持 DeepSeek thinking mode + 运行时切换强度）
 pub struct OpenAiProvider {
-    api_key: String,
+    api_key: Secret<String>,
     base_url: String,
     model: String,
     reasoning_effort: Arc<tokio::sync::RwLock<Option<String>>>,
@@ -225,7 +226,7 @@ impl OpenAiProvider {
             .unwrap_or_default();
 
         Self {
-            api_key,
+            api_key: Secret::new(api_key),
             base_url,
             model,
             reasoning_effort: Arc::new(tokio::sync::RwLock::new(reasoning_effort)),
@@ -331,7 +332,7 @@ impl LlmProvider for OpenAiProvider {
             attempts += 1;
             let request_fut = self.client
                 .post(&url)
-                .header("Authorization", format!("Bearer {}", self.api_key))
+                .header("Authorization", format!("Bearer {}", self.api_key.expose_secret()))
                 .header("Content-Type", "application/json")
                 .json(&body)
                 .send();

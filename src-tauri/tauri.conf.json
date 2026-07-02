@@ -33,6 +33,16 @@
         "minHeight": 500,
         "decorations": false,
         "visible": false
+      },
+      {
+        "label": "ai-agent",
+        "title": "JC9 AI Agent",
+        "width": 1300,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 600,
+        "decorations": false,
+        "visible": false
       }
     ],
     "security": {

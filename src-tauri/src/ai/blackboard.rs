@@ -49,7 +49,17 @@ impl SharedBlackboard {
             source_worker,
             timestamp: Utc::now(),
         };
-        self.entries.write().await.insert(key, entry);
+        let mut entries = self.entries.write().await;
+        // 容量限制：超过 1000 条时淘汰最旧条目
+        if entries.len() >= 1000 && !entries.contains_key(&key) {
+            if let Some((oldest_key, _)) = entries.iter()
+                .min_by_key(|(_, e)| e.timestamp)
+                .map(|(k, v)| (k.clone(), v.clone()))
+            {
+                entries.remove(&oldest_key);
+            }
+        }
+        entries.insert(key, entry);
         id
     }
 

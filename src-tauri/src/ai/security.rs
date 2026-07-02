@@ -52,21 +52,38 @@ impl SecuritySandbox {
         ];
 
         let command_blacklist = vec![
-            Regex::new(r"(?i)\brm\s+-rf\s+/").unwrap(),
+            // rm -rf 危险变体：覆盖 / ~ . * 等目标，以及参数分开写的情况
+            Regex::new(r"(?i)\brm\s+(-[a-z]*r[a-z]*f|--recursive\s+--force)\s+[/~.*]").unwrap(),
+            Regex::new(r"(?i)\brm\s+-rf\s+[/~.*]").unwrap(),
+            Regex::new(r"(?i)\brm\s+-[a-z]*r[a-z]*\s+-[a-z]*f\s+[/~.*]").unwrap(),
+            // 格式化与系统破坏
             Regex::new(r"(?i)\bformat\s+[a-z]:").unwrap(),
             Regex::new(r"(?i)\bshutdown\b").unwrap(),
             Regex::new(r"(?i)\breboot\b").unwrap(),
             Regex::new(r"(?i)\bhalt\b").unwrap(),
             Regex::new(r"(?i)\bmkfs\b").unwrap(),
             Regex::new(r"(?i)\bdd\s+if=").unwrap(),
+            // fork bomb
             Regex::new(r"(?i)\b:\(\)\s*\{").unwrap(),
+            // 注册表与用户管理
             Regex::new(r"(?i)\breg\s+delete\b").unwrap(),
             Regex::new(r"(?i)\bregedit\b").unwrap(),
             Regex::new(r"(?i)\bnet\s+user\b").unwrap(),
             Regex::new(r"(?i)\bnet\s+localgroup\b").unwrap(),
+            // 编码执行与管道注入
             Regex::new(r"(?i)\bpowershell.*-enc\b").unwrap(),
             Regex::new(r"(?i)\bcurl.*\|\s*sh\b").unwrap(),
             Regex::new(r"(?i)\bwget.*\|\s*sh\b").unwrap(),
+            // 权限提升
+            Regex::new(r"(?i)\bsudo\s+rm\b").unwrap(),
+            Regex::new(r"(?i)\bchmod\s+777\s+/").unwrap(),
+            Regex::new(r"(?i)\bchown\s+-R\b").unwrap(),
+            // 危险写入系统目录
+            Regex::new(r"(?i)\bcat\s+.+\s*>\s*/etc/").unwrap(),
+            Regex::new(r"(?i)\becho\s+.+\s*>\s*/etc/").unwrap(),
+            // 环境变量窃取
+            Regex::new(r"(?i)\benv\s*\|\s*(curl|wget)\b").unwrap(),
+            Regex::new(r"(?i)\bprintenv\s*\|\s*(curl|wget)\b").unwrap(),
         ];
 
         Self {
@@ -150,7 +167,14 @@ impl SecuritySandbox {
             }
         }
 
-        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        // 使用 shell-words 正确解析带引号的参数（如 echo "hello world"）
+        let parts: Vec<String> = match shell_words::split(trimmed) {
+            Ok(p) => p,
+            Err(_) => {
+                // shell-words 解析失败时回退到简单空格分割
+                trimmed.split_whitespace().map(|s| s.to_string()).collect()
+            }
+        };
         if parts.is_empty() {
             return false;
         }

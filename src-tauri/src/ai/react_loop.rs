@@ -89,7 +89,7 @@ impl ReActLoop {
             input_tokens: 0,
             output_tokens: 0,
             total_cost_usd: 0.0,
-            cost_limit_usd: cost_config.cost_limit, // 预算限额，单位元
+                cost_limit_cny: cost_config.cost_limit, // 预算限额，单位元（人民币）
             is_circuit_broken: false,
             total_cost_cny: 0.0,
         }));
@@ -186,7 +186,7 @@ impl ReActLoop {
                 total_tokens: tracker.input_tokens + tracker.output_tokens,
                 cost_cny: tracker.total_cost_cny,
                 cost_usd: tracker.total_cost_usd,
-                cost_limit_cny: tracker.cost_limit_usd,
+                cost_limit_cny: tracker.cost_limit_cny,
                 is_circuit_broken: tracker.is_circuit_broken,
                 timestamp: Utc::now().to_rfc3339(),
             };
@@ -266,13 +266,13 @@ impl ReActLoop {
                 tracker.total_cost_cny += cost_cny;
                 tracker.total_cost_usd = tracker.total_cost_cny / 7.2;
 
-                if tracker.total_cost_cny >= tracker.cost_limit_usd {
+                if tracker.total_cost_cny >= tracker.cost_limit_cny {
                     tracker.is_circuit_broken = true;
                     let mut state = self.state.write().await;
                     state.is_terminated = true;
                     let err_reason = format!(
                         "【Token防爆熔断】当前会话消费已达 ¥{:.4}，超过预算上限 ¥{:.2}，强制熔断挂起！",
-                        tracker.total_cost_cny, tracker.cost_limit_usd
+                        tracker.total_cost_cny, tracker.cost_limit_cny
                     );
                     state.termination_reason = Some(err_reason.clone());
                     
@@ -340,16 +340,13 @@ impl ReActLoop {
                 return Ok(response.content);
             }
             // DS thinking mode: 有 tool_calls 时必须回传 reasoning_content 和 tool_calls
-            if !response.tool_calls.is_empty() {
-                let reasoning = if thought.is_empty() { None } else { Some(thought.clone()) };
-                messages.push(LlmMessage::assistant_with_tool_calls(
-                    response.content.clone(),
-                    reasoning,
-                    &response.tool_calls,
-                ));
-            } else {
-                messages.push(LlmMessage::assistant(response.content.clone()));
-            }
+            // （上方 is_empty() 检查已 return，此处 tool_calls 必非空）
+            let reasoning = if thought.is_empty() { None } else { Some(thought.clone()) };
+            messages.push(LlmMessage::assistant_with_tool_calls(
+                response.content.clone(),
+                reasoning,
+                &response.tool_calls,
+            ));
             let mut observations = Vec::new();
 
             for tool_call in &response.tool_calls {

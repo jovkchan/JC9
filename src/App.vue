@@ -8,11 +8,13 @@ import ProjectSidebar from '@/components/ProjectSidebar.vue'
 import MainPanel from '@/components/MainPanel.vue'
 import TitleBar from '@/components/TitleBar.vue'
 import StatusBar from '@/components/StatusBar.vue'
+import AiAgentPanel from '@/components/ai-agent/AiAgentPanel.vue'
 
 const store = useProjectStore()
 const status = useStatusStore()
 const sidebarCollapsed = ref(false)
 const isSplash = ref(false)
+const isAiAgent = ref(false)
 
 // Watch project count
 watch(() => store.projects.length, (n) => status.setProjectCount(n), { immediate: true })
@@ -32,6 +34,10 @@ onMounted(async () => {
     }
 
     // 确保样式设置后才显示窗口，使窗口启动时就完全透明
+    await win.show()
+    await win.setFocus()
+  } else if (win.label === 'ai-agent') {
+    isAiAgent.value = true
     await win.show()
     await win.setFocus()
   } else {
@@ -70,6 +76,9 @@ onUnmounted(() => {
     <!-- 简易斜体黑体文字标志 -->
     <div class="splash-text">JC CLI NINE</div>
   </div>
+
+  <!-- AI Agent 独立窗口 -->
+  <AiAgentPanel v-else-if="isAiAgent" />
 
   <!-- Main window -->
   <div v-else class="app">

@@ -318,7 +318,7 @@ pub struct CostConfig {
     pub input_uncached_cost_per_m: f64,
     pub output_cost_per_m: f64,
     pub cost_limit: f64,
-    pub reasoning_effort: String,  // "high" | "max" | "" (空=关闭)
+    pub reasoning_effort: String,  // "high" | "max" | "" (�?关闭)
 }
 
 /// Token 成本看板
@@ -329,7 +329,7 @@ pub struct TokenCostTracker {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub total_cost_usd: f64,
-    pub cost_limit_usd: f64,
+    pub cost_limit_cny: f64,
     pub is_circuit_broken: bool,
     pub total_cost_cny: f64,
 }

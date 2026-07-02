@@ -288,8 +288,21 @@ impl WorkerManager {
                     // 2. 任务成功完成。把隔离快照中的增量修改写入原始工作区
                     if let Err(e) = workspace_mgr.apply_to_original() {
                         println!("Worker {} COW 修改合并写回失败: {}", wid, e);
+                        // 合并失败：标记 Worker 为 Failed，通知前端，保留临时工作区供用户手动恢复
+                        if let Some(w) = workers.get_mut(&wid) {
+                            w.status = WorkerStatus::Failed;
+                            w.termination_reason = Some(format!(
+                                "COW 修改合并写回失败: {}. 临时工作区已保留: {}",
+                                e, temp_workspace.display()
+                            ));
+                            if let Some(ref handle) = app_handle_clone {
+                                let _ = handle.emit("ai:worker-update", w.clone());
+                            }
+                        }
+                        // 不执行 cleanup()，保留临时工作区供用户手动恢复
+                    } else {
+                        workspace_mgr.cleanup();
                     }
-                    workspace_mgr.cleanup();
                 }
                 Err(e) => {
                     let state = react_loop.get_state().await;

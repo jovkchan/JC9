@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useNotesStore } from '@/stores/notes'
 import { useStatusStore } from '@/stores/status'
 import { save, open } from '@tauri-apps/plugin-dialog'
@@ -257,16 +257,51 @@ function setProviderDefaults() {
 
 async function fetchVllmModelsForm() {
   loadingModels.value = true
+  vllmModels.value = []
+  vllmSelectedModels.value = []
   try {
-    const res = await fetch(`${newModelForm.value.endpoint}/models`)
+    const url = `${newModelForm.value.endpoint.replace(/\/+$/, '')}/models`
+    const res = await fetch(url)
     if (res.ok) {
       const json = await res.json()
       if (json.data && Array.isArray(json.data)) {
         vllmModels.value = json.data.map((m: any) => m.id)
+        status.pushMessage(`获取到 ${vllmModels.value.length} 个模型`, 'success')
+        syncVllmSelection()
       }
+    } else {
+      status.pushMessage(`获取模型列表失败 (${res.status})`, 'error')
     }
-  } catch { /* ignore */ }
+  } catch (e) {
+    status.pushMessage(`无法连接 vLLM 服务: ${e}`, 'error')
+  }
   finally { loadingModels.value = false }
+}
+
+function onEndpointBlur() {
+  if (newModelForm.value.provider === 'vllm' && newModelForm.value.endpoint.trim()) {
+    fetchVllmModelsForm()
+  }
+}
+
+const vllmSelectedModels = ref<string[]>([])
+
+function toggleVllmModel(model: string) {
+  const idx = vllmSelectedModels.value.indexOf(model)
+  if (idx >= 0) {
+    vllmSelectedModels.value.splice(idx, 1)
+  } else {
+    vllmSelectedModels.value.push(model)
+  }
+  newModelForm.value.model = vllmSelectedModels.value.join(',')
+}
+
+// 初始化选中状态：当 vllmModels 加载完成时，根据已有 model 字段勾选
+function syncVllmSelection() {
+  if (newModelForm.value.provider === 'vllm' && newModelForm.value.model) {
+    const existing = newModelForm.value.model.split(',').map(m => m.trim()).filter(Boolean)
+    vllmSelectedModels.value = existing.filter(m => vllmModels.value.includes(m))
+  }
 }
 
 // ── MCP 服务器管理 ──
@@ -436,6 +471,61 @@ async function disconnectAllMcp() {
   status.pushMessage('已断开所有 MCP 服务器', 'success')
 }
 
+// ── 技能管理 ──
+interface SystemSkill {
+  id: string
+  name: string
+  version: string
+  description: string
+  path: string
+  file_size: number
+  enabled: boolean
+  source: string
+}
+
+const systemSkills = ref<SystemSkill[]>([])
+const skillsLoading = ref(false)
+const skillsError = ref('')
+const skillsSearch = ref('')
+
+const filteredSkills = computed(() => {
+  const q = skillsSearch.value.trim().toLowerCase()
+  if (!q) return systemSkills.value
+  return systemSkills.value.filter(s =>
+    s.name.toLowerCase().includes(q) ||
+    s.id.toLowerCase().includes(q) ||
+    s.description.toLowerCase().includes(q)
+  )
+})
+
+async function loadSystemSkills() {
+  skillsLoading.value = true
+  skillsError.value = ''
+  try {
+    // 确保 workspaceRoot 已从后端读取
+    if (!aiStore.workspaceRoot) {
+      await aiStore.loadWorkspaceRoot()
+    }
+    const root = aiStore.workspaceRoot || ''
+    const skills = await invoke<SystemSkill[]>('list_system_skills', { workspaceRoot: root })
+    systemSkills.value = skills
+  } catch (e) {
+    skillsError.value = `加载失败: ${e}`
+  } finally {
+    skillsLoading.value = false
+  }
+}
+
+function formatSkillSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function openSkillFolder(path: string) {
+  invoke('show_in_folder', { path })
+}
+
 // ── 备份与导出 ──
 async function exportData() {
   try {
@@ -520,7 +610,7 @@ async function importData() {
           <div :class="['nav-item', { active: activeTab === 'ai-roles' }]" @click="activeTab = 'ai-roles'">
             智能体
           </div>
-          <div :class="['nav-item', { active: activeTab === 'skills' }]" @click="activeTab = 'skills'">
+          <div :class="['nav-item', { active: activeTab === 'skills' }]" @click="activeTab = 'skills'; loadSystemSkills()">
             技能
           </div>
           <div :class="['nav-item', { active: activeTab === 'command' }]" @click="activeTab = 'command'">
@@ -613,7 +703,7 @@ async function importData() {
                 </div>
                 <div class="form-group">
                   <label>Endpoint</label>
-                  <input v-model="newModelForm.endpoint" class="form-input" />
+                  <input v-model="newModelForm.endpoint" class="form-input" @blur="onEndpointBlur" />
                 </div>
                 <div class="form-group" v-if="newModelForm.provider !== 'ollama' && newModelForm.provider !== 'vllm'">
                   <label>API Key</label>
@@ -621,10 +711,25 @@ async function importData() {
                 </div>
                 <div class="form-group">
                   <label>Model</label>
-                  <select v-if="newModelForm.provider === 'vllm'" v-model="newModelForm.model" class="form-select">
-                    <option v-if="loadingModels" value="">获取中...</option>
-                    <option v-for="m in vllmModels" :key="m" :value="m">{{ m }}</option>
-                  </select>
+                  <div v-if="newModelForm.provider === 'vllm'" class="vllm-model-area">
+                    <div class="vllm-toolbar">
+                      <span class="vllm-count" v-if="!loadingModels">{{ vllmModels.length }} 个模型</span>
+                      <button class="vllm-refresh-btn" :disabled="loadingModels" @click="fetchVllmModelsForm" title="刷新模型列表">
+                        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" :class="{ spinning: loadingModels }">
+                          <path d="M1.5 8a6.5 6.5 0 0 1 10.5-5L14 5m0-3.5V5h-3.5M14.5 8a6.5 6.5 0 0 1-10.5 5L2 11m0 3.5V11h3.5"/>
+                        </svg>
+                        刷新
+                      </button>
+                    </div>
+                    <div v-if="loadingModels" class="vllm-loading">正在获取模型列表...</div>
+                    <div v-else-if="vllmModels.length === 0" class="vllm-empty">点击刷新从 <code>/models</code> 获取模型列表</div>
+                    <div v-else class="vllm-checklist">
+                      <label v-for="m in vllmModels" :key="m" class="vllm-check-item" :class="{ checked: vllmSelectedModels.includes(m) }">
+                        <input type="checkbox" :checked="vllmSelectedModels.includes(m)" @change="toggleVllmModel(m)" />
+                        <span>{{ m }}</span>
+                      </label>
+                    </div>
+                  </div>
                   <input v-else v-model="newModelForm.model" class="form-input" placeholder="多个用英文逗号分隔，如: gemini-1.5-flash, gemini-1.5-pro" />
                   <span class="help-text" v-if="newModelForm.provider !== 'vllm'">支持输入多个模型，请使用英文逗号 <code>,</code> 分隔。</span>
                 </div>
@@ -725,7 +830,57 @@ async function importData() {
               </button>
             </div>
           </div>
-          <div v-if="activeTab === 'skills'" class="settings-pane">创建可重用的技术文件，提供特定领域知识和工作流</div>
+          <div v-if="activeTab === 'skills'" class="settings-pane">
+            <!-- <h3 class="pane-title">技能管理</h3> -->
+            <!-- <p class="pane-desc" style="margin-bottom:12px">
+              管理系统中的 AI 技能文件。技能位于 <code>~/.agents/skills/</code> 目录，每个技能是一个包含 <code>SKILL.md</code> 的子文件夹。
+            </p> -->
+
+            <div class="skills-toolbar">
+              <input
+                v-model="skillsSearch"
+                class="skills-search-input"
+                placeholder="搜索技能名称、ID 或描述..."
+              />
+              <button class="skills-refresh-btn" :disabled="skillsLoading" @click="loadSystemSkills">
+                {{ skillsLoading ? '加载中...' : '刷新' }}
+              </button>
+              <span class="skills-count" v-if="!skillsLoading">
+                {{ filteredSkills.length }}/{{ systemSkills.length }} 个技能
+              </span>
+            </div>
+
+            <div v-if="skillsError" class="skills-error">{{ skillsError }}</div>
+
+            <div class="skills-list">
+              <div v-for="skill in filteredSkills" :key="skill.id" class="skill-card">
+                <div class="skill-card-header">
+                  <div class="skill-card-info">
+                    <span class="skill-card-name">{{ skill.name }} v{{ skill.version || '0.0.0' }}</span>
+               
+                  </div>
+                  <div class="skill-card-badges">
+                    <span class="skill-card-status" :class="{ enabled: skill.enabled }">
+                      {{ skill.enabled ? '已启用' : '已禁用' }}
+                    </span>
+                    <span class="skill-card-source" :class="skill.source">
+                      {{ skill.source === 'system' ? '全局' : '项目' }}
+                    </span>
+                  </div>
+                </div>
+                <p class="skill-card-desc" v-if="skill.description">{{ skill.description }}</p>
+                <div class="skill-card-meta">
+                  <span class="skill-card-size">{{ formatSkillSize(skill.file_size) }}</span>
+                  <button class="skill-card-folder" @click="openSkillFolder(skill.path)" title="打开文件夹">
+                    📂 {{ skill.path }}
+                  </button>
+                </div>
+              </div>
+              <div v-if="!skillsLoading && systemSkills.length === 0 && !skillsError" class="empty-hint">
+                未发现任何技能文件。全局技能放入 <code>~/.agents/skills/</code>，项目技能放入 <code>.jc9/skills/</code>。
+              </div>
+            </div>
+          </div>
           <div v-if="activeTab === 'command'" class="settings-pane">设置始终生效的指令，在整个工作区或用户配置文件中引导AI行为</div>
           <div v-if="activeTab === 'hook'" class="settings-pane">配置由保存文件或运行任务等事件触发的自动操作</div>
           <div v-if="activeTab === 'plugin'" class="settings-pane">安装和管理智能体插件，以添加更多工具，技能和集成</div>
@@ -1170,6 +1325,119 @@ async function importData() {
     border-color: #f85149;
     color: #f85149;
   }
+}
+
+.vllm-model-area {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.vllm-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.vllm-count {
+  font-size: 10.5px;
+  color: var(--jc-text-secondary);
+}
+
+.vllm-refresh-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: 1px solid var(--jc-border-default);
+  border-radius: 4px;
+  background: var(--jc-bg-elevated);
+  color: var(--jc-text-secondary);
+  font-size: 10.5px;
+  cursor: pointer;
+  white-space: nowrap;
+  font-family: inherit;
+  transition: all 0.15s;
+  flex-shrink: 0;
+
+  &:hover:not(:disabled) {
+    border-color: var(--jc-color-accent);
+    color: var(--jc-color-accent);
+  }
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.vllm-loading {
+  font-size: 11px;
+  color: var(--jc-text-secondary);
+  padding: 8px 4px;
+}
+
+.vllm-empty {
+  font-size: 11px;
+  color: var(--jc-text-secondary);
+  padding: 8px 4px;
+  opacity: 0.7;
+  code {
+    font-size: 10px;
+    background: rgba(255,255,255,0.06);
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+}
+
+.vllm-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1px solid var(--jc-border-default);
+  border-radius: 4px;
+  padding: 4px;
+
+  &::-webkit-scrollbar { width: 4px; }
+  &::-webkit-scrollbar-thumb { background: var(--jc-border-default); border-radius: 2px; }
+}
+
+.vllm-check-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 3px;
+  font-size: 11.5px;
+  color: var(--jc-text-primary);
+  cursor: pointer;
+  transition: background 0.1s;
+  font-family: monospace;
+
+  &:hover { background: var(--jc-bg-hover); }
+  &.checked { color: var(--jc-color-accent); }
+
+  input[type="checkbox"] {
+    accent-color: var(--jc-color-accent);
+    margin: 0;
+    flex-shrink: 0;
+  }
+
+  span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.spinning {
+  animation: spin 1s linear infinite;
 }
 
 .add-model-btn {
@@ -1723,6 +1991,201 @@ async function importData() {
   &:hover {
     color: #f85149;
     border-color: #f85149;
+  }
+}
+
+/* ── 技能管理 ── */
+.skills-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.skills-search-input {
+  flex: 1;
+  background: var(--jc-bg-input);
+  border: 1px solid var(--jc-border-default);
+  color: var(--jc-text-primary);
+  font-size: 11px;
+  padding: 5px 10px;
+  border-radius: 4px;
+  outline: none;
+  min-width: 0;
+
+  &:focus {
+    border-color: var(--jc-color-accent);
+  }
+
+  &::placeholder {
+    color: var(--jc-text-secondary);
+    opacity: 0.5;
+  }
+}
+
+.skills-refresh-btn {
+  padding: 5px 12px;
+  border: 1px solid var(--jc-border-default);
+  border-radius: 4px;
+  background: var(--jc-bg-elevated);
+  color: var(--jc-text-primary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+
+  &:hover:not(:disabled) {
+    border-color: var(--jc-color-accent);
+    color: var(--jc-color-accent);
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+}
+
+.skills-count {
+  font-size: 11px;
+  color: var(--jc-text-secondary);
+}
+
+.skills-error {
+  font-size: 11px;
+  color: #f85149;
+  background: rgba(248, 81, 73, 0.08);
+  padding: 6px 10px;
+  border-radius: 4px;
+  margin-bottom: 8px;
+}
+
+.skills-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 380px;
+  overflow-y: auto;
+}
+
+.skill-card {
+  border: 1px solid var(--jc-border-default);
+  border-radius: 6px;
+  padding: 5px 6px;
+  background: rgba(255, 255, 255, 0.02);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: border-color 0.15s;
+
+  &:hover {
+    border-color: var(--jc-border-strong);
+  }
+}
+
+.skill-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.skill-card-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.skill-card-name {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--jc-text-highlight);
+}
+
+.skill-card-id {
+  font-family: monospace;
+  font-size: 9px;
+  color: var(--jc-text-secondary);
+  margin-top: 1px;
+}
+
+.skill-card-badges {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.skill-card-status {
+  font-size: 9px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+  background: rgba(139, 148, 158, 0.1);
+  color: var(--jc-text-secondary);
+  flex-shrink: 0;
+
+  &.enabled {
+    background: rgba(63, 185, 80, 0.12);
+    color: #3fb950;
+  }
+}
+
+.skill-card-source {
+  font-size: 9px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+  flex-shrink: 0;
+
+  &.system {
+    background: rgba(88, 166, 255, 0.1);
+    color: #58a6ff;
+  }
+
+  &.project {
+    background: rgba(210, 153, 34, 0.12);
+    color: #d29922;
+  }
+}
+
+.skill-card-desc {
+  margin: 0;
+  font-size: 11px;
+  color: var(--jc-text-secondary);
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.skill-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 10px;
+}
+
+.skill-card-size {
+  color: var(--jc-text-secondary);
+  font-family: monospace;
+}
+
+.skill-card-folder {
+  background: none;
+  border: none;
+  color: var(--jc-text-secondary);
+  font-size: 10px;
+  font-family: monospace;
+  cursor: pointer;
+  text-align: left;
+  padding: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 320px;
+
+  &:hover {
+    color: var(--jc-color-accent);
+    text-decoration: underline;
   }
 }
 </style>
