@@ -3,14 +3,13 @@ import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useStatusStore } from '@/stores/status'
-import type { Command, Project, RunningStatus } from '@/types'
+import type { Command, Project, RunningStatus, Workflow } from '@/types'
 
 function genId() { return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 9)}` }
 
 export interface RunningTab { projectId: string; projectName: string; commandId: string; commandName: string; command: string }
 export interface DocTab { id: string; title: string; command: string; content: string; loading: boolean }
 export interface ToolTab { id: string; title: string; toolType: string }
-export interface ShortcutItem { id: string; name: string; command: string; category: string; description: string; favorite?: boolean; useCount?: number }
 export interface LogStats { error: number; warn: number; info: number; debug: number }
 
 export const useProjectStore = defineStore('project', () => {
@@ -28,22 +27,98 @@ export const useProjectStore = defineStore('project', () => {
   const activeDocIndex = ref(-1)
   const activeToolIndex = ref(-1)
   const activeTabType = ref<'term'|'doc'|'tool'|'note'>('term')
-  const shortcuts = ref<ShortcutItem[]>([])
+  const workflows = ref<Workflow[]>([])
   const pendingInput = ref('')
   const recentTools = ref<string[]>(JSON.parse(localStorage.getItem('jc9-recent-tools') || '[]'))
-  const sidebarTab = ref<'projects'|'shortcuts'|'tools'|'notes'>('projects')
+  const sidebarTab = ref<'projects'|'workflows'|'tools'|'notes'>('projects')
   const mainMode = ref<'main' | 'ai'>('main')
+  const workflowRunning = ref(false)
+  const workflowProgress = ref<{ step: number; total: number; name: string; status: string; stdout: string; stderr: string } | null>(null)
 
-  async function loadShortcuts() { try { shortcuts.value = await invoke<ShortcutItem[]>('get_shortcuts') } catch (e) { console.error(e) } }
-  async function saveShortcuts(userOnly: ShortcutItem[]) { try { await invoke('save_shortcuts', { shortcuts: userOnly }) } catch (e) { console.error(e) } }
-  function addShortcut(s: Omit<ShortcutItem, 'id'>) { const item: ShortcutItem = { ...s, id: genId() }; shortcuts.value.push(item); saveShortcuts(shortcuts.value.filter(x => !isBuiltin(x.id))) }
-  function removeShortcut(id: string) { shortcuts.value = shortcuts.value.filter(s => s.id !== id); saveShortcuts(shortcuts.value.filter(x => !isBuiltin(x.id))) }
-  function isBuiltin(id: string) { return id.startsWith('go-') || id.startsWith('npm-') || id.startsWith('yarn-') || id.startsWith('npx-') || id.startsWith('git-') }
-  function useShortcut(s: ShortcutItem) { s.useCount = (s.useCount||0) + 1; if (!isBuiltin(s.id)) saveShortcuts(shortcuts.value.filter(x => !isBuiltin(x.id))); pendingInput.value = s.command }
-  function toggleFav(id: string) { const s = shortcuts.value.find(x=>x.id===id); if(s){s.favorite=!s.favorite; if(!isBuiltin(id)) saveShortcuts(shortcuts.value.filter(x=>!isBuiltin(x.id)))} }
-  function updateShortcut(id: string, data: Partial<ShortcutItem>) { const s = shortcuts.value.find(x=>x.id===id); if(s){ Object.assign(s, data); if(!isBuiltin(id)) saveShortcuts(shortcuts.value.filter(x=>!isBuiltin(x.id))) } }
-  const frequentShortcuts = computed(() => [...shortcuts.value].filter(s=>(s.useCount||0)>0).sort((a,b)=>(b.useCount||0)-(a.useCount||0)))
-  const favShortcuts = computed(() => shortcuts.value.filter(s=>s.favorite))
+  // ── 工作流加载/保存 ──
+  async function loadWorkflows() {
+    try {
+      const json = await invoke<string>('get_workflows')
+      workflows.value = JSON.parse(json)
+    } catch (e) {
+      console.error(e)
+      useStatusStore().pushMessage(`加载工作流失败: ${e}`, 'error')
+    }
+  }
+
+  async function persistWorkflows() {
+    try {
+      await invoke('save_workflows', { workflowsJson: JSON.stringify(workflows.value) })
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
+  function addWorkflow(w: Omit<Workflow, 'id'>) {
+    const item: Workflow = { ...w, id: genId() }
+    workflows.value.push(item)
+    persistWorkflows()
+  }
+
+  function removeWorkflow(id: string) {
+    workflows.value = workflows.value.filter(w => w.id !== id)
+    persistWorkflows()
+  }
+
+  function updateWorkflow(id: string, data: Partial<Workflow>) {
+    const w = workflows.value.find(x => x.id === id)
+    if (w) { Object.assign(w, data); persistWorkflows() }
+  }
+
+  function toggleWfFav(id: string) {
+    const w = workflows.value.find(x => x.id === id)
+    if (w) { w.favorite = !w.favorite; persistWorkflows() }
+  }
+
+  const frequentWorkflows = computed(() =>
+    [...workflows.value].filter(w => (w.useCount || 0) > 0).sort((a, b) => (b.useCount || 0) - (a.useCount || 0))
+  )
+  const favWorkflows = computed(() => workflows.value.filter(w => w.favorite))
+
+  // ── 工作流执行 ──
+  async function runWorkflow(id: string) {
+    const w = workflows.value.find(x => x.id === id)
+    if (!w || w.steps.length === 0) return
+    if (workflowRunning.value) {
+      useStatusStore().pushMessage('已有工作流正在运行', 'warn')
+      return
+    }
+
+    w.useCount = (w.useCount || 0) + 1
+    persistWorkflows()
+    workflowRunning.value = true
+    workflowProgress.value = null
+
+    // 监听进度事件
+    const unlisten = await listen<any>('workflow-event', (event) => {
+      workflowProgress.value = event.payload
+      if (event.payload.type === 'step_start') {
+        useStatusStore().pushMessage(`▶ 步骤 ${event.payload.step}/${event.payload.total}: ${event.payload.name}`, 'info')
+      } else if (event.payload.type === 'step_done') {
+        useStatusStore().pushMessage(`✅ 步骤 ${event.payload.step}/${event.payload.total}: ${event.payload.name}`, 'success')
+      } else if (event.payload.type === 'step_fail') {
+        useStatusStore().pushMessage(`❌ 步骤 ${event.payload.step}/${event.payload.total}: ${event.payload.name}`, 'error')
+      } else if (event.payload.type === 'workflow_done') {
+        useStatusStore().pushMessage(`🏁 工作流「${w.name}」执行完成`, 'success')
+        workflowRunning.value = false
+        workflowProgress.value = null
+      }
+    })
+
+    try {
+      await invoke('run_workflow', { steps: w.steps })
+    } catch (e) {
+      useStatusStore().pushMessage(`工作流执行失败: ${e}`, 'error')
+      workflowRunning.value = false
+    } finally {
+      unlisten()
+    }
+  }
 
   let _defaultTerminalStarted = false
   function startDefaultTerminal() {
@@ -242,9 +317,9 @@ export const useProjectStore = defineStore('project', () => {
     _unlistenPty = await listen<{ processId: string; data: number[] }>('pty-output', (e) => {
       bufferPtyOutput(e.payload.processId, e.payload.data)
     })
-    await loadShortcuts()
+    await loadWorkflows()
   }
   function destroyListeners() { _unlistenExit?.(); _unlistenPty?.() }
 
-  return { projects, selectedProjectId, runningMap, outputMap, logStatsMap, runningTabs, docTabs, toolTabs, activeTabIndex, activeDocIndex, activeToolIndex, activeTabType, shortcuts, pendingInput, frequentShortcuts, favShortcuts, recentTools, clearTermSignal, sidebarTab, mainMode, loadProjects, saveProjects, addProject, removeProject, updateProjectName, addCommand, removeCommand, updateCommand, startCommand, stopCommand, restartCommand, closeTab, closeDocTab, openDoc, openDocFromText, clearOutput, clearLogStats, getOutput, initListeners, destroyListeners, cmdKey, detectProject, bufferPtyOutput, loadShortcuts, addShortcut, removeShortcut, updateShortcut, isBuiltin, useShortcut, toggleFav, startDefaultTerminal, openTool, closeToolTab }
+  return { projects, selectedProjectId, runningMap, outputMap, logStatsMap, runningTabs, docTabs, toolTabs, activeTabIndex, activeDocIndex, activeToolIndex, activeTabType, workflows, pendingInput, frequentWorkflows, favWorkflows, recentTools, clearTermSignal, sidebarTab, mainMode, workflowRunning, workflowProgress, loadProjects, saveProjects, addProject, removeProject, updateProjectName, addCommand, removeCommand, updateCommand, startCommand, stopCommand, restartCommand, closeTab, closeDocTab, openDoc, openDocFromText, clearOutput, clearLogStats, getOutput, initListeners, destroyListeners, cmdKey, detectProject, bufferPtyOutput, loadWorkflows, addWorkflow, removeWorkflow, updateWorkflow, toggleWfFav, runWorkflow, startDefaultTerminal, openTool, closeToolTab }
 })

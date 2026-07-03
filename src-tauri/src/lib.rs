@@ -209,6 +209,83 @@ fn save_ai_config(config: String) -> Result<(), String> {
     database::save_ai_config(&config)
 }
 
+// ── 工作流（多命令顺序执行）──
+
+#[tauri::command]
+fn get_workflows() -> Result<String, String> {
+    database::get_workflows()
+}
+
+#[tauri::command]
+fn save_workflows(workflows_json: String) -> Result<(), String> {
+    database::save_workflows_json(&workflows_json)
+}
+
+/// 执行工作流：按顺序在终端中执行多个命令，每个等上一个完成
+#[tauri::command]
+async fn run_workflow(app: tauri::AppHandle, steps: Vec<database::WorkflowStep>) -> Result<(), String> {
+    use tauri::Emitter;
+    let total = steps.len();
+    for (i, step) in steps.iter().enumerate() {
+        let step_num = i + 1;
+
+        // 发出开始事件
+        let _ = app.emit("workflow-event", serde_json::json!({
+            "type": "step_start",
+            "step": step_num,
+            "total": total,
+            "name": step.name,
+            "command": step.command
+        }));
+
+        // 使用 cmd.exe /C 执行（非交互式，完成后自动退出）
+        let shell = if cfg!(target_os = "windows") { "cmd.exe" } else { "sh" };
+        let arg = if cfg!(target_os = "windows") { "/C" } else { "-c" };
+
+        let output = std::process::Command::new(shell)
+            .args([arg, &step.command])
+            .current_dir(if step.working_dir.is_empty() { "." } else { &step.working_dir })
+            .output()
+            .map_err(|e| format!("步骤 {} 「{}」启动失败: {}", step_num, step.name, e))?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+        // 发送输出事件到前端（显示在终端标签页或通知面板）
+        let _ = app.emit("pty-output", serde_json::json!({
+            "processId": format!("workflow-{step_num}"),
+            "data": output.stdout
+        }));
+
+        if output.status.success() {
+            let _ = app.emit("workflow-event", serde_json::json!({
+                "type": "step_done",
+                "step": step_num,
+                "total": total,
+                "name": step.name,
+                "stdout": stdout,
+                "stderr": stderr
+            }));
+        } else {
+            let _ = app.emit("workflow-event", serde_json::json!({
+                "type": "step_fail",
+                "step": step_num,
+                "total": total,
+                "name": step.name,
+                "stdout": stdout,
+                "stderr": stderr
+            }));
+            return Err(format!("步骤 {} 「{}」失败:\n{}", step_num, step.name, stderr));
+        }
+    }
+    let _ = app.emit("workflow-event", serde_json::json!({
+        "type": "workflow_done",
+        "step": total,
+        "total": total
+    }));
+    Ok(())
+}
+
 #[tauri::command]
 fn get_projects(state: State<'_, Mutex<AppState>>) -> Result<Vec<Project>, String> {
     let app_state = state.lock().map_err(|e| e.to_string())?;
@@ -1835,6 +1912,9 @@ pub fn run() {
             get_startup_logs,
             get_ai_config,
             save_ai_config,
+            get_workflows,
+            save_workflows,
+            run_workflow,
             get_projects,
             save_all_projects,
             start_command,

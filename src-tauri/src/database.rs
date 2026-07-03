@@ -677,3 +677,53 @@ pub fn save_ai_config(config: &str) -> Result<(), String> {
     }
     fs::write(&path, config).map_err(|e| format!("保存 ai-config 失败: {e}"))
 }
+
+// ── 工作流（多命令顺序执行，替代旧快捷方式）──
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowStep {
+    pub name: String,
+    pub command: String,
+    #[serde(default)]
+    pub working_dir: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Workflow {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub category: String,
+    pub steps: Vec<WorkflowStep>,
+    #[serde(default)]
+    pub favorite: bool,
+    #[serde(default)]
+    pub use_count: i32,
+}
+
+/// 读取工作流列表（~/.jc9/data/workflows.json）
+pub fn get_workflows() -> Result<String, String> {
+    let path = dirs_data().join("workflows.json");
+    if path.exists() {
+        fs::read_to_string(&path).map_err(|e| format!("读取 workflows 失败: {e}"))
+    } else {
+        // 首次使用：写入默认空列表
+        let default = "[]";
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let _ = fs::write(&path, default);
+        Ok(default.to_string())
+    }
+}
+
+/// 保存工作流列表到 JSON
+pub fn save_workflows_json(workflows_json: &str) -> Result<(), String> {
+    let path = dirs_data().join("workflows.json");
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    fs::write(&path, workflows_json).map_err(|e| format!("保存 workflows 失败: {e}"))
+}

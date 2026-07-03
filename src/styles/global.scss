@@ -28,6 +28,8 @@ input, textarea {
   font-size: 12px;
   outline: none;
   color: var(--jc-text-primary);
+  background: var(--jc-bg-input);
+  border: 1px solid var(--jc-border-strong);
 }
 
 // ── Scrollbar ── 全局统一滚动条样式

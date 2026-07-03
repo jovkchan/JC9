@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { ref, nextTick, computed, onMounted, onUnmounted } from 'vue'
 import { useProjectStore } from '@/stores/project'
+import { useStatusStore } from '@/stores/status'
 import { open } from '@tauri-apps/plugin-dialog'
 import CommandDialog from '@/components/CommandDialog.vue'
 import NoteSidebar from '@/components/notes/NoteSidebar.vue'
 import type { Command } from '@/types'
 
 const store = useProjectStore()
-const activeTab = ref<'projects' | 'shortcuts' | 'tools' | 'notes'>('projects')
+const activeTab = ref<'projects' | 'workflows' | 'tools' | 'notes'>('projects')
 const showAdd = ref(false)
 const newName = ref('')
 const newDir = ref('')
@@ -189,136 +190,177 @@ function ctxDelCmd() {
   closeCmdCtx()
 }
 
-// ---- Shortcuts ----
-const showScDlg = ref(false)
-const newScName = ref('')
-const newScCmd = ref('')
-const newScDesc = ref('')
-const newScCat = ref('')
+// ── 工作流 JSON 模板 ──
+const WORKFLOW_TEMPLATE_JSON = JSON.stringify({
+  name: "编译并运行",
+  description: "先编译项目，编译成功后再启动",
+  category: "Tauri",
+  steps: [
+    { name: "编译", command: "cargo build", workingDir: "src-tauri" },
+    { name: "运行", command: "npx tauri dev", workingDir: "." }
+  ]
+}, null, 2)
 
-function openScDlg() {
-  showScDlg.value = true
-  newScName.value = ''
-  newScCmd.value = ''
-  newScDesc.value = ''
-  newScCat.value = ''
+// ---- Workflows (多命令顺序执行，替代旧快捷方式) ----
+const showWfDlg = ref(false)
+const wfEditId = ref('')
+const wfName = ref('')
+const wfDesc = ref('')
+const wfCat = ref('')
+const wfSteps = ref<Array<{ name: string; command: string; workingDir: string }>>([{ name: '', command: '', workingDir: '' }])
+const wfJsonMode = ref(false)
+const wfJsonText = ref('')
+
+function openWfDlg(editId?: string) {
+  showWfDlg.value = true
+  wfJsonMode.value = false
+  if (editId) {
+    const w = store.workflows.find(x => x.id === editId)
+    if (w) {
+      wfEditId.value = editId
+      wfName.value = w.name
+      wfDesc.value = w.description
+      wfCat.value = w.category
+      wfSteps.value = w.steps.map(s => ({ ...s }))
+      wfJsonText.value = JSON.stringify({ name: w.name, description: w.description, category: w.category, steps: w.steps }, null, 2)
+      return
+    }
+  }
+  // 新建：预填模板
+  wfEditId.value = ''
+  const tpl = JSON.parse(WORKFLOW_TEMPLATE_JSON)
+  wfName.value = tpl.name
+  wfDesc.value = tpl.description
+  wfCat.value = tpl.category
+  wfSteps.value = tpl.steps.map((s: any) => ({ ...s }))
+  wfJsonText.value = WORKFLOW_TEMPLATE_JSON
 }
 
-const expandedCat = ref('')
-const scSearch = ref('')
-const filteredCats = computed(() => {
-  return shortcutCats.value.filter(c => {
-    return shortcutsByCat(c).some(s => {
-      return s.command.includes(scSearch.value) ||
-             s.description.includes(scSearch.value) ||
-             s.name.includes(scSearch.value)
-    })
-  })
-})
-
-const filteredFreq = computed(() => {
-  return store.frequentShortcuts.filter(s => {
-    return s.command.includes(scSearch.value) ||
-           s.description.includes(scSearch.value) ||
-           s.name.includes(scSearch.value)
-  })
-})
-
-const filteredFav = computed(() => {
-  return store.favShortcuts.filter(s => {
-    return s.command.includes(scSearch.value) ||
-           s.description.includes(scSearch.value) ||
-           s.name.includes(scSearch.value)
-  })
-})
-
-const shortcutCats = computed(() => {
-  return [...new Set(store.shortcuts.map(s => s.category))]
-})
-
-function shortcutsByCat(cat: string) {
-  return store.shortcuts.filter(s => s.category === cat)
+function applyJsonToForm() {
+  try {
+    const parsed = JSON.parse(wfJsonText.value)
+    wfName.value = parsed.name || ''
+    wfDesc.value = parsed.description || ''
+    wfCat.value = parsed.category || ''
+    wfSteps.value = (parsed.steps || []).map((s: any) => ({
+      name: s.name || '',
+      command: s.command || '',
+      workingDir: s.workingDir || ''
+    }))
+    wfJsonMode.value = false
+  } catch (e) {
+    useStatusStore().pushMessage(`JSON 格式错误: ${e}`, 'error')
+  }
 }
 
-function addSc() {
-  const n = newScName.value.trim()
-  const c = newScCmd.value.trim()
-  if (!n || !c) return
-  if (editingScId.value) {
-    store.updateShortcut(editingScId.value, {
+function syncFormToJson() {
+  wfJsonText.value = JSON.stringify({
+    name: wfName.value,
+    description: wfDesc.value,
+    category: wfCat.value,
+    steps: wfSteps.value.filter(s => s.command.trim())
+  }, null, 2)
+  wfJsonMode.value = true
+}
+
+function addStep() {
+  wfSteps.value.push({ name: '', command: '', workingDir: '' })
+}
+
+function removeStep(idx: number) {
+  wfSteps.value.splice(idx, 1)
+}
+
+async function pickWfDir(step: { workingDir: string }) {
+  const { open } = await import('@tauri-apps/plugin-dialog')
+  const dir = await open({ directory: true, multiple: false, title: '选择工作目录' })
+  if (dir && typeof dir === 'string') step.workingDir = dir
+}
+
+function saveWf() {
+  const n = wfName.value.trim()
+  if (!n) return
+  let steps = wfSteps.value.filter(s => s.command.trim())
+  // 如果在 JSON 模式下，先解析
+  if (wfJsonMode.value) {
+    try {
+      const parsed = JSON.parse(wfJsonText.value)
+      steps = (parsed.steps || []).filter((s: any) => s.command)
+    } catch { return }
+  }
+  if (steps.length === 0) return
+  if (wfEditId.value) {
+    store.updateWorkflow(wfEditId.value, {
       name: n,
-      command: c,
-      description: newScDesc.value.trim(),
-      category: newScCat.value.trim() || '自定义'
+      description: wfDesc.value.trim(),
+      category: wfCat.value.trim() || '自定义',
+      steps
     })
   } else {
-    store.addShortcut({
+    store.addWorkflow({
       name: n,
-      command: c,
-      description: newScDesc.value.trim(),
-      category: newScCat.value.trim() || '自定义'
+      description: wfDesc.value.trim(),
+      category: wfCat.value.trim() || '自定义',
+      steps
     })
   }
-  showScDlg.value = false
-  editingScId.value = ''
+  showWfDlg.value = false
 }
 
-const scTab = ref<'all' | 'freq' | 'fav'>('all')
+const wfSearch = ref('')
+const wfTab = ref<'all' | 'freq' | 'fav'>('all')
+const expandedCat = ref('')
 
-// Shortcut context menu
-const scCtxShow = ref(false)
-const scCtxPos = ref({ x: 0, y: 0 })
-const scCtxItem = ref<import('@/stores/project').ShortcutItem | null>(null)
+const wfCats = computed(() => [...new Set(store.workflows.map(w => w.category))])
 
-function openScCtx(e: MouseEvent, s: import('@/stores/project').ShortcutItem) {
+function wfsByCat(cat: string) {
+  return store.workflows.filter(w => w.category === cat && matchesSearch(w))
+}
+
+function matchesSearch(w: { name: string; description: string; steps: Array<{ command: string }> }) {
+  const q = wfSearch.value
+  if (!q) return true
+  return w.name.includes(q) || w.description.includes(q) || w.steps.some(s => s.command.includes(q))
+}
+
+const filteredFreq = computed(() =>
+  store.frequentWorkflows.filter(w => matchesSearch(w))
+)
+
+const filteredFav = computed(() =>
+  store.favWorkflows.filter(w => matchesSearch(w))
+)
+
+// Context menu
+const wfCtxShow = ref(false)
+const wfCtxPos = ref({ x: 0, y: 0 })
+const wfCtxItem = ref<import('@/types').Workflow | null>(null)
+
+function openWfCtx(e: MouseEvent, w: import('@/types').Workflow) {
   e.preventDefault()
-  scCtxPos.value = { x: e.clientX, y: e.clientY }
-  scCtxItem.value = s
-  scCtxShow.value = true
+  wfCtxPos.value = { x: e.clientX, y: e.clientY }
+  wfCtxItem.value = w
+  wfCtxShow.value = true
 }
 
-function closeScCtx() {
-  scCtxShow.value = false
+function closeWfCtx() { wfCtxShow.value = false }
+
+function wfCtxEdit() {
+  const w = wfCtxItem.value
+  if (w) openWfDlg(w.id)
+  closeWfCtx()
 }
 
-function scCtxEdit() {
-  const s = scCtxItem.value
-  if (s) {
-    newScName.value = s.name
-    newScCmd.value = s.command
-    newScDesc.value = s.description
-    newScCat.value = s.category
-    editingScId.value = s.id
-    showScDlg.value = true
-  }
-  closeScCtx()
+function wfCtxDel() {
+  if (wfCtxItem.value) store.removeWorkflow(wfCtxItem.value.id)
+  closeWfCtx()
 }
 
-function scCtxDel() {
-  if (scCtxItem.value) {
-    store.removeShortcut(scCtxItem.value.id)
-  }
-  closeScCtx()
+function wfCtxFav() {
+  if (wfCtxItem.value) store.toggleWfFav(wfCtxItem.value.id)
+  closeWfCtx()
 }
 
-function scCtxFav() {
-  if (scCtxItem.value) {
-    store.toggleFav(scCtxItem.value.id)
-  }
-  closeScCtx()
-}
-
-const editingScId = ref('')
-
-async function scCtxDoc() {
-  const s = scCtxItem.value
-  if (!s) {
-    closeScCtx()
-    return
-  }
-  closeScCtx()
-  store.openDoc(s.command, s.command)
-}
 const allTools = [
   { type: 'json', name: 'JSON 格式化', desc: 'JSON 美化/压缩与校验', category: 'code', icon: 'json' },
   { type: 'regex', name: '正则测试器', desc: '正则表达式实时高亮测试', category: 'code', icon: 'regex' },
@@ -375,19 +417,7 @@ const recentUsedTools = computed(() => {
   return store.recentTools.map(type => allTools.find(t => t.type === type)).filter(Boolean) as typeof allTools
 })
 
-function handleShortcutKeys(e: KeyboardEvent) {
-  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
-  if (e.altKey && e.key >= '1' && e.key <= '9') {
-    e.preventDefault()
-    const idx = parseInt(e.key) - 1
-    if (idx >= 0 && idx < allTools.length) {
-      const tool = allTools[idx]
-      store.openTool(tool.type, tool.name)
-    }
-  }
-}
-
-function switchTab(tab: 'projects'|'shortcuts'|'tools'|'notes') {
+function switchTab(tab: 'projects'|'workflows'|'tools'|'notes') {
   activeTab.value = tab
   store.sidebarTab = tab
 }
@@ -395,17 +425,15 @@ function switchTab(tab: 'projects'|'shortcuts'|'tools'|'notes') {
 function handleGlobalClick() {
   closeProjCtx()
   closeCmdCtx()
-  closeScCtx()
+  closeWfCtx()
 }
 
 onMounted(() => {
   document.addEventListener('click', handleGlobalClick)
-  document.addEventListener('keydown', handleShortcutKeys)
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', handleGlobalClick)
-  document.removeEventListener('keydown', handleShortcutKeys)
 })
 </script>
 
@@ -414,7 +442,7 @@ onUnmounted(() => {
     <div class="side-head"></div>
     <div class="tabs" role="tablist">
       <div :class="['tab',{on:activeTab==='projects'}]" role="tab" :aria-selected="activeTab==='projects'" tabindex="0" @click="switchTab('projects')" @keyup.enter="switchTab('projects')">项目</div>
-      <div :class="['tab',{on:activeTab==='shortcuts'}]" role="tab" :aria-selected="activeTab==='shortcuts'" tabindex="0" @click="switchTab('shortcuts')" @keyup.enter="switchTab('shortcuts')">快捷</div>
+      <div :class="['tab',{on:activeTab==='workflows'}]" role="tab" :aria-selected="activeTab==='workflows'" tabindex="0" @click="switchTab('workflows')" @keyup.enter="switchTab('workflows')">快捷</div>
       <div :class="['tab',{on:activeTab==='tools'}]" role="tab" :aria-selected="activeTab==='tools'" tabindex="0" @click="switchTab('tools')" @keyup.enter="switchTab('tools')">工具</div>
       <div :class="['tab',{on:activeTab==='notes'}]" role="tab" :aria-selected="activeTab==='notes'" tabindex="0" @click="switchTab('notes')" @keyup.enter="switchTab('notes')">笔记</div>
     </div>
@@ -459,44 +487,45 @@ onUnmounted(() => {
       <CommandDialog ref="cmdDialogRef" :project-id="dialogProjectId" :editing="editingCmd" @close="editingCmd=null" />
     </div>
 
-    <!-- Shortcuts -->
-    <div v-show="activeTab==='shortcuts'" class="panel" style="display:flex;flex-direction:column">
-      <div class="bar"><button class="btn" @click="openScDlg">+ 添加快捷命令</button></div>
+    <!-- Workflows (多命令顺序执行) -->
+    <div v-show="activeTab==='workflows'" class="panel" style="display:flex;flex-direction:column">
+      <div class="bar">
+        <button class="btn" @click="openWfDlg()">+ 新建工作流</button>
+        <span v-if="store.workflowRunning" class="wf-badge">运行中...</span>
+      </div>
       <div class="tabs">
-        <div :class="['tab',{on:scTab==='all'}]" @click="scTab='all'">全部</div>
-        <div :class="['tab',{on:scTab==='freq'}]" @click="scTab='freq'">常用</div>
-        <div :class="['tab',{on:scTab==='fav'}]" @click="scTab='fav'">收藏</div>
+        <div :class="['tab',{on:wfTab==='all'}]" @click="wfTab='all'">全部</div>
+        <div :class="['tab',{on:wfTab==='freq'}]" @click="wfTab='freq'">常用</div>
+        <div :class="['tab',{on:wfTab==='fav'}]" @click="wfTab='fav'">收藏</div>
       </div>
       <div style="flex:1;overflow-y:auto">
-          <!-- All: accordion single-expand -->
-          <template v-if="scTab==='all'">
-            <div v-for="cat in filteredCats" :key="cat" style="border-bottom:1px solid var(--jc-border-default)">
-              <div class="scat" @click="expandedCat = expandedCat===cat?'':cat">{{ expandedCat===cat?'▾':'▸'}} {{ cat }} ({{ shortcutsByCat(cat).length }})</div>
-              <div v-if="expandedCat===cat">
-                <div v-for="s in shortcutsByCat(cat)" :key="s.id" class="sc" @click="store.useShortcut(s)" @contextmenu="openScCtx($event,s)" :title="s.command + '\n' + s.description">
-                  <span class="fav-star" v-if="s.favorite">★</span>
-                  <span class="scc">{{ s.command }}</span>
-                </div>
+        <template v-if="wfTab==='all'">
+          <div v-for="cat in wfCats" :key="cat" style="border-bottom:1px solid var(--jc-border-default)">
+            <div class="scat" @click="expandedCat = expandedCat===cat?'':cat">{{ expandedCat===cat?'▾':'▸'}} {{ cat }}</div>
+            <div v-if="expandedCat===cat">
+              <div v-for="w in wfsByCat(cat)" :key="w.id" class="sc" @click="store.runWorkflow(w.id)" @contextmenu="openWfCtx($event,w)">
+                <span class="fav-star" v-if="w.favorite">★</span>
+                <span class="scc">{{ w.name }}</span>
+                <span class="scd">{{ w.steps.length }}步</span>
               </div>
             </div>
-          </template>
-          <!-- Frequent -->
-          <template v-if="scTab==='freq'">
-            <div v-for="s in filteredFreq" :key="s.id" class="sc" @click="store.useShortcut(s)" @contextmenu="openScCtx($event,s)" :title="s.command + '\n' + s.description">
-              <span class="fav-star" v-if="s.favorite">★</span>
-              <span class="scc">{{ s.command }}</span><span class="scd">{{ s.useCount }}次</span>
-            </div>
-          </template>
-          <!-- Favorites -->
-          <template v-if="scTab==='fav'">
-            <div v-for="s in filteredFav" :key="s.id" class="sc" @click="store.useShortcut(s)" @contextmenu="openScCtx($event,s)" :title="s.command + '\n' + s.description">
-              <span class="fav-star">★</span>
-              <span class="scc">{{ s.command }}</span>
-            </div>
-          </template>
+          </div>
+        </template>
+        <template v-if="wfTab==='freq'">
+          <div v-for="w in filteredFreq" :key="w.id" class="sc" @click="store.runWorkflow(w.id)" @contextmenu="openWfCtx($event,w)">
+            <span class="fav-star" v-if="w.favorite">★</span>
+            <span class="scc">{{ w.name }}</span><span class="scd">{{ w.useCount }}次</span>
+          </div>
+        </template>
+        <template v-if="wfTab==='fav'">
+          <div v-for="w in filteredFav" :key="w.id" class="sc" @click="store.runWorkflow(w.id)" @contextmenu="openWfCtx($event,w)">
+            <span class="fav-star">★</span>
+            <span class="scc">{{ w.name }}</span>
+          </div>
+        </template>
       </div>
       <div style="padding:4px 6px;border-top:1px solid var(--jc-border-default);flex-shrink:0">
-        <input v-model="scSearch" placeholder="搜索命令..." style="width:100%;font-size:11px;padding:3px 6px" />
+        <input v-model="wfSearch" placeholder="搜索工作流..." style="width:100%;font-size:11px;padding:3px 6px" />
       </div>
     </div>
 
@@ -627,26 +656,57 @@ onUnmounted(() => {
         <div class="ci" style="color:var(--jc-color-error)" @click="ctxDelCmd">删除</div>
       </div>
     </Teleport>
+    <!-- 工作流编辑对话框 -->
     <Teleport to="body">
-      <div v-if="showScDlg" class="mbg" @click.self="showScDlg=false;editingScId=''">
-        <div class="mw">
-          <div class="mt">{{ editingScId?'编辑快捷命令':'添加快捷命令' }}</div>
+      <div v-if="showWfDlg" class="mbg" @click.self="showWfDlg=false">
+        <div class="mw" style="width:560px">
+          <div class="mt" style="display:flex;align-items:center;justify-content:space-between">
+            <span>{{ wfEditId ? '编辑工作流' : '新建工作流' }}</span>
+            <button class="btn" style="font-size:10px;padding:2px 8px" @click="wfJsonMode ? applyJsonToForm() : syncFormToJson()">
+              {{ wfJsonMode ? '📋 应用 JSON' : '✏ JSON 编辑' }}
+            </button>
+          </div>
           <div class="mb">
-            <div class="fld"><label>名称</label><input v-model="newScName" placeholder="如: Go 编译" @keyup.enter="addSc" autofocus /></div>
-            <div class="fld"><label>命令</label><input v-model="newScCmd" placeholder="如: go build -o app.exe ." @keyup.enter="addSc" style="font-family:'Cascadia Code',Consolas,monospace" /></div>
-            <div class="fld"><label>分类</label><input v-model="newScCat" placeholder="如: Go / 自定义" /></div>
-            <div class="fld"><label>说明</label><input v-model="newScDesc" placeholder="中文用法说明" /></div>
-            <div class="acts"><button class="btn" @click="showScDlg=false">取消</button><button class="btn pri" @click="addSc">添加</button></div>
+            <template v-if="!wfJsonMode">
+              <div class="fld"><label>名称</label><input v-model="wfName" class="wf-input" placeholder="如: 编译并运行" autofocus /></div>
+              <div class="fld"><label>分类</label><input v-model="wfCat" class="wf-input" placeholder="如: Go / Tauri" /></div>
+              <div class="fld"><label>说明</label><input v-model="wfDesc" class="wf-input" placeholder="描述这个工作流的用途" /></div>
+              <div class="wf-section-label">命令步骤（顺序执行）</div>
+              <div v-for="(step, idx) in wfSteps" :key="idx" class="wf-step-card">
+                <div class="wf-step-header">
+                  <span class="wf-step-num">#{{ idx+1 }}</span>
+                  <input v-model="step.name" class="wf-input wf-step-name" placeholder="步骤名称" />
+                  <button class="wf-step-del" @click="removeStep(idx)">✕</button>
+                </div>
+                <textarea v-model="step.command" class="wf-textarea" placeholder="命令（如 go build -o app.exe .）" rows="2" />
+                <div class="wf-step-footer">
+                  <input v-model="step.workingDir" class="wf-input wf-dir" placeholder="工作目录（点击📁选择）" />
+                  <button class="wf-dir-pick" @click="pickWfDir(step)">📁</button>
+                </div>
+              </div>
+              <button class="btn wf-add-step" @click="addStep">+ 添加步骤</button>
+            </template>
+            <template v-else>
+              <div class="fld"><label>名称</label><input v-model="wfName" class="wf-input" placeholder="工作流名称" /></div>
+              <div style="margin-top:6px">
+                <div class="wf-section-label">JSON 定义</div>
+                <textarea v-model="wfJsonText" class="wf-textarea wf-json-editor" rows="14" spellcheck="false" />
+              </div>
+            </template>
+            <div class="acts wf-acts">
+              <button class="btn" @click="showWfDlg=false">取消</button>
+              <button class="btn pri" @click="saveWf">{{ wfEditId ? '保存' : '创建' }}</button>
+            </div>
           </div>
         </div>
       </div>
     </Teleport>
+    <!-- 工作流右键菜单 -->
     <Teleport to="body">
-      <div v-if="scCtxShow" class="ctx" :style="{left:scCtxPos.x+'px',top:scCtxPos.y+'px'}" @click.stop>
-        <div class="ci" @click="scCtxEdit">编辑</div>
-        <div class="ci" @click="scCtxFav">{{ scCtxItem?.favorite?'取消收藏':'收藏' }}</div>
-        <div class="ci" @click="scCtxDoc">查看文档</div>
-        <div class="ci" style="color:var(--jc-color-error)" @click="scCtxDel">删除</div>
+      <div v-if="wfCtxShow" class="ctx" :style="{left:wfCtxPos.x+'px',top:wfCtxPos.y+'px'}" @click.stop>
+        <div class="ci" @click="wfCtxEdit">编辑</div>
+        <div class="ci" @click="wfCtxFav">{{ wfCtxItem?.favorite?'取消收藏':'收藏' }}</div>
+        <div class="ci" style="color:var(--jc-color-error)" @click="wfCtxDel">删除</div>
       </div>
     </Teleport>
   </aside>
@@ -714,6 +774,23 @@ input { @include input-base; }
   label { font-size:11px; color:var(--jc-text-secondary); text-transform:uppercase; letter-spacing:.5px; }
   input { @include input-base; padding:6px 10px; font-size:13px; }
 }
+
+// ── 工作流对话框（Teleport 到 body，用 :global 确保样式穿透）──
+:global(.wf-input) { @include input-base; }
+:global(.wf-textarea) { @include input-base; font-family:'Cascadia Code',Consolas,monospace; resize:vertical; width:100%; font-size:11px; }
+:global(.wf-json-editor) { margin-top:4px; }
+:global(.wf-step-card) { border:1px solid var(--jc-border-default); border-radius:4px; padding:6px; margin-bottom:4px; }
+:global(.wf-step-header) { display:flex; gap:4px; align-items:center; margin-bottom:4px; }
+:global(.wf-step-num) { font-size:10px; color:var(--jc-text-secondary); }
+:global(.wf-step-name) { flex:1; }
+:global(.wf-step-del) { background:none; border:none; font-size:12px; color:var(--jc-color-error); cursor:pointer; padding:2px 6px; }
+:global(.wf-step-footer) { margin-top:4px; display:flex; gap:4px; align-items:center; }
+:global(.wf-dir) { flex:1; font-size:10px; }
+:global(.wf-dir-pick) { background:none; border:none; cursor:pointer; font-size:13px; padding:2px 4px; flex-shrink:0; }
+:global(.wf-section-label) { font-size:11px; font-weight:600; color:var(--jc-text-highlight); margin:8px 0 4px; }
+:global(.wf-add-step) { width:100%; margin-top:4px; }
+:global(.wf-acts) { margin-top:8px; }
+
 .acts { display:flex; justify-content:flex-end; gap:8px; margin-top:4px; }
 .search-bar {
   padding: 6px 10px;

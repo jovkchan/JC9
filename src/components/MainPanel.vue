@@ -306,7 +306,7 @@ onUnmounted(() => {
 
     <div v-if="store.runningTabs.length===0&&store.docTabs.length===0&&store.toolTabs.length===0&&notesStore.noteTabs.length===0" class="empty-or-feed" :style="store.sidebarTab === 'notes' ? 'flex: 1; display: flex; flex-direction: column; overflow: hidden;' : ''">
       <template v-if="store.sidebarTab==='projects'"><div class="empty">从左侧项目列表点击命令启动</div></template>
-      <template v-else-if="store.sidebarTab==='shortcuts'"><div class="empty">点击快捷命令以执行</div></template>
+      <template v-else-if="store.sidebarTab==='workflows'"><div class="empty">点击工作流以执行</div></template>
       <template v-else-if="store.sidebarTab==='tools'"><div class="empty">选择工具开始使用</div></template>
       <template v-else-if="store.sidebarTab==='notes'">
         <NoteFeedView @open-settings="notesStore.showSettings = true" />
