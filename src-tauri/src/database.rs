@@ -270,6 +270,33 @@ impl Database {
         Ok(())
     }
 
+    /// 读取设置项
+    #[allow(dead_code)]
+    pub fn get_setting(&self, key: &str) -> Result<Option<String>, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let result = conn.query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            params![key],
+            |row| row.get::<_, String>(0),
+        );
+        match result {
+            Ok(val) => Ok(Some(val)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(format!("get_setting: {e}")),
+        }
+    }
+
+    /// 写入设置项
+    #[allow(dead_code)]
+    pub fn set_setting(&self, key: &str, value: &str) -> Result<(), String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
+            params![key, value],
+        ).map_err(|e| format!("set_setting: {e}"))?;
+        Ok(())
+    }
+
     pub fn get_projects(&self) -> Result<Vec<Project>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare("SELECT id, name, created_at FROM projects WHERE user_id = 'local' ORDER BY created_at DESC").map_err(|e| e.to_string())?;
@@ -630,4 +657,23 @@ fn dirs_data() -> PathBuf {
                 .to_string_lossy().to_string()
         });
     PathBuf::from(home).join(".jc9").join("data")
+}
+
+/// 读取 AI 配置（模型、端点等），存为 JSON 文件
+pub fn get_ai_config() -> Result<String, String> {
+    let path = dirs_data().join("ai-config.json");
+    if path.exists() {
+        fs::read_to_string(&path).map_err(|e| format!("读取 ai-config 失败: {e}"))
+    } else {
+        Ok("{}".to_string())
+    }
+}
+
+/// 保存 AI 配置到 JSON 文件
+pub fn save_ai_config(config: &str) -> Result<(), String> {
+    let path = dirs_data().join("ai-config.json");
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    fs::write(&path, config).map_err(|e| format!("保存 ai-config 失败: {e}"))
 }

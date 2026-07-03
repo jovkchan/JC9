@@ -146,7 +146,16 @@ function cancelRoleForm() {
 
 // ── 备份与导入 ──
 
-onMounted(() => {
+onMounted(async () => {
+  // 从 JSON 文件同步 AI 配置到 localStorage（跨 dev/build 共享）
+  try {
+    const json = await invoke<string>('get_ai_config')
+    const cfg = JSON.parse(json)
+    for (const [k, v] of Object.entries(cfg)) {
+      if (typeof v === 'string' && v) localStorage.setItem(k, v)
+    }
+  } catch { /* ignore */ }
+
   defaultFormat.value = (localStorage.getItem('notes-default-format') as any) || 'markdown'
   defaultVisibility.value = (localStorage.getItem('notes-default-visibility') as any) || 'PRIVATE'
 
@@ -179,7 +188,22 @@ onMounted(() => {
   aiStore.loadMcpServers()
 })
 
-function saveSettings() {
+// 辅助：将所有 AI localStorage 键同步到 JSON 文件
+async function saveAiConfigToJson() {
+  const keys: string[] = []
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i)
+    if (k?.startsWith('notes-ai-') || k === 'jc9-last-model') keys.push(k)
+  }
+  const config: Record<string, string> = {}
+  for (const k of keys) {
+    const v = localStorage.getItem(k)
+    if (v) config[k] = v
+  }
+  try { await invoke('save_ai_config', { config: JSON.stringify(config) }) } catch {}
+}
+
+async function saveSettings() {
   localStorage.setItem('notes-default-format', defaultFormat.value)
   localStorage.setItem('notes-default-visibility', defaultVisibility.value)
   localStorage.setItem('notes-ai-models', JSON.stringify(modelConfigs.value))
@@ -208,6 +232,7 @@ function saveSettings() {
       })
     })
   }
+  await saveAiConfigToJson()
   status.pushMessage('设置保存成功', 'success')
   emit('close')
 }

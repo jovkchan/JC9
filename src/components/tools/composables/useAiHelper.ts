@@ -270,7 +270,23 @@ export function useAiHelper() {
     localStorage.setItem(`notes-ai-endpoint-${aiProvider.value}`, aiEndpoint.value)
     localStorage.setItem(`notes-ai-apikey-${aiProvider.value}`, aiApiKey.value)
     localStorage.setItem(`notes-ai-model-${aiProvider.value}`, aiModel.value)
+    // 同步到 JSON 文件（跨 dev/build 共享）
+    persistAiConfigToJson()
     status.pushMessage(`已切换为模型: ${aiProvider.value} / ${aiModel.value}`, 'success')
+  }
+
+  async function persistAiConfigToJson() {
+    const keys: string[] = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)
+      if (k?.startsWith('notes-ai-') || k === 'jc9-last-model') keys.push(k)
+    }
+    const config: Record<string, string> = {}
+    for (const k of keys) {
+      const v = localStorage.getItem(k)
+      if (v) config[k] = v
+    }
+    try { await invoke('save_ai_config', { config: JSON.stringify(config) }) } catch {}
   }
 
   async function fetchOllamaModels() {
@@ -330,6 +346,45 @@ export function useAiHelper() {
       body = { model: aiModel.value, messages: promptMessages.map(m => ({ role: m.role, content: m.content })), temperature: 0.7, stream: true }
     }
 
+    // 尝试通过 Rust 后端代理（绕过 CSP/CORS），失败则回退前端 fetch
+    try {
+      const headerPairs = Object.entries(headers).map(([k, v]) => [k, v] as [string, string])
+      const responseText = await invoke<string>('proxy_ai_request', {
+        url, method: 'POST',
+        headers: headerPairs,
+        body: JSON.stringify(body),
+      })
+      // 解析 SSE 响应
+      if (aiProvider.value === 'ollama') {
+        for (const line of responseText.split('\n')) {
+          const trimmed = line.trim()
+          if (!trimmed) continue
+          try {
+            const json = JSON.parse(trimmed)
+            const text = json.message?.content || ''
+            if (text) onChunk(text)
+          } catch { /* ignore */ }
+        }
+      } else {
+        for (const line of responseText.split('\n')) {
+          const trimmed = line.trim()
+          if (trimmed.startsWith('data:')) {
+            const dataVal = trimmed.slice(5).trim()
+            if (dataVal === '[DONE]') continue
+            try {
+              const json = JSON.parse(dataVal)
+              const text = json.choices?.[0]?.delta?.content || ''
+              if (text) onChunk(text)
+            } catch { /* ignore */ }
+          }
+        }
+      }
+      return
+    } catch (proxyErr) {
+      console.warn('代理请求失败，回退前端 fetch:', proxyErr)
+    }
+
+    // 回退：直接前端 fetch
     const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) })
     if (!res.ok) throw new Error(`请求失败 (${res.status}): ${await res.text()}`)
 
@@ -949,6 +1004,15 @@ export function useAiHelper() {
   }
 
   async function init() {
+    // 从 JSON 文件同步 AI 配置到 localStorage（跨 dev/build 共享）
+    try {
+      const json = await invoke<string>('get_ai_config')
+      const cfg = JSON.parse(json)
+      for (const [k, v] of Object.entries(cfg)) {
+        if (typeof v === 'string' && v) localStorage.setItem(k, v)
+      }
+    } catch { /* ignore */ }
+
     loadCustomModels()
     loadConfig()
     chatRolesList.value = loadAllRoles()

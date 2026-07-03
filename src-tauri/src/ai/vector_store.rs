@@ -3,6 +3,9 @@ use std::sync::Mutex;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
+/// 编译时将 vec0.dll 嵌入 exe（避免分发时缺少 DLL）
+const VEC0_DLL_BYTES: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/vec0.dll"));
+
 /// 向量存储 - 集成 sqlite-vec 扩展实现语义检索
 /// 如果无法加载 sqlite-vec 扩展，回退到纯 Rust 余弦相似度
 
@@ -73,7 +76,7 @@ impl VectorStore {
         }
     }
 
-    /// 查找 sqlite-vec 扩展 DLL
+    /// 查找 sqlite-vec 扩展 DLL（找不到则从嵌入的字节自动释放）
     fn find_vec_extension() -> Option<PathBuf> {
         // 搜索 vec0.dll 的候选路径
         let cwd = std::env::current_dir().ok();
@@ -99,11 +102,31 @@ impl VectorStore {
             }
         }
 
+        // 先检查是否有现成的
         for candidate in &candidates {
             if candidate.exists() {
                 return Some(candidate.clone());
             }
         }
+
+        // 所有候选都不存在 → 从嵌入的字节释放到 exe 同级目录
+        if let Some(ref dir) = exe_dir {
+            let target = dir.join("vec0.dll");
+            // 写入之前确保父目录存在
+            if let Some(parent) = target.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            match std::fs::write(&target, VEC0_DLL_BYTES) {
+                Ok(()) => {
+                    println!("📦 已自动释放 vec0.dll 到 {}", target.display());
+                    return Some(target);
+                }
+                Err(e) => {
+                    println!("⚠️  自动释放 vec0.dll 失败: {e}");
+                }
+            }
+        }
+
         None
     }
 

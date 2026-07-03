@@ -197,6 +197,18 @@ fn get_startup_logs(state: State<'_, Mutex<AppState>>) -> Vec<serde_json::Value>
     logs.clone()
 }
 
+/// 读取 AI 配置（存为 ~/.jc9/data/ai-config.json，跨 dev/build 共享）
+#[tauri::command]
+fn get_ai_config() -> Result<String, String> {
+    database::get_ai_config()
+}
+
+/// 保存 AI 配置到 JSON 文件
+#[tauri::command]
+fn save_ai_config(config: String) -> Result<(), String> {
+    database::save_ai_config(&config)
+}
+
 #[tauri::command]
 fn get_projects(state: State<'_, Mutex<AppState>>) -> Result<Vec<Project>, String> {
     let app_state = state.lock().map_err(|e| e.to_string())?;
@@ -1505,6 +1517,41 @@ fn parse_skill_frontmatter(content: &str) -> (String, String, String, bool) {
     }
 }
 
+/// 后端代理 AI 请求：绕过前端 CSP/CORS 限制
+#[tauri::command]
+async fn proxy_ai_request(url: String, method: String, headers: Vec<(String, String)>, body: Option<String>) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
+
+    let mut req = match method.to_uppercase().as_str() {
+        "POST" => client.post(&url),
+        "GET" => client.get(&url),
+        "PUT" => client.put(&url),
+        "DELETE" => client.delete(&url),
+        _ => client.post(&url),
+    };
+
+    for (key, value) in &headers {
+        req = req.header(key.as_str(), value.as_str());
+    }
+
+    if let Some(b) = body {
+        req = req.body(b);
+    }
+
+    let resp = req.send().await.map_err(|e| format!("请求失败: {e}"))?;
+    let status = resp.status();
+    let text = resp.text().await.map_err(|e| format!("读取响应失败: {e}"))?;
+
+    if status.is_success() || status.is_redirection() {
+        Ok(text)
+    } else {
+        Err(format!("请求失败 ({status}): {text}"))
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let db = Database::new().expect("无法初始化数据库");
@@ -1786,6 +1833,8 @@ pub fn run() {
             get_db_path,
             db_debug,
             get_startup_logs,
+            get_ai_config,
+            save_ai_config,
             get_projects,
             save_all_projects,
             start_command,
@@ -1861,6 +1910,7 @@ pub fn run() {
             ai_register_frontend_tool,
             ai_submit_frontend_tool_result,
             list_system_skills,
+            proxy_ai_request,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

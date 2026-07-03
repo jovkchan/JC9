@@ -8,6 +8,17 @@ import { save, open } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
 import { loadAllRoles, saveAllRoles, type AgentRole } from '@/config/roles'
 
+// ── 页面加载时从 JSON 同步 AI 配置（跨 dev/build 共享）──
+onMounted(async () => {
+  try {
+    const json = await invoke<string>('get_ai_config')
+    const cfg = JSON.parse(json)
+    for (const [k, v] of Object.entries(cfg)) {
+      if (typeof v === 'string' && v) localStorage.setItem(k, v)
+    }
+  } catch { /* JSON 不存在或读取失败，忽略 */ }
+})
+
 const win = getCurrentWindow()
 const notesStore = useNotesStore()
 const status = useStatusStore()
@@ -277,7 +288,22 @@ async function importData() {
 }
 
 // ── Save ──
-function saveSettings() {
+async function saveAllToJson() {
+  // 收集所有 AI 相关的 localStorage 键写入 JSON（跨 dev/build 共享）
+  const keys: string[] = []
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i)
+    if (k?.startsWith('notes-ai-') || k === 'jc9-last-model') keys.push(k)
+  }
+  const config: Record<string, string> = {}
+  for (const k of keys) {
+    const v = localStorage.getItem(k)
+    if (v) config[k] = v
+  }
+  try { await invoke('save_ai_config', { config: JSON.stringify(config) }) } catch {}
+}
+
+async function saveSettings() {
   localStorage.setItem('notes-default-format', defaultFormat.value)
   localStorage.setItem('notes-default-visibility', defaultVisibility.value)
   localStorage.setItem('notes-ai-models', JSON.stringify(modelConfigs.value))
@@ -298,6 +324,7 @@ function saveSettings() {
       costLimit: first.costLimit,
     })
   }
+  await saveAllToJson()
   status.pushMessage('设置保存成功', 'success')
 }
 
