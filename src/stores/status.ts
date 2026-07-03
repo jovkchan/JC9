@@ -47,7 +47,11 @@ export const useStatusStore = defineStore('status', () => {
 
   // ── Notifications ──
   const notificationCount = ref(0)
+  const notificationPanelOpen = ref(false)
   function setNotificationCount(n: number) { notificationCount.value = n }
+  function toggleNotificationPanel() { notificationPanelOpen.value = !notificationPanelOpen.value }
+  function openNotificationPanel() { notificationPanelOpen.value = true }
+  function closeNotificationPanel() { notificationPanelOpen.value = false }
 
   // ── User ──
   const userName = ref('')
@@ -68,6 +72,10 @@ export const useStatusStore = defineStore('status', () => {
     currentMessage,
     pushMessage,
     notificationCount,
+    notificationPanelOpen,
+    toggleNotificationPanel,
+    openNotificationPanel,
+    closeNotificationPanel,
     setNotificationCount,
     userName,
     isLoggedIn,

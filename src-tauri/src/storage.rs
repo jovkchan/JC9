@@ -39,39 +39,19 @@ fn get_storage_path() -> PathBuf {
 fn dirs_next() -> Option<PathBuf> {
     let home = std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
-        .ok()?;
+        .unwrap_or_else(|_| {
+            // fallback：用 exe 所在目录
+            std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+                .unwrap_or_else(|| PathBuf::from("."))
+                .to_string_lossy()
+                .to_string()
+        });
     Some(PathBuf::from(home).join(".jc9").join("data"))
 }
 
-/// 旧版 JSON 文件基础目录（用于迁移）
-fn old_dirs_next() -> Option<PathBuf> {
-    #[cfg(target_os = "windows")]
-    {
-        std::env::var("APPDATA").ok().map(PathBuf::from).map(|p| p.join("jc9"))
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        std::env::var("HOME").ok().map(|p| PathBuf::from(p).join(".local").join("share").join("jc9"))
-    }
-}
-
-/// 尝试从旧路径迁移 JSON 文件到新路径
-fn migrate_json_if_needed(filename: &str) {
-    let new_path = dirs_next().map(|p| p.join(filename));
-    let old_path = old_dirs_next().map(|p| p.join(filename));
-    if let (Some(new), Some(old)) = (&new_path, &old_path) {
-        if !new.exists() && old.exists() {
-            if let Some(parent) = new.parent() {
-                let _ = fs::create_dir_all(parent);
-            }
-            let _ = fs::copy(old, new);
-            println!("✅ 已迁移 {filename}: {:?} → {:?}", old, new);
-        }
-    }
-}
-
 pub fn load_projects() -> Result<Vec<Project>, String> {
-    migrate_json_if_needed("jc9-projects.json");
     let path = get_storage_path();
     if !path.exists() {
         // ensure directory exists
@@ -110,7 +90,6 @@ pub fn load_shortcuts() -> Vec<Shortcut> {
     let mut shortcuts: Vec<Shortcut> = serde_json::from_str(default_json).unwrap_or_default();
 
     // 合并用户自定义的快捷命令
-    migrate_json_if_needed("jc9-shortcuts.json");
     let path = get_shortcuts_path();
     if path.exists() {
         if let Ok(content) = fs::read_to_string(&path) {

@@ -1,8 +1,0 @@
-EXPORTS
-    DllGetClassObject   PRIVATE
-    DllCanUnloadNow     PRIVATE
-    DllRegisterServer   PRIVATE
-    DllUnregisterServer PRIVATE
-    jc9_init
-    jc9_set_text
-    jc9_cleanup

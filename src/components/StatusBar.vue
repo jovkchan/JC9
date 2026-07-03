@@ -12,7 +12,7 @@ const s = useStatusStore()
         <span class="sb-dot" :class="s.connectionStatus"></span>
         <span class="sb-label">{{ s.connectionLabel }}</span>
       </span>
-      <span v-if="s.currentMessage" class="sb-item msg" :class="s.currentMessage.type">
+      <span v-if="s.currentMessage" class="sb-item msg" :class="s.currentMessage.type" @click="s.openNotificationPanel()" title="点击查看全部通知">
         {{ s.currentMessage.text }}
       </span>
     </div>
@@ -34,12 +34,12 @@ const s = useStatusStore()
         </svg>
         {{ s.projectCount }}
       </span>
-      <span class="sb-item notif" :class="{ has: s.notificationCount > 0 }" title="通知" @click="s.setNotificationCount(0)">
+      <span class="sb-item notif" :class="{ has: s.notificationCount > 0, active: s.notificationPanelOpen }" title="通知中心" @click="s.toggleNotificationPanel()">
         <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
           <path d="M8 1.5A4.5 4.5 0 0 0 3.5 6v2l-1 2.5h11L12.5 8V6A4.5 4.5 0 0 0 8 1.5z"/>
           <path d="M6 12.5a2 2 0 0 0 4 0"/>
         </svg>
-        <span v-if="s.notificationCount > 0" class="sb-badge">{{ s.notificationCount > 99 ? '99+' : s.notificationCount }}</span>
+        <span v-if="s.messages.length > 0" class="sb-badge">{{ s.messages.length > 99 ? '99+' : s.messages.length }}</span>
       </span>
       <span class="sb-item user" :class="{ logged: s.isLoggedIn }" :title="s.isLoggedIn ? s.userName : '未登录'">
         <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
@@ -158,6 +158,7 @@ const s = useStatusStore()
   cursor: pointer;
 
   &.has svg { color: var(--jc-color-warning); }
+  &.active { background: var(--jc-bg-selected); color: var(--jc-color-accent); }
 }
 
 .sb-badge {

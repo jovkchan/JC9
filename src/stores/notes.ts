@@ -36,9 +36,20 @@ export const useNotesStore = defineStore('notes', () => {
   }
 
   async function loadGroups() {
-    try {
-      groups.value = await invoke<NoteGroup[]>('get_note_groups')
-    } catch (e) { console.error(e) }
+    // 重试 3 次，应对 Tauri state 尚未 manage 的时序问题
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        groups.value = await invoke<NoteGroup[]>('get_note_groups')
+        return
+      } catch (e) {
+        if (attempt < 2) {
+          await new Promise(r => setTimeout(r, 200 * (attempt + 1)))
+        } else {
+          console.error(e)
+          useStatusStore().pushMessage(`加载分组失败: ${e}`, 'error')
+        }
+      }
+    }
   }
 
   async function addGroup(name: string, parentId: string | null = null) {

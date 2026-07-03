@@ -83,33 +83,8 @@ pub struct Database {
 }
 
 impl Database {
-    /// 获取旧版数据库路径（迁移用）
-    fn old_db_path() -> Option<PathBuf> {
-        #[cfg(target_os = "windows")]
-        {
-            std::env::var("APPDATA").ok().map(|p| PathBuf::from(p).join("jc9").join("jc9.db"))
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            std::env::var("HOME").ok().map(|p| PathBuf::from(p).join(".local").join("share").join("jc9").join("jc9.db"))
-        }
-    }
-
     pub fn new() -> Result<Self, String> {
         let db_path = get_db_path()?;
-
-        // 检查旧版数据库并迁移到新路径
-        if !db_path.exists() {
-            if let Some(old_path) = Self::old_db_path() {
-                if old_path.exists() {
-                    if let Some(parent) = db_path.parent() {
-                        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-                    }
-                    let _ = fs::copy(&old_path, &db_path);
-                    println!("✅ 已迁移数据库: {:?} → {:?}", old_path, db_path);
-                }
-            }
-        }
 
         let need_init = !db_path.exists();
         if let Some(parent) = db_path.parent() {
@@ -646,6 +621,13 @@ pub fn get_db_path() -> Result<PathBuf, String> {
 fn dirs_data() -> PathBuf {
     let home = std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
-        .unwrap_or_else(|_| ".".to_string());
+        .unwrap_or_else(|_| {
+            // fallback：用 exe 所在目录
+            std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                .to_string_lossy().to_string()
+        });
     PathBuf::from(home).join(".jc9").join("data")
 }

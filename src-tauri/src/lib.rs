@@ -5,10 +5,11 @@ pub mod ai;
 use process::ProcessManager;
 use database::{Database, Project, Shortcut, NoteGroup, Note};
 use serde::{Deserialize, Serialize};
+use serde_json;
 use std::fs;
 use std::path::Path;
 use std::sync::Mutex;
-use tauri::{State, Manager};
+use tauri::{State, Manager, Emitter};
 use chrono::{DateTime, Utc};
 
 #[cfg(target_os = "windows")]
@@ -18,6 +19,7 @@ struct AppState {
     manager: ProcessManager,
     db: Database,
     ai_manager: std::sync::Arc<ai::agent_manager::AgentManager>,
+    startup_logs: Mutex<Vec<serde_json::Value>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -152,6 +154,47 @@ fn detect_project(dir: String) -> Result<ProjectInfo, String> {
     }
 
     Ok(ProjectInfo { name, language, suggest_commands })
+}
+
+#[tauri::command]
+fn get_db_path() -> Result<String, String> {
+    database::get_db_path().map(|p| p.to_string_lossy().to_string())
+}
+
+/// 诊断：返回完整数据库状态 JSON
+#[allow(dead_code)]
+#[tauri::command]
+fn db_debug(state: State<'_, Mutex<AppState>>) -> Result<String, String> {
+    let app = state.lock().map_err(|e| e.to_string())?;
+    let path = database::get_db_path()?;
+    let path_str = path.to_string_lossy().to_string();
+    let exists = path.exists();
+    let file_size = if exists { fs::metadata(&path).map(|m| m.len()).unwrap_or(0) } else { 0 };
+
+    // 逐个查询，捕获各自的错误
+    let projects_count = app.db.get_projects().map(|v| v.len()).unwrap_or(0);
+    let notes_count = app.db.get_notes(None::<&str>, true).map(|v| v.len()).unwrap_or(0);
+    let groups_count = app.db.get_note_groups().map(|v| v.len()).unwrap_or(0);
+
+    Ok(serde_json::json!({
+        "path": path_str,
+        "exists": exists,
+        "file_size": file_size,
+        "projects": projects_count,
+        "notes": notes_count,
+        "groups": groups_count
+    }).to_string())
+}
+
+/// 获取启动诊断日志（Rust 端 startup 阶段记录的）
+#[tauri::command]
+fn get_startup_logs(state: State<'_, Mutex<AppState>>) -> Vec<serde_json::Value> {
+    let app = match state.lock() {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
+    let logs = app.startup_logs.lock().unwrap_or_else(|e| e.into_inner());
+    logs.clone()
 }
 
 #[tauri::command]
@@ -435,6 +478,7 @@ fn get_note_by_id(state: State<'_, Mutex<AppState>>, id: String) -> Result<Optio
 }
 
 #[tauri::command]
+#[allow(non_snake_case)]
 fn move_note(state: State<'_, Mutex<AppState>>, noteId: String, groupId: Option<String>) -> Result<(), String> {
     state.lock().map_err(|e| e.to_string())?.db.move_note_to_group(&noteId, groupId.as_deref())
 }
@@ -1465,19 +1509,30 @@ fn parse_skill_frontmatter(content: &str) -> (String, String, String, bool) {
 pub fn run() {
     let db = Database::new().expect("无法初始化数据库");
 
-    // 工作区默认指向项目根目录（Tauri dev 时 cwd 在 src-tauri，需回退一层）
-    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let workspace = if cwd.ends_with("src-tauri") {
-        cwd.parent().unwrap_or(&cwd).to_path_buf()
-    } else {
-        cwd.clone()
-    };
+    // 工作区路径：无论 dev 还是 build 模式，统一使用用户主目录
+    // 确保所有数据（数据库、AI对话记录、配置、技能等）都存放在 ~/.jc9 下
+    let workspace = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+        });
     let db_conn = db.conn.clone();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
+            // 主窗口关闭时彻底退出（防止后台线程残留）
+            if let Some(win) = app.get_webview_window("main") {
+                let w = win.clone();
+                win.on_window_event(move |ev| {
+                    if let tauri::WindowEvent::CloseRequested { .. } = ev {
+                        let _ = w.destroy();
+                        std::process::exit(0);
+                    }
+                });
+            }
             let ai_manager = std::sync::Arc::new(ai::agent_manager::AgentManager::new(
                 workspace.clone(),
                 db_conn.clone(),
@@ -1487,10 +1542,167 @@ pub fn run() {
                 manager: ProcessManager::new(),
                 db,
                 ai_manager,
+                startup_logs: Mutex::new(Vec::new()),
             }));
 
-            // 启动时同步技能 + 自动重连 MCP 服务器
-            let app_handle = app.handle().clone();
+            // ── 启动诊断：逐条记录到 AppState.startup_logs ──
+            let state = app.state::<Mutex<AppState>>();
+            let guard = state.lock().unwrap();
+
+            macro_rules! log_startup {
+                ($step:expr, $level:expr, $msg:expr) => {
+                    let entry = serde_json::json!({
+                        "step": $step,
+                        "message": $msg,
+                        "level": $level
+                    });
+                    if let Ok(mut logs) = guard.startup_logs.lock() {
+                        logs.push(entry);
+                    }
+                };
+            }
+
+            // 1. 数据库路径
+            let path_str = database::get_db_path()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| "未知".into());
+            let file_size = std::path::Path::new(&path_str)
+                .metadata()
+                .map(|m| m.len())
+                .unwrap_or(0);
+            log_startup!("db_path", "info", format!("📁 数据库路径: {} ({}KB)", path_str, file_size / 1024));
+
+            // 2. 查询项目
+            match guard.db.get_projects() {
+                Ok(projects) => {
+                    log_startup!("projects",
+                        if projects.is_empty() { "warn" } else { "success" },
+                        format!("📦 项目查询: {} 个项目", projects.len()));
+                    // 额外推送带 count 的
+                    if let Ok(mut logs) = guard.startup_logs.lock() {
+                        if let Some(last) = logs.last_mut() {
+                            if let Some(obj) = last.as_object_mut() {
+                                obj.insert("count".into(), serde_json::json!(projects.len()));
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    log_startup!("projects", "error", format!("❌ 项目查询失败: {}", e));
+                }
+            }
+
+            // 3. 查询笔记分组
+            match guard.db.get_note_groups() {
+                Ok(groups) => {
+                    log_startup!("groups",
+                        if groups.is_empty() { "warn" } else { "success" },
+                        format!("📂 分组查询: {} 个分组", groups.len()));
+                    if let Ok(mut logs) = guard.startup_logs.lock() {
+                        if let Some(last) = logs.last_mut() {
+                            if let Some(obj) = last.as_object_mut() {
+                                obj.insert("count".into(), serde_json::json!(groups.len()));
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    log_startup!("groups", "error", format!("❌ 分组查询失败: {}", e));
+                }
+            }
+
+            // 4. 查询笔记
+            match guard.db.get_notes(None::<&str>, true) {
+                Ok(notes) => {
+                    let active = notes.iter().filter(|n| !n.is_deleted).count();
+                    log_startup!("notes",
+                        if notes.is_empty() { "warn" } else { "success" },
+                        format!("📝 笔记查询: 共 {} 条 (活跃 {} 条)", notes.len(), active));
+                    if let Ok(mut logs) = guard.startup_logs.lock() {
+                        if let Some(last) = logs.last_mut() {
+                            if let Some(obj) = last.as_object_mut() {
+                                obj.insert("count".into(), serde_json::json!(notes.len()));
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    log_startup!("notes", "error", format!("❌ 笔记查询失败: {}", e));
+                }
+            }
+
+            // 5. 直接 SQL 查询 projects 表原始数据（诊断 build 模式为何返回空）
+            {
+                let conn = guard.db.conn.lock().map_err(|e| e.to_string());
+                if let Ok(ref conn) = conn {
+                    // 检查 projects 表行数
+                    let project_count: i64 = conn.query_row(
+                        "SELECT COUNT(*) FROM projects WHERE user_id = 'local'",
+                        [],
+                        |row| row.get(0)
+                    ).unwrap_or(-1);
+                    log_startup!("db_raw_count", "info",
+                        format!("🔍 SQL COUNT(projects WHERE user_id='local') = {}", project_count));
+
+                    // 列出 projects 表所有行
+                    let db_raw_projects_result: Result<Vec<Vec<String>>, String> = (|| {
+                        let mut stmt = conn.prepare("SELECT id, name, user_id, created_at FROM projects LIMIT 10")
+                            .map_err(|e| e.to_string())?;
+                        let rows = stmt.query_map([], |row| {
+                            Ok(vec![
+                                row.get::<_, String>(0).unwrap_or_default(),
+                                row.get::<_, String>(1).unwrap_or_default(),
+                                row.get::<_, String>(2).unwrap_or_default(),
+                                row.get::<_, String>(3).unwrap_or_default(),
+                            ])
+                        }).map_err(|e| e.to_string())?;
+                        let collected: Vec<Vec<String>> = rows.filter_map(|r| r.ok()).collect();
+                        Ok(collected)
+                    })();
+                    match db_raw_projects_result {
+                        Ok(rows) => {
+                            let log_entry = serde_json::json!({
+                                "step": "db_raw_projects",
+                                "message": format!("🔍 projects 表数据: {} 行", rows.len()),
+                                "level": "info",
+                                "rows": rows
+                            });
+                            if let Ok(mut logs) = guard.startup_logs.lock() {
+                                logs.push(log_entry);
+                            }
+                        }
+                        Err(e) => {
+                            log_startup!("db_raw_projects", "error", format!("❌ projects 表查询失败: {}", e));
+                        }
+                    }
+
+                    // 列出 note_groups 表
+                    let group_count: i64 = conn.query_row(
+                        "SELECT COUNT(*) FROM note_groups WHERE user_id = 'local'",
+                        [],
+                        |row| row.get(0)
+                    ).unwrap_or(-1);
+                    log_startup!("db_raw_groups", "info",
+                        format!("🔍 SQL COUNT(note_groups WHERE user_id='local') = {}", group_count));
+
+                    // 检查 user 表
+                    let user_count: i64 = conn.query_row(
+                        "SELECT COUNT(*) FROM users",
+                        [],
+                        |row| row.get(0)
+                    ).unwrap_or(-1);
+                    log_startup!("db_users", "info",
+                        format!("🔍 users 表行数: {}", user_count));
+                } else {
+                    log_startup!("db_raw_query", "error", "无法获取数据库连接锁");
+                }
+            }
+
+            log_startup!("complete", "success", "✅ Rust 端启动诊断完成");
+            drop(guard);
+
+            // 启动时同步技能 + 自动重连 MCP 服务器（带事件通知）
+            let app_handle2 = app.handle().clone();
             let db_conn_clone = db_conn.clone();
             let skills_dir = workspace.join(".jc9");
             tauri::async_runtime::spawn(async move {
@@ -1498,11 +1710,15 @@ pub fn run() {
                 let loader = ai::skill_loader::SkillLoader::new(skills_dir, db_conn_clone);
                 let skill_count = loader.sync_all().await;
                 if skill_count > 0 {
-                    println!("✅ 已同步 {} 个技能到知识库", skill_count);
+                    let _ = app_handle2.emit("startup-log", serde_json::json!({
+                        "step": "skills",
+                        "message": format!("🧠 已同步 {} 个技能到知识库", skill_count),
+                        "level": "success"
+                    }));
                 }
 
                 // 2. 自动重连已保存的 MCP 服务器
-                let state = app_handle.state::<Mutex<AppState>>();
+                let state = app_handle2.state::<Mutex<AppState>>();
                 let (mcp_configs, mcp_client) = {
                     let guard = state.lock().unwrap();
                     let configs = guard.db.get_enabled_mcp_servers().unwrap_or_default();
@@ -1514,8 +1730,20 @@ pub fn run() {
                         "sse" => {
                             if let Some(u) = url {
                                 match mcp_client.connect(name.clone(), u.clone()).await {
-                                    Ok(()) => println!("  🔗 MCP [{}] SSE 已自动重连", name),
-                                    Err(e) => println!("  ⚠️ MCP [{}] 自动重连失败: {}", name, e),
+                                    Ok(()) => {
+                                        let _ = app_handle2.emit("startup-log", serde_json::json!({
+                                            "step": "mcp",
+                                            "message": format!("🔗 MCP [{}] SSE 已自动重连", name),
+                                            "level": "success"
+                                        }));
+                                    }
+                                    Err(e) => {
+                                        let _ = app_handle2.emit("startup-log", serde_json::json!({
+                                            "step": "mcp",
+                                            "message": format!("⚠️ MCP [{}] 自动重连失败: {}", name, e),
+                                            "level": "warn"
+                                        }));
+                                    }
                                 }
                             }
                         }
@@ -1523,8 +1751,20 @@ pub fn run() {
                             if let (Some(cmd), Some(args_str)) = (command, args) {
                                 let arg_list: Vec<String> = serde_json::from_str(args_str).unwrap_or_default();
                                 match mcp_client.connect_stdio(name.clone(), cmd.clone(), arg_list).await {
-                                    Ok(()) => println!("  🔗 MCP [{}] stdio 已自动重连", name),
-                                    Err(e) => println!("  ⚠️ MCP [{}] 自动重连失败: {}", name, e),
+                                    Ok(()) => {
+                                        let _ = app_handle2.emit("startup-log", serde_json::json!({
+                                            "step": "mcp",
+                                            "message": format!("🔗 MCP [{}] stdio 已自动重连", name),
+                                            "level": "success"
+                                        }));
+                                    }
+                                    Err(e) => {
+                                        let _ = app_handle2.emit("startup-log", serde_json::json!({
+                                            "step": "mcp",
+                                            "message": format!("⚠️ MCP [{}] 自动重连失败: {}", name, e),
+                                            "level": "warn"
+                                        }));
+                                    }
                                 }
                             }
                         }
@@ -1532,13 +1772,20 @@ pub fn run() {
                     }
                 }
                 if !mcp_configs.is_empty() {
-                    println!("✅ MCP 服务器自动重连完成 ({} 个)", mcp_configs.len());
+                    let _ = app_handle2.emit("startup-log", serde_json::json!({
+                        "step": "mcp_done",
+                        "message": format!("✅ MCP 服务器自动重连完成 ({} 个)", mcp_configs.len()),
+                        "level": "success"
+                    }));
                 }
             });
 
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            get_db_path,
+            db_debug,
+            get_startup_logs,
             get_projects,
             save_all_projects,
             start_command,

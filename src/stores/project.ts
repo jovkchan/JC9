@@ -53,7 +53,23 @@ export const useProjectStore = defineStore('project', () => {
     startCommand(p.id, p.commands[0])
   }
 
-  async function loadProjects() { try { projects.value = await invoke<Project[]>('get_projects') } catch (e) { console.error(e) } }
+  async function loadProjects() {
+    // 重试 3 次，应对 Tauri state 尚未 manage 的时序问题
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        projects.value = await invoke<Project[]>('get_projects')
+        return // 成功则退出
+      } catch (e) {
+        if (attempt < 2) {
+          await new Promise(r => setTimeout(r, 200 * (attempt + 1)))
+        } else {
+          console.error(e)
+          const { useStatusStore } = await import('@/stores/status')
+          useStatusStore().pushMessage(`加载项目失败: ${e}`, 'error')
+        }
+      }
+    }
+  }
   async function saveProjects() { try { await invoke('save_all_projects', { projects: JSON.parse(JSON.stringify(projects.value)) }) } catch (e) { console.error(e) } }
 
   function addProject(name: string) {
