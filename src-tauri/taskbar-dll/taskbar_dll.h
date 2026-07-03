@@ -1,19 +1,23 @@
-// jc9_taskbar.dll - Windows Taskbar Integration
-// ITaskbarList3 COM wrapper for Tauri FFI
+// jc9_taskbar.dll - DeskBand Shell Extension
+// Proper COM implementation with IDeskBand2 + IObjectWithSite + IPersistStream
+// Based on Windows SDK DeskBand sample
 
 #pragma once
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <shlobj.h>
+#include <shobjidl.h>
+
+// {A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
+DEFINE_GUID(CLSID_JC9DeskBand,
+0xa1b2c3d4,0xe5f6,0x7890,0xab,0xcd,0xef,0x12,0x34,0x56,0x78,0x90);
 
 #ifdef JC9_TASKBAR_EXPORTS
-    #define JC9_TASKBAR_API extern "C" __declspec(dllexport)
+#define JC9_API extern "C" __declspec(dllexport)
 #else
-    #define JC9_TASKBAR_API extern "C" __declspec(dllimport)
+#define JC9_API extern "C" __declspec(dllimport)
 #endif
 
-JC9_TASKBAR_API int jc9_taskbar_init(HWND hWnd);
-JC9_TASKBAR_API int jc9_taskbar_add_button(int id, const wchar_t* tip);
-JC9_TASKBAR_API int jc9_taskbar_update_button(int id, const wchar_t* tip, int enabled, int hidden);
-JC9_TASKBAR_API int jc9_taskbar_clear_buttons();
-JC9_TASKBAR_API int jc9_taskbar_set_overlay(int count, const wchar_t* description);
-JC9_TASKBAR_API int jc9_taskbar_set_progress(ULONGLONG completed, ULONGLONG total);
-JC9_TASKBAR_API void jc9_taskbar_cleanup();
+JC9_API HRESULT jc9_init(HWND tauriHwnd);
+JC9_API HRESULT jc9_set_text(const wchar_t* text);
+JC9_API void    jc9_cleanup();

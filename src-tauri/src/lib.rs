@@ -1,8 +1,6 @@
 mod process;
 mod database;
 pub mod ai;
-#[cfg(target_os = "windows")]
-mod taskbar;
 
 use process::ProcessManager;
 use database::{Database, Project, Shortcut, NoteGroup, Note};
@@ -301,36 +299,6 @@ fn kill_port(port: u16) -> Result<String, String> {
         if text.trim().is_empty() { Err("未找到进程".into()) }
         else { Ok(format!("已杀掉端口 {} 占用的进程", port)) }
     }
-}
-
-/// 设置任务栏缩略图按钮
-#[cfg(target_os = "windows")]
-#[tauri::command]
-fn setup_taskbar() -> Result<(), String> {
-    taskbar::add_button(1001, "📝 快速笔记")?;
-    taskbar::add_button(1002, "📋 剪贴板")?;
-    Ok(())
-}
-
-/// 设置任务栏角标徽章 (count: 0=清除, >99→"99+", <0→"⋯")
-#[cfg(target_os = "windows")]
-#[tauri::command]
-fn taskbar_set_overlay(count: i32, description: Option<String>) -> Result<(), String> {
-    taskbar::set_overlay(count, description.as_deref())
-}
-
-/// 设置任务栏进度条 (total=0 不确定进度)
-#[cfg(target_os = "windows")]
-#[tauri::command]
-fn taskbar_set_progress(completed: u64, total: u64) -> Result<(), String> {
-    taskbar::set_progress(completed, total)
-}
-
-/// 更新缩略图按钮状态
-#[cfg(target_os = "windows")]
-#[tauri::command]
-fn taskbar_update_button(id: i32, tip: String, enabled: bool, hidden: bool) -> Result<(), String> {
-    taskbar::update_button(id, &tip, enabled, hidden)
 }
 
 #[tauri::command]
@@ -1521,22 +1489,6 @@ pub fn run() {
                 ai_manager,
             }));
 
-            // 初始化任务栏集成 (Windows only) — 加载 C++ DLL
-            #[cfg(target_os = "windows")]
-            {
-                if let Some(window) = app.get_webview_window("main") {
-                    let hwnd = window.hwnd().unwrap().0;
-                    match taskbar::init(hwnd as isize) {
-                        Ok(()) => {
-                            println!("✅ 任务栏 DLL 集成成功");
-                            let _ = taskbar::add_button(1001, "📝 快速笔记");
-                            let _ = taskbar::add_button(1002, "📋 剪贴板");
-                        }
-                        Err(e) => println!("⚠️ 任务栏 DLL 加载失败: {}", e),
-                    }
-                }
-            }
-
             // 启动时同步技能 + 自动重连 MCP 服务器
             let app_handle = app.handle().clone();
             let db_conn_clone = db_conn.clone();
@@ -1627,14 +1579,6 @@ pub fn run() {
             ai_list_sessions,
             ai_create_session,
             ai_delete_session,
-            #[cfg(target_os = "windows")]
-            setup_taskbar,
-            #[cfg(target_os = "windows")]
-            taskbar_set_overlay,
-            #[cfg(target_os = "windows")]
-            taskbar_set_progress,
-            #[cfg(target_os = "windows")]
-            taskbar_update_button,
             ai_plan_task,
             ai_spawn_worker,
             ai_list_workers,

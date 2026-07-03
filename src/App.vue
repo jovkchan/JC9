@@ -74,9 +74,9 @@ onMounted(async () => {
     // 注册全局键盘快捷键
     document.addEventListener('keydown', onGlobalKeydown)
 
-    // 尝试初始化任务栏集成 (Windows only)
+    // 尝试初始化任务栏嵌入
     try {
-      await invoke('setup_taskbar')
+      await invoke('taskbar_set_text', { text: '\u26A1 JC9' })
     } catch {
       // 非 Windows 环境或未支持时静默失败
     }
