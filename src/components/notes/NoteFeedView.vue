@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import { ref, computed, nextTick } from 'vue'
 import { useNotesStore } from '@/stores/notes'
+import { invoke } from '@tauri-apps/api/core'
 import type { Note } from '@/types/notes'
 import { marked } from 'marked'
 
 const store = useNotesStore()
+
+// 右键菜单状态
+const ctxMenu = ref({ show: false, x: 0, y: 0, noteId: '' })
 
 // 编辑器输入框状态
 const newContent = ref('')
@@ -103,6 +107,23 @@ function startInlineEdit(note: Note) {
   inlineEditingId.value = note.id
   inlineEditContent.value = note.content
   inlineEditTitle.value = note.title
+}
+
+// ── 右键菜单 ──
+function showCtxMenu(e: MouseEvent, noteId: string) {
+  ctxMenu.value = { show: true, x: e.clientX, y: e.clientY, noteId }
+}
+
+function hideCtxMenu() {
+  ctxMenu.value.show = false
+}
+
+async function moveNoteToGroup(groupId: string | null) {
+  try {
+    await invoke('move_note', { noteId: ctxMenu.value.noteId, groupId })
+    await store.loadAllNotes()
+    hideCtxMenu()
+  } catch (e) { console.error(e) }
 }
 
 function cancelInlineEdit() {
@@ -232,6 +253,7 @@ const activeFilterSummary = computed(() => {
         class="memo-card"
         :class="{pinned: note.isPinned}"
         @click="handleCardInteraction($event, note)"
+        @contextmenu.stop.prevent="showCtxMenu($event, note.id)"
       >
         <!-- 原地编辑状态 -->
         <div v-if="inlineEditingId === note.id" class="card-edit-mode" @click.stop>
@@ -310,6 +332,27 @@ const activeFilterSummary = computed(() => {
       </div>
     </div>
   </div>
+
+  <!-- 右键菜单：移动笔记到分组 -->
+  <Teleport to="body">
+    <div v-if="ctxMenu.show" class="ctx-overlay" @click="hideCtxMenu" @contextmenu.prevent="hideCtxMenu">
+      <div
+        class="ctx-menu"
+        :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
+        @click.stop
+      >
+        <div class="ctx-menu-title">移动到分组</div>
+        <button
+          v-for="g in store.groups"
+          :key="g.id"
+          class="ctx-menu-item"
+          @click="moveNoteToGroup(g.id)"
+        >
+          📁 {{ g.name }}
+        </button>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <style lang="scss">
@@ -760,5 +803,35 @@ const activeFilterSummary = computed(() => {
     color: var(--jc-color-accent);
     background: var(--jc-bg-selected);
   }
+}
+
+// 右键菜单
+.ctx-overlay {
+  position: fixed; inset: 0; z-index: 10000;
+}
+.ctx-menu {
+  position: fixed;
+  background: var(--jc-bg-elevated);
+  border: 1px solid var(--jc-border-default);
+  border-radius: 8px;
+  padding: 4px 0;
+  min-width: 160px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.3);
+}
+.ctx-menu-title {
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--jc-text-secondary);
+  border-bottom: 1px solid var(--jc-border-default);
+  margin-bottom: 2px;
+}
+.ctx-menu-item {
+  display: block; width: 100%;
+  padding: 6px 12px;
+  border: none; background: none;
+  font-size: 13px; text-align: left;
+  cursor: pointer;
+  color: var(--jc-text-primary);
+  &:hover { background: var(--jc-bg-selected); }
 }
 </style>

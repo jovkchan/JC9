@@ -32,6 +32,7 @@ export const useProjectStore = defineStore('project', () => {
   const pendingInput = ref('')
   const recentTools = ref<string[]>(JSON.parse(localStorage.getItem('jc9-recent-tools') || '[]'))
   const sidebarTab = ref<'projects'|'shortcuts'|'tools'|'notes'>('projects')
+  const mainMode = ref<'main' | 'ai'>('main')
 
   async function loadShortcuts() { try { shortcuts.value = await invoke<ShortcutItem[]>('get_shortcuts') } catch (e) { console.error(e) } }
   async function saveShortcuts(userOnly: ShortcutItem[]) { try { await invoke('save_shortcuts', { shortcuts: userOnly }) } catch (e) { console.error(e) } }
@@ -229,5 +230,5 @@ export const useProjectStore = defineStore('project', () => {
   }
   function destroyListeners() { _unlistenExit?.(); _unlistenPty?.() }
 
-  return { projects, selectedProjectId, runningMap, outputMap, logStatsMap, runningTabs, docTabs, toolTabs, activeTabIndex, activeDocIndex, activeToolIndex, activeTabType, shortcuts, pendingInput, frequentShortcuts, favShortcuts, recentTools, clearTermSignal, sidebarTab, loadProjects, saveProjects, addProject, removeProject, updateProjectName, addCommand, removeCommand, updateCommand, startCommand, stopCommand, restartCommand, closeTab, closeDocTab, openDoc, openDocFromText, clearOutput, clearLogStats, getOutput, initListeners, destroyListeners, cmdKey, detectProject, bufferPtyOutput, loadShortcuts, addShortcut, removeShortcut, updateShortcut, isBuiltin, useShortcut, toggleFav, startDefaultTerminal, openTool, closeToolTab }
+  return { projects, selectedProjectId, runningMap, outputMap, logStatsMap, runningTabs, docTabs, toolTabs, activeTabIndex, activeDocIndex, activeToolIndex, activeTabType, shortcuts, pendingInput, frequentShortcuts, favShortcuts, recentTools, clearTermSignal, sidebarTab, mainMode, loadProjects, saveProjects, addProject, removeProject, updateProjectName, addCommand, removeCommand, updateCommand, startCommand, stopCommand, restartCommand, closeTab, closeDocTab, openDoc, openDocFromText, clearOutput, clearLogStats, getOutput, initListeners, destroyListeners, cmdKey, detectProject, bufferPtyOutput, loadShortcuts, addShortcut, removeShortcut, updateShortcut, isBuiltin, useShortcut, toggleFav, startDefaultTerminal, openTool, closeToolTab }
 })

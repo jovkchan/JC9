@@ -83,8 +83,34 @@ pub struct Database {
 }
 
 impl Database {
+    /// 获取旧版数据库路径（迁移用）
+    fn old_db_path() -> Option<PathBuf> {
+        #[cfg(target_os = "windows")]
+        {
+            std::env::var("APPDATA").ok().map(|p| PathBuf::from(p).join("jc9").join("jc9.db"))
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            std::env::var("HOME").ok().map(|p| PathBuf::from(p).join(".local").join("share").join("jc9").join("jc9.db"))
+        }
+    }
+
     pub fn new() -> Result<Self, String> {
         let db_path = get_db_path()?;
+
+        // 检查旧版数据库并迁移到新路径
+        if !db_path.exists() {
+            if let Some(old_path) = Self::old_db_path() {
+                if old_path.exists() {
+                    if let Some(parent) = db_path.parent() {
+                        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                    }
+                    let _ = fs::copy(&old_path, &db_path);
+                    println!("✅ 已迁移数据库: {:?} → {:?}", old_path, db_path);
+                }
+            }
+        }
+
         let need_init = !db_path.exists();
         if let Some(parent) = db_path.parent() {
             fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -95,7 +121,21 @@ impl Database {
         let db = Database { conn: Arc::new(Mutex::new(conn)) };
         db.create_tables()?;
         db.ensure_user()?;
+        // 确保固定分组"未分组"存在
+        db.ensure_uncategorized_group()?;
+        // 仅在首次创建数据库时执行完整迁移（包括删除 JSON 源文件）
         if need_init { db.migrate_from_json()?; }
+        // 每次启动都检查 JSON 文件，将遗漏的项目合并到 SQLite
+        db.sync_json_projects()?;
+        // 确保 default-shortcuts.json 已写入 runtime 目录
+        let quick_dir = dirs_data().join("quick");
+        let shortcuts_json = quick_dir.join("default-shortcuts.json");
+        if !shortcuts_json.exists() {
+            if let Some(parent) = shortcuts_json.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            let _ = fs::write(&shortcuts_json, include_str!("default-shortcuts.json"));
+        }
         Ok(db)
     }
 
@@ -218,6 +258,43 @@ impl Database {
         Ok(())
     }
 
+    /// 每次启动调用：检查 jc9-projects.json 中是否有 SQLite 里不存在的项目，合并进去
+    fn sync_json_projects(&self) -> Result<(), String> {
+        let dir = dirs_data();
+        let pp = dir.join("jc9-projects.json");
+        if !pp.exists() { return Ok(()); }
+        let content = match fs::read_to_string(&pp) {
+            Ok(c) => c,
+            Err(_) => return Ok(()),
+        };
+        let json_projects: Vec<Project> = match serde_json::from_str(&content) {
+            Ok(p) => p,
+            Err(_) => return Ok(()),
+        };
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let mut count = 0usize;
+        for p in &json_projects {
+            let exists: bool = conn.query_row(
+                "SELECT COUNT(*) FROM projects WHERE id = ?1",
+                params![p.id],
+                |row| row.get::<_,i32>(0),
+            ).map(|n| n > 0).unwrap_or(false);
+            if !exists {
+                conn.execute("INSERT INTO projects (id, user_id, name, created_at) VALUES (?1, 'local', ?2, ?3)",
+                    params![p.id, p.name, p.created_at]).ok();
+                for c in &p.commands {
+                    conn.execute("INSERT INTO project_commands (id, project_id, name, command, working_dir) VALUES (?1, ?2, ?3, ?4, ?5)",
+                        params![c.id, p.id, c.name, c.command, c.working_dir]).ok();
+                }
+                count += 1;
+            }
+        }
+        if count > 0 {
+            println!("✅ 从 JSON 合并了 {} 个项目到 SQLite", count);
+        }
+        Ok(())
+    }
+
     pub fn get_projects(&self) -> Result<Vec<Project>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare("SELECT id, name, created_at FROM projects WHERE user_id = 'local' ORDER BY created_at DESC").map_err(|e| e.to_string())?;
@@ -318,9 +395,68 @@ impl Database {
 
     pub fn save_note(&self, note: &Note) -> Result<(), String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
+
+        // 没指定分组 → 自动归入"未分组"
+        let group_id = note.group_id.clone().or_else(|| {
+            conn.query_row(
+                "SELECT id FROM note_groups WHERE user_id = 'local' AND name = '未分组' LIMIT 1",
+                [],
+                |row| row.get::<_, String>(0),
+            ).ok()
+        });
+
         let tags_json = serde_json::to_string(&note.tags).unwrap_or_else(|_| "[]".into());
         conn.execute("INSERT OR REPLACE INTO notes (id, user_id, group_id, title, content, format, is_pinned, tags, visibility, sort_order, version, is_deleted, is_archived, created_at, updated_at) VALUES (?1, 'local', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
-            params![note.id, note.group_id, note.title, note.content, note.format, note.is_pinned as i32, tags_json, note.visibility, note.sort_order, note.version, note.is_deleted as i32, note.is_archived as i32, note.created_at, note.updated_at],
+            params![note.id, group_id, note.title, note.content, note.format, note.is_pinned as i32, tags_json, note.visibility, note.sort_order, note.version, note.is_deleted as i32, note.is_archived as i32, note.created_at, note.updated_at],
+        ).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// 确保"未分组"固定分组存在（启动时调用）
+    fn ensure_uncategorized_group(&self) -> Result<(), String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let exists: bool = conn.query_row(
+            "SELECT COUNT(*) FROM note_groups WHERE user_id = 'local' AND name = '未分组'",
+            [],
+            |row| row.get::<_, i32>(0),
+        ).map(|n| n > 0).unwrap_or(false);
+        if !exists {
+            let now = chrono::Utc::now().to_rfc3339();
+            let id = "fixed_uncategorized";
+            conn.execute(
+                "INSERT INTO note_groups (id, user_id, name, parent_id, sort_order, created_at, updated_at) VALUES (?1, 'local', '未分组', NULL, 0, ?2, ?2)",
+                params![id, now],
+            ).map_err(|e| e.to_string())?;
+            println!("✅ 已创建固定分组: 未分组");
+        }
+
+        // 将历史遗留的 group_id=NULL 的笔记归入"未分组"（首次运行一次性修复）
+        let orphan_count: i32 = conn.query_row(
+            "SELECT COUNT(*) FROM notes WHERE user_id = 'local' AND group_id IS NULL AND is_deleted = 0",
+            [],
+            |row| row.get(0),
+        ).unwrap_or(0);
+        if orphan_count > 0 {
+            let id: String = conn.query_row(
+                "SELECT id FROM note_groups WHERE user_id = 'local' AND name = '未分组' LIMIT 1",
+                [],
+                |row| row.get(0),
+            ).map_err(|e| e.to_string())?;
+            conn.execute(
+                "UPDATE notes SET group_id = ?1 WHERE user_id = 'local' AND group_id IS NULL",
+                params![id],
+            ).map_err(|e| e.to_string())?;
+            println!("✅ 已将 {} 条历史笔记归入「未分组」", orphan_count);
+        }
+        Ok(())
+    }
+
+    /// 将笔记移动到指定分组
+    pub fn move_note_to_group(&self, note_id: &str, group_id: Option<&str>) -> Result<(), String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE notes SET group_id = ?1, updated_at = ?2 WHERE id = ?3 AND user_id = 'local'",
+            params![group_id, chrono::Utc::now().to_rfc3339(), note_id],
         ).map_err(|e| e.to_string())?;
         Ok(())
     }
@@ -462,54 +598,45 @@ fn map_note(row: &rusqlite::Row) -> rusqlite::Result<Note> {
     })
 }
 
+/// 从运行时 JSON 文件 (~/.jc9/data/quick/default-shortcuts.json) 加载内置快捷命令。
+/// 如果文件不存在，则从编译时嵌入的 JSON 自动创建。
 fn builtin_shortcuts() -> Vec<Shortcut> {
-    fn s(id: &str, name: &str, command: &str, category: &str, description: &str) -> Shortcut {
-        Shortcut { id: id.into(), name: name.into(), command: command.into(), category: category.into(), description: description.into(), favorite: false, use_count: 0, is_builtin: true }
+    let quick_dir = dirs_data().join("quick");
+    let json_path = quick_dir.join("default-shortcuts.json");
+
+    // 首次运行时，从嵌入的 JSON 写入 runtime 路径
+    if !json_path.exists() {
+        if let Some(parent) = json_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let embedded = include_str!("default-shortcuts.json");
+        let _ = fs::write(&json_path, embedded);
+        println!("✅ 已创建默认快捷命令文件: {:?}", json_path);
     }
-    vec![
-        s("go-bug","go bug","go bug","Go","start go bug report"),
-        s("go-build","go build","go build -o bin/app.exe .","Go","compile packages"),
-        s("go-clean","go clean","go clean","Go","remove object files"),
-        s("go-doc","go doc","go doc","Go","show documentation"),
-        s("go-fix","go fix","go fix ./...","Go","update to new APIs"),
-        s("go-fmt","go fmt","go fmt ./...","Go","gofmt"),
-        s("go-generate","go generate","go generate ./...","Go","generate Go files"),
-        s("go-get","go get","go get","Go","add dependencies"),
-        s("go-install","go install","go install","Go","compile and install"),
-        s("go-list","go list","go list ./...","Go","list packages"),
-        s("go-mod-tidy","go mod tidy","go mod tidy","Go","tidy modules"),
-        s("go-mod-verify","go mod verify","go mod verify","Go","verify modules"),
-        s("go-mod-vendor","go mod vendor","go mod vendor","Go","vendor modules"),
-        s("go-work","go work","go work","Go","workspace maintenance"),
-        s("go-run","go run","go run .","Go","compile and run"),
-        s("go-telemetry","go telemetry","go telemetry","Go","manage telemetry"),
-        s("go-test","go test","go test ./...","Go","test packages"),
-        s("go-test-cover","go test -cover","go test -cover ./...","Go","test with coverage"),
-        s("go-tool","go tool","go tool","Go","run go tool"),
-        s("go-version","go version","go version","Go","print go version"),
-        s("go-vet","go vet","go vet ./...","Go","report likely mistakes"),
-        s("npm-install","npm install","npm install","Node","install dependencies"),
-        s("npm-run-dev","npm run dev","npm run dev","Node","start dev server"),
-        s("npm-run-build","npm run build","npm run build","Node","production build"),
-        s("npm-audit","npm audit fix","npm audit fix","Node","audit and fix"),
-        s("npm-init","npm init -y","npm init -y","Node","init package.json"),
-        s("yarn-install","yarn install","yarn install","Node","yarn install"),
-        s("yarn-dev","yarn dev","yarn dev","Node","yarn dev server"),
-        s("npx-tsc","npx tsc --noEmit","npx tsc --noEmit","Node","TypeScript check"),
-        s("git-status","git status","git status","Git","show working tree status"),
-        s("git-pull","git pull","git pull","Git","fetch and merge"),
-        s("git-push","git push","git push","Git","push commits"),
-        s("git-commit","git commit -m \"\"","git commit -m \"\"","Git","commit changes"),
-        s("git-add-all","git add","git add .","Git","stage all changes"),
-        s("git-log","git log --oneline -10","git log --oneline -10","Git","last 10 commits"),
-        s("git-branch","git branch -a","git branch -a","Git","list branches"),
-        s("git-checkout","git checkout","git checkout ","Git","switch branch"),
-        s("git-stash","git stash","git stash","Git","stash changes"),
-        s("git-diff","git diff","git diff","Git","show unstaged changes"),
-        s("git-clone","git clone","git clone ","Git","clone repo"),
-        s("git-merge","git merge","git merge ","Git","merge branch"),
-        s("git-rebase","git rebase","git rebase ","Git","rebase"),
-    ]
+
+    // 从 runtime JSON 读取
+    if let Ok(content) = fs::read_to_string(&json_path) {
+        if let Ok(list) = serde_json::from_str::<Vec<ShortcutValue>>(&content) {
+            return list.into_iter().map(|s| Shortcut {
+                id: s.id, name: s.name, command: s.command, category: s.category,
+                description: s.description, favorite: false, use_count: 0, is_builtin: true,
+            }).collect();
+        }
+        println!("⚠️ 解析快捷命令 JSON 失败，使用嵌入的默认值");
+    }
+
+    // fallback: 直接解析嵌入的 JSON
+    let embedded: &str = include_str!("default-shortcuts.json");
+    serde_json::from_str::<Vec<ShortcutValue>>(embedded).unwrap_or_default()
+        .into_iter().map(|s| Shortcut {
+            id: s.id, name: s.name, command: s.command, category: s.category,
+            description: s.description, favorite: false, use_count: 0, is_builtin: true,
+        }).collect()
+}
+
+#[derive(Deserialize)]
+struct ShortcutValue {
+    id: String, name: String, command: String, category: String, description: String,
 }
 
 pub fn get_db_path() -> Result<PathBuf, String> {
@@ -517,8 +644,8 @@ pub fn get_db_path() -> Result<PathBuf, String> {
 }
 
 fn dirs_data() -> PathBuf {
-    #[cfg(target_os = "windows")]
-    { std::env::var("APPDATA").ok().map(PathBuf::from).map(|p| p.join("jc9")).unwrap_or_else(|| PathBuf::from(".")) }
-    #[cfg(not(target_os = "windows"))]
-    { std::env::var("HOME").ok().map(PathBuf::from).map(|p| p.join(".local").join("share").join("jc9")).unwrap_or_else(|| PathBuf::from(".")) }
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .unwrap_or_else(|_| ".".to_string());
+    PathBuf::from(home).join(".jc9").join("data")
 }

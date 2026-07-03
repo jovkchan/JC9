@@ -150,6 +150,17 @@ impl AgentManager {
         }
     }
 
+    /// 删除一个会话（从内存和 SQLite 中移除）
+    pub async fn delete_session(&self, session_id: &str) -> bool {
+        // 从内存中移除
+        {
+            let mut sessions = self.sessions.write().await;
+            sessions.retain(|s| s.id != session_id);
+        }
+        // 从数据库删除
+        self.knowledge_base.delete_session(session_id).await
+    }
+
     pub fn blackboard(&self) -> &Arc<SharedBlackboard> {
         &self.blackboard
     }

@@ -1,6 +1,8 @@
 mod process;
 mod database;
 pub mod ai;
+#[cfg(target_os = "windows")]
+mod taskbar;
 
 use process::ProcessManager;
 use database::{Database, Project, Shortcut, NoteGroup, Note};
@@ -301,6 +303,36 @@ fn kill_port(port: u16) -> Result<String, String> {
     }
 }
 
+/// 设置任务栏缩略图按钮
+#[cfg(target_os = "windows")]
+#[tauri::command]
+fn setup_taskbar() -> Result<(), String> {
+    taskbar::add_button(1001, "📝 快速笔记")?;
+    taskbar::add_button(1002, "📋 剪贴板")?;
+    Ok(())
+}
+
+/// 设置任务栏角标徽章 (count: 0=清除, >99→"99+", <0→"⋯")
+#[cfg(target_os = "windows")]
+#[tauri::command]
+fn taskbar_set_overlay(count: i32, description: Option<String>) -> Result<(), String> {
+    taskbar::set_overlay(count, description.as_deref())
+}
+
+/// 设置任务栏进度条 (total=0 不确定进度)
+#[cfg(target_os = "windows")]
+#[tauri::command]
+fn taskbar_set_progress(completed: u64, total: u64) -> Result<(), String> {
+    taskbar::set_progress(completed, total)
+}
+
+/// 更新缩略图按钮状态
+#[cfg(target_os = "windows")]
+#[tauri::command]
+fn taskbar_update_button(id: i32, tip: String, enabled: bool, hidden: bool) -> Result<(), String> {
+    taskbar::update_button(id, &tip, enabled, hidden)
+}
+
 #[tauri::command]
 fn get_shortcuts(state: State<'_, Mutex<AppState>>) -> Vec<Shortcut> {
     let app_state = match state.lock() { Ok(s) => s, Err(_) => return Vec::new() };
@@ -394,9 +426,11 @@ async fn save_note(state: State<'_, Mutex<AppState>>, note: Note) -> Result<(), 
         app_state.db.save_note(&note)?;
         app_state.ai_manager.clone()
     };
-    // 异步同步到知识库（已在外释放 AppState 锁，避免死锁）
+    // 异步同步到知识库（失败不影响笔记保存）
     let entry = note_to_kb_entry(&note);
-    ai_manager.knowledge_base().add_entry(entry).await;
+    tokio::spawn(async move {
+        ai_manager.knowledge_base().add_entry(entry).await;
+    });
     Ok(())
 }
 
@@ -433,6 +467,11 @@ fn get_note_by_id(state: State<'_, Mutex<AppState>>, id: String) -> Result<Optio
 }
 
 #[tauri::command]
+fn move_note(state: State<'_, Mutex<AppState>>, noteId: String, groupId: Option<String>) -> Result<(), String> {
+    state.lock().map_err(|e| e.to_string())?.db.move_note_to_group(&noteId, groupId.as_deref())
+}
+
+#[tauri::command]
 fn write_file_binary(path: String, data: Vec<u8>) -> Result<(), String> {
     fs::write(&path, data).map_err(|e| e.to_string())
 }
@@ -442,6 +481,37 @@ fn read_file_string(path: String) -> Result<String, String> {
     fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 
+
+#[tauri::command]
+fn get_chat_storage_dir() -> Result<String, String> {
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .map_err(|_| "无法获取用户目录".to_string())?;
+    let dir = format!("{}/.jc9/aichat", home);
+    Ok(dir)
+}
+
+#[tauri::command]
+fn write_text_file(path: String, content: String) -> Result<(), String> {
+    if let Some(parent) = std::path::Path::new(&path).parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {}", e))?;
+    }
+    fs::write(&path, &content).map_err(|e| format!("写入文件失败: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn read_text_file(path: String) -> Result<String, String> {
+    fs::read_to_string(&path).map_err(|e| format!("读取文件失败: {}", e))
+}
+
+#[tauri::command]
+fn delete_file(path: String) -> Result<(), String> {
+    if std::path::Path::new(&path).exists() {
+        fs::remove_file(&path).map_err(|e| format!("删除文件失败: {}", e))?;
+    }
+    Ok(())
+}
 
 #[tauri::command]
 fn show_in_folder(path: String) {
@@ -833,6 +903,15 @@ async fn ai_create_session(state: State<'_, Mutex<AppState>>, title: String) -> 
         app_state.ai_manager.clone()
     };
     Ok(ai_manager.create_session(title).await)
+}
+
+#[tauri::command]
+async fn ai_delete_session(state: State<'_, Mutex<AppState>>, session_id: String) -> Result<bool, String> {
+    let ai_manager = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.ai_manager.clone()
+    };
+    Ok(ai_manager.delete_session(&session_id).await)
 }
 
 #[tauri::command]
@@ -1442,6 +1521,22 @@ pub fn run() {
                 ai_manager,
             }));
 
+            // 初始化任务栏集成 (Windows only) — 加载 C++ DLL
+            #[cfg(target_os = "windows")]
+            {
+                if let Some(window) = app.get_webview_window("main") {
+                    let hwnd = window.hwnd().unwrap().0;
+                    match taskbar::init(hwnd as isize) {
+                        Ok(()) => {
+                            println!("✅ 任务栏 DLL 集成成功");
+                            let _ = taskbar::add_button(1001, "📝 快速笔记");
+                            let _ = taskbar::add_button(1002, "📋 剪贴板");
+                        }
+                        Err(e) => println!("⚠️ 任务栏 DLL 加载失败: {}", e),
+                    }
+                }
+            }
+
             // 启动时同步技能 + 自动重连 MCP 服务器
             let app_handle = app.handle().clone();
             let db_conn_clone = db_conn.clone();
@@ -1513,6 +1608,10 @@ pub fn run() {
             write_file_binary,
             read_file_string,
             show_in_folder,
+            get_chat_storage_dir,
+            write_text_file,
+            read_text_file,
+            delete_file,
             fetch_url_html,
             get_note_groups,
             save_note_group,
@@ -1523,9 +1622,19 @@ pub fn run() {
             search_notes,
             get_note_count,
             get_note_by_id,
+            move_note,
             // AI commands
             ai_list_sessions,
             ai_create_session,
+            ai_delete_session,
+            #[cfg(target_os = "windows")]
+            setup_taskbar,
+            #[cfg(target_os = "windows")]
+            taskbar_set_overlay,
+            #[cfg(target_os = "windows")]
+            taskbar_set_progress,
+            #[cfg(target_os = "windows")]
+            taskbar_update_button,
             ai_plan_task,
             ai_spawn_worker,
             ai_list_workers,

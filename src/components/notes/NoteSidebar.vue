@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useNotesStore } from '@/stores/notes'
-import { useProjectStore } from '@/stores/project'
+import { invoke } from '@tauri-apps/api/core'
 import ActivityCalendar from './ActivityCalendar.vue'
 import type { Note } from '@/types/notes'
 
 const store = useNotesStore()
-const projectStore = useProjectStore()
 
 const newGroupName = ref('')
 const showingNewGroup = ref(false)
@@ -37,6 +36,7 @@ const selectedTag = computed({
 const ctxShow = ref(false)
 const ctxPos = ref({ x: 0, y: 0 })
 const ctxNote = ref<Note | null>(null)
+const ctxShowMove = ref(false)
 
 // ── Rename ──
 const renameShow = ref(false)
@@ -83,19 +83,10 @@ function openCtx(e: MouseEvent, note: Note) {
   e.preventDefault(); e.stopPropagation()
   ctxPos.value = { x: e.clientX, y: e.clientY }; ctxNote.value = note; ctxShow.value = true
 }
-function closeCtx() { ctxShow.value = false }
+function closeCtx() { ctxShow.value = false; ctxShowMove.value = false }
 
-// 重置过滤
-function clearAllFilters() {
-  store.selectedGroupId = null
-  store.selectedTag = null
-  store.filterDate = null
-  store.searchQuery = ''
-}
 
-function openAiAssistant() {
-  projectStore.openTool('ai-helper', 'AI 助手')
-}
+
 
 function ctxEdit() {
   if (ctxNote.value) { store.selectedNoteId = ctxNote.value.id; store.openNoteTab(ctxNote.value.id) }
@@ -118,6 +109,14 @@ async function confirmRenameNote() {
 function ctxDelete() {
   if (ctxNote.value) { deleteNoteId.value = ctxNote.value.id; deleteNoteTitle.value = ctxNote.value.title || '无标题'; deleteConfirmShow.value = true }
   closeCtx()
+}
+async function moveNoteToGroup(groupId: string | null) {
+  if (!ctxNote.value) return
+  try {
+    await invoke('move_note', { noteId: ctxNote.value.id, groupId })
+    await store.loadNotes(store.selectedGroupId)
+    closeCtx()
+  } catch (e) { console.error(e) }
 }
 async function confirmDelete() { await store.removeNote(deleteNoteId.value); deleteConfirmShow.value = false }
 
@@ -158,7 +157,7 @@ onMounted(() => document.addEventListener('click', closeCtx))
   <aside class="note-sidebar">
     <!-- Header: title + calendar toggle -->
     <div class="ns-header">
-      <span class="ns-title">笔记</span>
+      <span class="ns-title">日历</span>
       <button class="ns-cal-btn" @click="calendarOpen = !calendarOpen" :title="calendarOpen ? '收起日历' : '展开日历'">
         {{ calendarOpen ? '▴' : '▾' }}
       </button>
@@ -282,7 +281,24 @@ onMounted(() => document.addEventListener('click', closeCtx))
         <div class="ci" @click="ctxTogglePin">{{ ctxNote?.isPinned ? '★ 取消星标' : '☆ 设为星标' }}</div>
         <div class="ci" @click="ctxToggleArchive">{{ ctxNote?.isArchived ? '取消归档' : '归档' }}</div>
         <div class="ci" @click="ctxRename">重命名</div>
+        <div class="ci" style="display:flex;align-items:center;justify-content:space-between" @mouseenter="ctxShowMove = true">
+          移动到分组 <span style="font-size:10px">▸</span>
+        </div>
         <div class="ci" style="color:var(--jc-color-error)" @click="ctxDelete">删除</div>
+      </div>
+    </Teleport>
+
+    <!-- 移动分组子菜单（向右弹出） -->
+    <Teleport to="body">
+      <div
+        v-if="ctxShow && ctxShowMove"
+        class="ctx ctx-sub"
+        :style="{ left: (ctxPos.x + 135) + 'px', top: (ctxPos.y + 118) + 'px' }"
+        @mouseleave="ctxShowMove = false"
+      >
+        <div v-for="g in store.groups" :key="g.id" class="ci" @click="moveNoteToGroup(g.id)">
+          📁 {{ g.name }}
+        </div>
       </div>
     </Teleport>
 
@@ -318,11 +334,7 @@ onMounted(() => document.addEventListener('click', closeCtx))
     </Teleport>
 
     <!-- Sidebar Footer -->
-    <div class="ns-footer-bar">
-      <button class="ns-footer-btn" @click="store.showSettings = true" title="设置笔记">设置</button>
-      <button class="ns-footer-btn" @click="openAiAssistant" title="AI 助理">AI 助理</button>
-      <button class="ns-footer-btn" @click="clearAllFilters" title="重置过滤">重置</button>
-    </div>
+
   </aside>
 </template>
 
@@ -668,15 +680,6 @@ onMounted(() => document.addEventListener('click', closeCtx))
   }
 }
 
-.ctx {
-  @include ctx-menu;
-  min-width: 130px
-}
-
-.ci {
-  @include ctx-item
-}
-
 .mbg {
   position: fixed;
   inset: 0;
@@ -768,5 +771,21 @@ onMounted(() => document.addEventListener('click', closeCtx))
     color: var(--jc-text-primary);
     border-color: var(--jc-border-strong);
   }
+}
+</style>
+
+<style lang="scss">
+// 右键菜单样式 — 不能 scoped，因为 Teleport 到 body 后 DOM 脱离组件作用域
+@use "@/styles/mixins.scss" as *;
+.ctx {
+  @include ctx-menu;
+  min-width: 130px;
+}
+.ctx-sub {
+  min-width: 130px;
+  z-index: 10001;
+}
+.ci {
+  @include ctx-item;
 }
 </style>

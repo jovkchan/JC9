@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { useProjectStore } from '@/stores/project'
 
+const store = useProjectStore()
 const theme = ref<'dark'|'light'>('dark')
 const atop = ref(false)
 const maximized = ref(false)
 const win = getCurrentWindow()
+defineEmits<{ quickNote: [] }>()
 
 let unlistenResized: (() => void) | null = null
 
@@ -50,6 +53,11 @@ async function doMaximize() {
 
 async function doClose() {
   try { await win.close() } catch {}
+}
+
+async function openSettingsWindow() {
+  const { openSettingsWindow: openSettings } = await import('@/utils/openSettings')
+  await openSettings()
 }
 
 async function openAiAgent() {
@@ -99,8 +107,25 @@ async function openAiAgent() {
         </g>
       </svg>
       <span class="tb-title">jc9</span>
+      <!-- Mode tabs: 主程序 / AI -->
+      <div class="mode-tabs">
+        <button :class="['mode-tab', { active: store.mainMode === 'main' }]" @click="store.mainMode = 'main'">主程序</button>
+        <button :class="['mode-tab', { active: store.mainMode === 'ai' }]" @click="store.mainMode = 'ai'">AI</button>
+      </div>
     </div>
     <div class="tb-controls">
+      <button class="tb-btn" @click="$emit('quickNote')" title="快速笔记 (Ctrl+Shift+N)">
+        <svg viewBox="0 0 18 18" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 2h10a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V3a1 1 0 011-1z"/>
+          <path d="M6 6h6M6 9h4M6 12h2"/>
+        </svg>
+      </button>
+      <button class="tb-btn" @click="openSettingsWindow" title="设置">
+        <svg viewBox="0 0 18 18" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="9" cy="9" r="2.5"></circle>
+          <path d="M9 1.5v2M9 14.5v2M1.5 9h2M14.5 9h2M3.3 3.3l1.4 1.4M13.3 13.3l1.4 1.4M3.3 14.7l1.4-1.4M13.3 4.7l1.4-1.4"></path>
+        </svg>
+      </button>
       <button class="tb-btn ai-agent-btn" @click="openAiAgent" title="AI Agent">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
@@ -161,6 +186,17 @@ async function openAiAgent() {
   font-size: 12px;
   font-weight: 600;
   color: var(--jc-text-secondary);
+}
+.mode-tabs {
+  display: flex; gap: 2px; margin-left: 12px; align-items: center; height: 22px;
+  background: var(--jc-bg-panel); border: 1px solid var(--jc-border-default); border-radius: 6px; padding: 1px;
+}
+.mode-tab {
+  padding: 0 10px; height: 18px; border: none; border-radius: 4px; background: transparent;
+  color: var(--jc-text-secondary); font-size: 10.5px; font-weight: 500; cursor: pointer;
+  font-family: inherit; white-space: nowrap; transition: all 0.12s;
+  &:hover { color: var(--jc-text-primary); }
+  &.active { background: var(--jc-bg-elevated); color: var(--jc-color-accent); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,0.06); }
 }
 .tb-controls {
   display: flex;

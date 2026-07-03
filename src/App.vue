@@ -2,6 +2,7 @@
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
+import { invoke } from '@tauri-apps/api/core'
 import { useProjectStore } from '@/stores/project'
 import { useStatusStore } from '@/stores/status'
 import ProjectSidebar from '@/components/ProjectSidebar.vue'
@@ -9,18 +10,35 @@ import MainPanel from '@/components/MainPanel.vue'
 import TitleBar from '@/components/TitleBar.vue'
 import StatusBar from '@/components/StatusBar.vue'
 import AiAgentPanel from '@/components/ai-agent/AiAgentPanel.vue'
+import SettingsPanel from '@/components/settings/SettingsPanel.vue'
+import AiHelper from '@/components/tools/AiHelper.vue'
+import QuickNote from '@/components/tools/QuickNote.vue'
 
 const store = useProjectStore()
 const status = useStatusStore()
 const sidebarCollapsed = ref(false)
 const isSplash = ref(false)
 const isAiAgent = ref(false)
+const windowLabel = ref('')
+const showQuickNote = ref(false)
+
+// 键盘快捷键：Ctrl+Shift+N 打开快速笔记
+function onGlobalKeydown(e: KeyboardEvent) {
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'N') {
+    e.preventDefault()
+    showQuickNote.value = !showQuickNote.value
+  }
+  if (e.key === 'Escape' && showQuickNote.value) {
+    showQuickNote.value = false
+  }
+}
 
 // Watch project count
 watch(() => store.projects.length, (n) => status.setProjectCount(n), { immediate: true })
 
 onMounted(async () => {
   const win = getCurrentWindow()
+  windowLabel.value = win.label
 
   if (win.label === 'splash') {
     isSplash.value = true
@@ -38,8 +56,9 @@ onMounted(async () => {
     await win.setFocus()
   } else if (win.label === 'ai-agent') {
     isAiAgent.value = true
-    await win.show()
-    await win.setFocus()
+    // 被动等待用户通过 TitleBar 按钮打开，不在启动时主动弹出
+  } else if (win.label === 'settings') {
+    // 被动等待用户通过按钮打开，不在启动时主动弹出
   } else {
     // 后台加载主窗口数据
     await store.loadProjects()
@@ -52,6 +71,16 @@ onMounted(async () => {
     await win.show()
     await win.setFocus()
 
+    // 注册全局键盘快捷键
+    document.addEventListener('keydown', onGlobalKeydown)
+
+    // 尝试初始化任务栏集成 (Windows only)
+    try {
+      await invoke('setup_taskbar')
+    } catch {
+      // 非 Windows 环境或未支持时静默失败
+    }
+
     // 优雅地关闭 logo (splash) 窗口
     const splashWin = await WebviewWindow.getByLabel('splash')
     if (splashWin) {
@@ -61,6 +90,7 @@ onMounted(async () => {
 })
 onUnmounted(() => {
   store.destroyListeners()
+  document.removeEventListener('keydown', onGlobalKeydown)
 })
 </script>
 <template>
@@ -80,20 +110,33 @@ onUnmounted(() => {
   <!-- AI Agent 独立窗口 -->
   <AiAgentPanel v-else-if="isAiAgent" />
 
+  <!-- Settings 独立窗口 -->
+  <SettingsPanel v-else-if="windowLabel === 'settings'" />
+
   <!-- Main window -->
   <div v-else class="app">
-    <TitleBar />
-    <div class="app-body">
-      <div class="sidebar-wrap" :class="{fold:sidebarCollapsed}">
-        <ProjectSidebar v-show="!sidebarCollapsed" />
-      </div>
-      <div class="splitter" @click="sidebarCollapsed=!sidebarCollapsed" :title="sidebarCollapsed?'展开侧栏':'折叠侧栏'">
-        <span class="splitter-arrow">{{ sidebarCollapsed?'▶':'◀' }}</span>
-      </div>
-      <MainPanel />
+    <TitleBar @quick-note="showQuickNote = true" />
+    <!-- AI 模式：全屏显示 AiHelper，隐藏侧栏和主面板 -->
+    <div v-if="store.mainMode === 'ai'" class="ai-mode-body">
+      <AiHelper />
     </div>
-    <StatusBar />
+    <!-- 主程序模式：正常显示 -->
+    <template v-else>
+      <div class="app-body">
+        <div class="sidebar-wrap" :class="{fold:sidebarCollapsed}">
+          <ProjectSidebar v-show="!sidebarCollapsed" />
+        </div>
+        <div class="splitter" @click="sidebarCollapsed=!sidebarCollapsed" :title="sidebarCollapsed?'展开侧栏':'折叠侧栏'">
+          <span class="splitter-arrow">{{ sidebarCollapsed?'▶':'◀' }}</span>
+        </div>
+        <MainPanel />
+      </div>
+      <StatusBar />
+    </template>
   </div>
+
+  <!-- 快速笔记浮动窗口 -->
+  <QuickNote v-if="showQuickNote" @close="showQuickNote = false" />
 </template>
 <style scoped lang="scss">
 .app { display:flex; flex-direction:column; height:100vh; background:var(--jc-bg-app); }
@@ -104,6 +147,7 @@ onUnmounted(() => {
   &-arrow { font-size:8px; color:var(--jc-text-secondary); }
   &:hover &-arrow { color:var(--jc-color-white); }
 }
+.ai-mode-body { flex: 1; display: flex; overflow: hidden; }
 .splash {
   position: fixed;
   inset: 0;

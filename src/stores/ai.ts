@@ -74,6 +74,24 @@ export const useAiStore = defineStore('ai', () => {
     }
   }
 
+  async function deleteSession(sessionId: string) {
+    isLoading.value = true
+    error.value = null
+    try {
+      await invoke('ai_delete_session', { sessionId })
+      if (currentSessionId.value === sessionId) {
+        currentSessionId.value = null
+      }
+      await loadSessions()
+      return true
+    } catch (e) {
+      error.value = String(e)
+      return false
+    } finally {
+      isLoading.value = false
+    }
+  }
+
   async function planTask(sessionId: string, request: string) {
     isLoading.value = true
     error.value = null
@@ -372,6 +390,7 @@ export const useAiStore = defineStore('ai', () => {
     pendingApprovalsCount,
     loadSessions,
     createSession,
+    deleteSession,
     planTask,
     spawnWorker,
     loadWorkers,

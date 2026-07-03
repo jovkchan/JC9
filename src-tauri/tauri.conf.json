@@ -43,6 +43,16 @@
         "minHeight": 600,
         "decorations": false,
         "visible": false
+      },
+      {
+        "label": "settings",
+        "title": "JC9 设置",
+        "width": 870,
+        "height": 620,
+        "minWidth": 600,
+        "minHeight": 400,
+        "decorations": false,
+        "visible": false
       }
     ],
     "security": {

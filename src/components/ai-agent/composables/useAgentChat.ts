@@ -15,7 +15,7 @@ export interface ChatMessage {
 
 export function useAgentChat() {
   const notesStore = useNotesStore()
-  const status = useStatusStore()
+  useStatusStore()
   const ai = useAiStore()
 
   // ── Message State ──
@@ -44,11 +44,13 @@ export function useAgentChat() {
   const activeChatRoleId = ref('auto')
   const chatRolesList = ref<AgentRole[]>([])
 
-  const activeChatRole = computed(() => {
+  const activeChatRole = computed((): { id: string; name: string; icon: string; description: string; systemPrompt: string } => {
     if (activeChatRoleId.value === 'auto') {
       return { id: 'auto', name: '智能路由', icon: '🤖', description: '', systemPrompt: '' }
     }
-    return chatRolesList.value.find(r => r.id === activeChatRoleId.value) || activeChatRole.value
+    return chatRolesList.value.find(r => r.id === activeChatRoleId.value) || {
+      id: 'auto', name: '智能路由', icon: '🤖', description: '', systemPrompt: ''
+    }
   })
 
   // ── Model Options ──
@@ -58,8 +60,6 @@ export function useAgentChat() {
   }
   const customModels = ref<CustomModel[]>([])
   const selectedCombinedModel = ref('')
-  const ollamaModels = ref<string[]>([])
-  const vllmModels = ref<string[]>([])
   const loadingModels = ref(false)
 
   function loadCustomModels() {
@@ -237,7 +237,7 @@ export function useAgentChat() {
     if (tasks.length > 0) {
       addSystemBubble(`✅ 已规划 **${tasks.length}** 个子任务`)
       for (const task of tasks) {
-        if (task.status === 'pending' || task.status === 'Pending') {
+        if (task.status === 'pending') {
           const role = getRole(task.assignedWorker)
           addSystemBubble(`🚀 启动: ${task.title} [${role.icon} ${role.name}]`)
           const sp = `${role.systemPrompt}\n\n任务描述：${task.description}`

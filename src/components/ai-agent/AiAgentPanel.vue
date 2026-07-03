@@ -2,20 +2,18 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useAiStore } from '@/stores/ai'
-import { useStatusStore } from '@/stores/status'
 import { useAgentChat } from './composables/useAgentChat'
 
 const ai = useAiStore()
-const status = useStatusStore()
 const win = getCurrentWindow()
 
 const {
-  messages, userInput, sending, enableAgentMode,
+  messages, userInput, sending,
   enableDeepThink, enableLocalKb,
-  aiModel, aiProvider, selectedCombinedModel, modelOptions, loadingModels,
+  selectedCombinedModel, modelOptions,
   activeChatRoleId, chatRolesList,
   handleModelChange, switchSession,
-  sendMessage, clearChat, init, destroy, addSystemBubble,
+  sendMessage, clearChat, init, destroy,
 } = useAgentChat()
 
 const maximized = ref(false)
@@ -39,7 +37,7 @@ const categories = [
 
 // ── Chat Mode: CRAFT / ASK / PLAN ──
 const chatMode = ref('问答')
-const chatModes = ['创作', '问答', '规划']
+const chatModes = ['执行', '问答', '规划']
 
 // ── Role selector (系统预设角色) ──
 // activeChatRoleId / chatRolesList 来自 useAgentChat
@@ -268,7 +266,7 @@ onUnmounted(() => {
           <div class="mode-selector">
             <button v-for="mode in chatModes" :key="mode" :class="['mode-btn', { active: chatMode === mode }]"
               @click="chatMode = mode"
-              :title="mode === '创作' ? '读写执行，调用全部工具' : mode === '问答' ? '只读问答，不执行操作' : '多级任务拆解，P0-P4 优先级规划'">
+              :title="mode === '执行' ? '读写执行，调用全部工具' : mode === '问答' ? '只读问答，不执行操作' : '多级任务拆解，P0-P4 优先级规划'">
               {{ mode }}
             </button>
           </div>
