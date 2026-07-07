@@ -24,7 +24,7 @@ defineExpose({openDialog})
 
 <template>
   <Teleport to="body">
-    <div v-if="visible" class="mbg" @click.self="close">
+    <div v-if="visible" class="mbg" @mousedown.self="close">
       <div class="mw">
         <div class="mt">{{ editing ? '编辑命令' : '添加命令' }}</div>
         <div class="mb">

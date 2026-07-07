@@ -2,6 +2,7 @@
 import { ref, nextTick, computed, onMounted, onUnmounted } from 'vue'
 import { useProjectStore } from '@/stores/project'
 import { useStatusStore } from '@/stores/status'
+import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import CommandDialog from '@/components/CommandDialog.vue'
 import NoteSidebar from '@/components/notes/NoteSidebar.vue'
@@ -210,10 +211,32 @@ const wfCat = ref('')
 const wfSteps = ref<Array<{ name: string; command: string; workingDir: string }>>([{ name: '', command: '', workingDir: '' }])
 const wfJsonMode = ref(false)
 const wfJsonText = ref('')
+const aiGenerating = ref(false)
+const wfAiProvider = ref('')
+const wfAiEndpoint = ref('')
+const wfAiKey = ref('')
+const wfAiModel = ref('')
+const wfModelList = ref<string[]>([])
+const wfModelMap = ref<Record<string, { provider: string; endpoint: string; apiKey: string; model: string }>>({})
+const wfAiMsg = ref('')
+const stepAiIdx = ref(-1)
+const stepAiInput = ref('')
+
+const WORKFLOW_SCHEMA_EXAMPLE = `{
+  "name": "编译并运行",
+  "description": "先编译项目，编译成功后再启动",
+  "category": "Tauri",
+  "steps": [
+    { "name": "编译", "command": "cargo build", "workingDir": "src-tauri" },
+    { "name": "运行", "command": "npx tauri dev", "workingDir": "." }
+  ]
+}`
 
 function openWfDlg(editId?: string) {
   showWfDlg.value = true
   wfJsonMode.value = false
+  // 从 JSON 加载模型列表
+  loadWfModels()
   if (editId) {
     const w = store.workflows.find(x => x.id === editId)
     if (w) {
@@ -277,25 +300,237 @@ async function pickWfDir(step: { workingDir: string }) {
   if (dir && typeof dir === 'string') step.workingDir = dir
 }
 
+async function loadWfModels() {
+  try {
+    const json = await invoke<string>('get_ai_config')
+    const cfg = JSON.parse(json)
+    const modelsRaw = cfg['notes-ai-models']
+    if (modelsRaw) {
+      const models = JSON.parse(modelsRaw)
+      const labels: string[] = []
+      const map: Record<string, { provider: string; endpoint: string; apiKey: string; model: string }> = {}
+      for (const m of models) {
+        const subModels = (m.model || '').split(',').map((s: string) => s.trim()).filter(Boolean)
+        for (const sm of subModels) {
+          labels.push(`${m.name} (${sm})`)
+          map[`${m.name} (${sm})`] = { provider: m.provider, endpoint: m.endpoint, apiKey: m.apiKey || '', model: sm }
+        }
+      }
+      wfModelList.value = labels
+      wfModelMap.value = map
+      // 默认选中第一个
+      if (labels.length > 0) {
+        wfAiModel.value = labels[0]
+        selectWfModel(labels[0])
+      }
+    }
+    // fallback: 从单个配置读
+    if (wfModelList.value.length === 0) {
+      const p = cfg['notes-ai-provider'] || 'deepseek'
+      const e = cfg['notes-ai-endpoint'] || 'https://api.deepseek.com'
+      const k = cfg['notes-ai-apikey'] || ''
+      const mo = cfg['notes-ai-model'] || 'deepseek-v4-pro'
+      wfAiProvider.value = p
+      wfAiEndpoint.value = e
+      wfAiKey.value = k
+      wfAiModel.value = `${p} ${mo}`
+    }
+  } catch { /* ignore */ }
+}
+
+function selectWfModel(label: string) {
+  const m = wfModelMap.value[label]
+  if (m) {
+    wfAiProvider.value = m.provider
+    wfAiEndpoint.value = m.endpoint
+    wfAiKey.value = m.apiKey
+    // wfAiModel 由 v-model 管理，这里只记录实际模型名供 AI 调用
+  }
+}
+
+async function aiGenerateWorkflow() {
+  wfAiMsg.value = ''
+  const desc = wfDesc.value.trim()
+  if (!desc) {
+    wfAiMsg.value = '⚠️ 请先填写「说明」'
+    return
+  }
+  const provider = wfAiProvider.value || 'deepseek'
+  const endpoint = wfAiEndpoint.value || 'https://api.deepseek.com'
+  const apiKey = wfAiKey.value
+  const selectedCfg = wfModelMap.value[wfAiModel.value]
+  const model = selectedCfg?.model || ''
+
+  if (!apiKey && provider !== 'ollama') {
+    wfAiMsg.value = '⚠️ 该模型未配置 API Key'
+    return
+  }
+  if (!model && !wfAiModel.value) {
+    wfAiMsg.value = '⚠️ 请选择一个模型'
+    return
+  }
+  aiGenerating.value = true
+  wfAiMsg.value = '⏳ 正在生成...'
+  try {
+    // 系统环境信息
+    const ua = navigator.userAgent
+    const isWin = ua.includes('Windows')
+    const isWin11 = ua.includes('Windows NT 10.0') && ua.includes('.0') // Win11 also reports NT 10.0
+    const osName = isWin
+      ? (isWin11 ? 'Windows 11' : (ua.match(/Windows NT (\d+\.\d+)/)?.[1] === '10.0' ? 'Windows 10' : 'Windows'))
+      : (ua.includes('Mac') ? 'macOS' : (ua.includes('Linux') ? 'Linux' : 'Unknown'))
+    const arch = ua.includes('Win64') || ua.includes('x64') ? 'x86_64' : (ua.includes('ARM') ? 'ARM64' : 'x86')
+
+    const prompt = `你是一个工作流 JSON 生成器。根据用户的描述，生成符合以下 schema 的 JSON：
+
+## 运行环境
+- 操作系统：${osName} (${arch})
+- 默认 Shell：PowerShell（也兼容 cmd.exe）
+- 可用工具：git, node, npm, npx, cargo, rustc, go, python, robocopy, xcopy, curl, tar, 7z
+- 路径分隔符：\\（PowerShell 中路径可直接使用）
+- 换行符：CRLF (\\r\\n)
+- 编码：UTF-8
+
+## JSON Schema
+{
+  "name": "工作流名称",
+  "description": "描述",
+  "category": "分类",
+  "steps": [
+    { "name": "步骤名", "command": "要执行的命令", "workingDir": "工作目录" }
+  ]
+}
+
+## 示例
+${WORKFLOW_SCHEMA_EXAMPLE}
+
+## 用户需求
+${desc}
+
+## 约束
+- 只输出 JSON，不要包含任何解释、代码块标记或其他文字
+- 确保 steps 数组至少有一项
+- 使用 PowerShell 语法（如 Copy-Item 而非 copy，New-Item 而非 mkdir）
+- 文件名含空格或特殊字符时请用双引号包裹路径
+- PowerShell 中路径的反斜杠无需转义`
+
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (provider !== 'ollama') headers['Authorization'] = `Bearer ${apiKey}`
+
+    const body = provider === 'ollama'
+      ? JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], stream: false })
+      : JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], temperature: 0.3, stream: false })
+
+    const responseText = await invoke<string>('proxy_ai_request', {
+      url: provider === 'ollama' ? `${endpoint}/api/chat` : `${endpoint}/chat/completions`,
+      method: 'POST',
+      headers: Object.entries(headers),
+      body,
+    })
+
+    // 解析 AI 响应
+    let jsonStr = ''
+    if (provider === 'ollama') {
+      const parsed = JSON.parse(responseText)
+      jsonStr = parsed.message?.content || ''
+    } else {
+      const parsed = JSON.parse(responseText)
+      jsonStr = parsed.choices?.[0]?.message?.content || ''
+    }
+
+    // 提取 JSON（去掉可能的代码块标记）
+    const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/) || jsonStr.match(/{[\s\S]*}/)
+    const cleanJson = jsonMatch ? jsonMatch[1] || jsonMatch[0] : jsonStr
+
+    // 验证 JSON 合法性
+    const parsed = JSON.parse(cleanJson)
+    if (!parsed.steps || !Array.isArray(parsed.steps)) {
+      throw new Error('生成的 JSON 缺少 steps 数组')
+    }
+
+    // 填充到表单
+    wfJsonText.value = JSON.stringify(parsed, null, 2)
+    wfName.value = parsed.name || wfName.value
+    wfDesc.value = parsed.description || wfDesc.value
+    wfCat.value = parsed.category || wfCat.value
+    wfSteps.value = (parsed.steps || []).map((s: any) => ({
+      name: s.name || '',
+      command: s.command || '',
+      workingDir: s.workingDir || ''
+    }))
+
+    useStatusStore().pushMessage('✅ 工作流 JSON 已生成', 'success')
+    wfAiMsg.value = ''
+  } catch (e) {
+    useStatusStore().pushMessage(`AI 生成失败: ${e}`, 'error')
+    wfAiMsg.value = `❌ ${e}`
+  } finally {
+    aiGenerating.value = false
+  }
+}
+
+const stepAiMsg = ref('')
+
+async function aiGenStep(step: { name: string; command: string; workingDir: string }) {
+  const desc = stepAiInput.value.trim()
+  if (!desc) { stepAiMsg.value = '⚠️ 输入描述'; return }
+  stepAiMsg.value = '⏳ 生成中...'
+  const provider = wfAiProvider.value || 'deepseek'
+  const endpoint = wfAiEndpoint.value || 'https://api.deepseek.com'
+  const apiKey = wfAiKey.value
+  const selectedCfg = wfModelMap.value[wfAiModel.value]
+  const model = selectedCfg?.model || ''
+  if (!apiKey && provider !== 'ollama') { stepAiMsg.value = '⚠️ 未配置 Key'; return }
+
+  const prompt = `你是一个命令生成助手。用户需要一条在 Windows PowerShell 中执行的命令。
+原命令（如果有）：${step.command || '无'}
+用户需求：${desc}
+
+请只输出命令本身，不要包含解释、代码块标记或其他文字。命令应在 PowerShell 中可执行。`
+
+  try {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (provider !== 'ollama') headers['Authorization'] = `Bearer ${apiKey}`
+    const body = provider === 'ollama'
+      ? JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], stream: false })
+      : JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], temperature: 0.3, stream: false })
+    const url = provider === 'ollama' ? `${endpoint}/api/chat` : `${endpoint}/chat/completions`
+    const text = await invoke<string>('proxy_ai_request', { url, method: 'POST', headers: Object.entries(headers), body })
+    const parsed = JSON.parse(text)
+    const raw = provider === 'ollama' ? (parsed.message?.content || '') : (parsed.choices?.[0]?.message?.content || '')
+    const cmd = raw.replace(/```[\s\S]*?```/g, '').replace(/`([^`]+)`/g, '$1').trim().split('\n')[0].trim()
+    if (cmd) { step.command = cmd; stepAiIdx = -1; stepAiMsg.value = ''; useStatusStore().pushMessage('✅ 命令已生成', 'success') }
+    else { stepAiMsg.value = '⚠️ AI 未返回有效命令' }
+  } catch (e) { stepAiMsg.value = `❌ ${e}` }
+}
+
 function saveWf() {
-  const n = wfName.value.trim()
-  if (!n) return
+  let n = wfName.value.trim()
+  if (!n) { useStatusStore().pushMessage('请输入工作流名称', 'warn'); return }
   let steps = wfSteps.value.filter(s => s.command.trim())
-  // 如果在 JSON 模式下，先解析
   if (wfJsonMode.value) {
     try {
       const parsed = JSON.parse(wfJsonText.value)
+      n = parsed.name || n
       steps = (parsed.steps || []).filter((s: any) => s.command)
-    } catch { return }
+    } catch { useStatusStore().pushMessage('JSON 格式错误', 'error'); return }
   }
-  if (steps.length === 0) return
+  if (steps.length === 0) { useStatusStore().pushMessage('请至少添加一个命令步骤', 'warn'); return }
   if (wfEditId.value) {
-    store.updateWorkflow(wfEditId.value, {
-      name: n,
-      description: wfDesc.value.trim(),
-      category: wfCat.value.trim() || '自定义',
-      steps
-    })
+    // 直接替换整个 workflow 对象（强制触发响应式更新）
+    const idx = store.workflows.findIndex(x => x.id === wfEditId.value)
+    if (idx >= 0) {
+      store.workflows[idx] = {
+        ...store.workflows[idx],
+        name: n,
+        description: wfDesc.value.trim(),
+        category: wfCat.value.trim() || '自定义',
+        steps
+      }
+      // 立即持久化
+      invoke('save_workflows', { workflowsJson: JSON.stringify(store.workflows) }).catch(e => console.error(e))
+    }
+    useStatusStore().pushMessage(`工作流「${n}」已保存`, 'success')
   } else {
     store.addWorkflow({
       name: n,
@@ -658,7 +893,7 @@ onUnmounted(() => {
     </Teleport>
     <!-- 工作流编辑对话框 -->
     <Teleport to="body">
-      <div v-if="showWfDlg" class="mbg" @click.self="showWfDlg=false">
+      <div v-if="showWfDlg" class="mbg" @mousedown.self="showWfDlg=false">
         <div class="mw" style="width:560px">
           <div class="mt" style="display:flex;align-items:center;justify-content:space-between">
             <span>{{ wfEditId ? '编辑工作流' : '新建工作流' }}</span>
@@ -670,7 +905,22 @@ onUnmounted(() => {
             <template v-if="!wfJsonMode">
               <div class="fld"><label>名称</label><input v-model="wfName" class="wf-input" placeholder="如: 编译并运行" autofocus /></div>
               <div class="fld"><label>分类</label><input v-model="wfCat" class="wf-input" placeholder="如: Go / Tauri" /></div>
-              <div class="fld"><label>说明</label><input v-model="wfDesc" class="wf-input" placeholder="描述这个工作流的用途" /></div>
+              <div class="fld">
+                <label>说明</label>
+                <div style="display:flex;gap:4px">
+                  <input v-model="wfDesc" class="wf-input" placeholder="描述需求，让 AI 生成工作流" style="flex:1" />
+                  <button class="btn" style="font-size:11px;white-space:nowrap;padding:2px 10px" @click="aiGenerateWorkflow" :disabled="aiGenerating">
+                    {{ aiGenerating ? '⏳...' : '🤖 AI 生成' }}
+                  </button>
+                </div>
+                <div style="display:flex;gap:4px;margin-top:4px;align-items:center">
+                  <select v-if="wfModelList.length > 0" v-model="wfAiModel" style="flex:1;background:var(--jc-bg-input);color:var(--jc-text-primary);border:1px solid var(--jc-border-strong);font-size:11px;padding:3px 4px" @change="selectWfModel(wfAiModel)">
+                    <option v-for="l in wfModelList" :key="l" :value="l">{{ l }}</option>
+                  </select>
+                  <span v-else style="font-size:10px;color:var(--jc-text-secondary)">未找到模型配置，请先在设置中添加</span>
+                </div>
+                <div v-if="wfAiMsg" style="margin-top:4px;font-size:11px;color:var(--jc-text-highlight)">{{ wfAiMsg }}</div>
+              </div>
               <div class="wf-section-label">命令步骤（顺序执行）</div>
               <div v-for="(step, idx) in wfSteps" :key="idx" class="wf-step-card">
                 <div class="wf-step-header">
@@ -679,18 +929,28 @@ onUnmounted(() => {
                   <button class="wf-step-del" @click="removeStep(idx)">✕</button>
                 </div>
                 <textarea v-model="step.command" class="wf-textarea" placeholder="命令（如 go build -o app.exe .）" rows="2" />
+                <button class="wf-step-ai" @click="stepAiIdx = idx; stepAiInput = step.command">🤖 AI</button>
                 <div class="wf-step-footer">
                   <input v-model="step.workingDir" class="wf-input wf-dir" placeholder="工作目录（点击📁选择）" />
                   <button class="wf-dir-pick" @click="pickWfDir(step)">📁</button>
+                </div>
+                <div v-if="stepAiIdx === idx" class="wf-step-ai-box">
+                  <input v-model="stepAiInput" placeholder="描述需要的命令" class="wf-input" style="flex:1;font-size:11px" />
+                  <button class="btn" style="font-size:10px;padding:2px 6px" @click="aiGenStep(step)">生成</button>
+                  <button class="btn" style="font-size:10px;padding:2px 6px" @click="stepAiIdx = -1">✕</button>
                 </div>
               </div>
               <button class="btn wf-add-step" @click="addStep">+ 添加步骤</button>
             </template>
             <template v-else>
               <div class="fld"><label>名称</label><input v-model="wfName" class="wf-input" placeholder="工作流名称" /></div>
+              <div class="fld"><label>说明</label><input v-model="wfDesc" class="wf-input" placeholder="描述需求，让 AI 生成 JSON" /></div>
               <div style="margin-top:6px">
                 <div class="wf-section-label">JSON 定义</div>
-                <textarea v-model="wfJsonText" class="wf-textarea wf-json-editor" rows="14" spellcheck="false" />
+                <textarea v-model="wfJsonText" class="wf-textarea wf-json-editor" rows="12" spellcheck="false" />
+                <button class="btn" style="width:100%;margin-top:4px;font-size:11px" @click="aiGenerateWorkflow" :disabled="aiGenerating">
+                  {{ aiGenerating ? '⏳ 生成中...' : 'AI 按描述生成' }}
+                </button>
               </div>
             </template>
             <div class="acts wf-acts">
@@ -769,7 +1029,7 @@ input { @include input-base; }
 .mbg { position:fixed; inset:0; background:var(--jc-bg-overlay); display:flex; align-items:center; justify-content:center; z-index:1000; }
 .mw { background:var(--jc-bg-elevated); border:1px solid var(--jc-border-strong); min-width:400px; box-shadow:var(--jc-shadow-modal); }
 .mt { background:var(--jc-bg-panel); padding:10px 16px; font-size:14px; font-weight:600; color:var(--jc-text-highlight); border-bottom:1px solid var(--jc-border-default); }
-.mb { padding:16px; display:flex; flex-direction:column; gap:12px; }
+.mb { padding:16px; display:flex; flex-direction:column; gap:12px; max-height:70vh; overflow-y:auto; }
 .fld { display:flex; flex-direction:column; gap:4px;
   label { font-size:11px; color:var(--jc-text-secondary); text-transform:uppercase; letter-spacing:.5px; }
   input { @include input-base; padding:6px 10px; font-size:13px; }
@@ -787,6 +1047,9 @@ input { @include input-base; }
 :global(.wf-step-footer) { margin-top:4px; display:flex; gap:4px; align-items:center; }
 :global(.wf-dir) { flex:1; font-size:10px; }
 :global(.wf-dir-pick) { background:none; border:none; cursor:pointer; font-size:13px; padding:2px 4px; flex-shrink:0; }
+:global(.wf-step-ai) { background:none; border:none; color:var(--jc-color-accent); cursor:pointer; font-size:11px; padding:2px 6px; margin-top:2px; width:100%; text-align:left; }
+:global(.wf-step-ai):hover { background:var(--jc-bg-hover); }
+:global(.wf-step-ai-box) { display:flex; gap:4px; align-items:center; margin-top:4px; }
 :global(.wf-section-label) { font-size:11px; font-weight:600; color:var(--jc-text-highlight); margin:8px 0 4px; }
 :global(.wf-add-step) { width:100%; margin-top:4px; }
 :global(.wf-acts) { margin-top:8px; }

@@ -304,7 +304,7 @@ onMounted(() => document.addEventListener('click', closeCtx))
 
     <!-- Rename modal -->
     <Teleport to="body">
-      <div v-if="renameShow" class="mbg" @click.self="renameShow = false">
+      <div v-if="renameShow" class="mbg" @mousedown.self="renameShow = false">
         <div class="mw" style="min-width:320px">
           <div class="mt">重命名笔记</div>
           <div class="mb">
@@ -320,7 +320,7 @@ onMounted(() => document.addEventListener('click', closeCtx))
 
     <!-- Delete confirm -->
     <Teleport to="body">
-      <div v-if="deleteConfirmShow" class="mbg" @click.self="deleteConfirmShow = false">
+      <div v-if="deleteConfirmShow" class="mbg" @mousedown.self="deleteConfirmShow = false">
         <div class="mw" style="min-width:320px">
           <div class="mt">删除笔记</div>
           <div class="mb">

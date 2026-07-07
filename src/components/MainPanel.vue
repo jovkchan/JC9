@@ -322,7 +322,7 @@ onUnmounted(() => {
     </Teleport>
 
     <Teleport to="body">
-      <div v-if="renameShow" class="mbg" @click.self="renameShow=false">
+      <div v-if="renameShow" class="mbg" @mousedown.self="renameShow=false">
         <div class="mw" style="min-width:360px">
           <div class="mt">命令重命名</div>
           <div class="mb">

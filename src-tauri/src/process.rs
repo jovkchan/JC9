@@ -186,4 +186,72 @@ impl ProcessManager {
             .map(|s| s.contains_key(id))
             .unwrap_or(false)
     }
+
+    /// 执行命令并流式输出（命令完成后进程自动退出）
+    #[allow(dead_code)]
+    pub fn execute(
+        &self,
+        id: String,
+        wd: String,
+        cmd: String,
+        app: AppHandle,
+    ) -> Result<(), String> {
+        eprintln!("[JC9] PTY execute id={id} cmd={cmd} wd={wd}");
+
+        let pty = native_pty_system();
+        let pair = pty
+            .openpty(PtySize { rows: 30, cols: 120, pixel_width: 0, pixel_height: 0 })
+            .map_err(|e| format!("ConPTY 创建失败: {e}"))?;
+
+        #[cfg(target_os = "windows")]
+        let cb = {
+            let mut c = CommandBuilder::new("powershell");
+            let full_cmd = format!("[Console]::OutputEncoding=[Text.Encoding]::UTF8; {}", cmd);
+            // 不加 -NoExit，命令完成后进程自动退出
+            c.args(&["-NoLogo", "-Command", &full_cmd]);
+            if !wd.is_empty() && Path::new(&wd).exists() { c.cwd(&wd); }
+            c
+        };
+        #[cfg(not(target_os = "windows"))]
+        let cb = {
+            let mut c = CommandBuilder::new("bash");
+            c.args(&["-c", &cmd]);
+            if !wd.is_empty() && Path::new(&wd).exists() { c.cwd(&wd); }
+            c
+        };
+
+        let child = pair.slave.spawn_command(cb).map_err(|e| format!("PTY 启动失败: {e}"))?;
+        drop(pair.slave);
+
+        let mut reader = pair.master.try_clone_reader().map_err(|e| format!("reader 失败: {e}"))?;
+        let pid = id.clone();
+        let app2 = app.clone();
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 8192];
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) => {
+                        let _ = app2.emit("process-exited", serde_json::json!({"processId": pid}));
+                        break;
+                    }
+                    Ok(n) => {
+                        let _ = app2.emit("pty-output", serde_json::json!({"processId": pid, "data": &buf[..n]}));
+                    }
+                    Err(_) => {
+                        let _ = app2.emit("process-exited", serde_json::json!({"processId": pid}));
+                        break;
+                    }
+                }
+            }
+        });
+
+        let writer: Box<dyn std::io::Write + Send> = pair.master.take_writer()
+            .map_err(|e| format!("writer 失败: {e}"))?;
+
+        self.sessions.lock().map_err(|e| e.to_string())?.insert(id.clone(), Session {
+            child, _master: pair.master, writer: Mutex::new(Some(writer)),
+        });
+        let _ = app.emit("process-started", serde_json::json!({"processId": id}));
+        Ok(())
+    }
 }

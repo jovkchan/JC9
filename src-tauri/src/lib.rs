@@ -223,66 +223,106 @@ fn save_workflows(workflows_json: String) -> Result<(), String> {
 
 /// 执行工作流：按顺序在终端中执行多个命令，每个等上一个完成
 #[tauri::command]
-async fn run_workflow(app: tauri::AppHandle, steps: Vec<database::WorkflowStep>) -> Result<(), String> {
+async fn run_workflow(app: tauri::AppHandle, tab_id: String, steps: Vec<database::WorkflowStep>) -> Result<(), String> {
+    use std::io::Read;
     use tauri::Emitter;
+
     let total = steps.len();
     for (i, step) in steps.iter().enumerate() {
         let step_num = i + 1;
 
-        // 发出开始事件
-        let _ = app.emit("workflow-event", serde_json::json!({
-            "type": "step_start",
-            "step": step_num,
-            "total": total,
-            "name": step.name,
-            "command": step.command
-        }));
+        // ── 终端输出步骤标题 ──
+        let header = format!(
+            "\x1b[1;33m=== 步骤 {}/{} ===\x1b[0m\n\x1b[1;36m> {}\x1b[0m\n",
+            step_num, total, step.command
+        );
+        app.emit("pty-output", serde_json::json!({
+            "processId": tab_id,
+            "data": header.as_bytes()
+        })).ok();
 
-        // 使用 cmd.exe /C 执行（非交互式，完成后自动退出）
-        let shell = if cfg!(target_os = "windows") { "cmd.exe" } else { "sh" };
-        let arg = if cfg!(target_os = "windows") { "/C" } else { "-c" };
+        app.emit("workflow-event", serde_json::json!({
+            "type": "step_start", "step": step_num, "total": total, "name": step.name
+        })).ok();
 
-        let output = std::process::Command::new(shell)
-            .args([arg, &step.command])
-            .current_dir(if step.working_dir.is_empty() { "." } else { &step.working_dir })
-            .output()
-            .map_err(|e| format!("步骤 {} 「{}」启动失败: {}", step_num, step.name, e))?;
+        // PowerShell 执行（默认 shell，比 cmd.exe 路径处理更强）
+        #[cfg(target_os = "windows")]
+        let (shell, arg, full_cmd) = ("powershell", "-Command", format!(
+            "[Console]::OutputEncoding=[Text.Encoding]::UTF8; $ErrorActionPreference='Stop'; {}",
+            step.command
+        ));
+        #[cfg(not(target_os = "windows"))]
+        let (shell, arg, full_cmd) = ("sh", "-c", step.command.clone());
 
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let mut cmd = std::process::Command::new(shell);
+        cmd.args([arg, &full_cmd]);
+        cmd.current_dir(if step.working_dir.is_empty() { "." } else { &step.working_dir });
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+        cmd.env("COLUMNS", "100");   // 限制终端宽度避免 vite 按超宽列渲染
+        cmd.env("FORCE_COLOR", "1");  // 保留 ANSI 颜色
 
-        // 发送输出事件到前端（显示在终端标签页或通知面板）
-        let _ = app.emit("pty-output", serde_json::json!({
-            "processId": format!("workflow-{step_num}"),
-            "data": output.stdout
-        }));
+        let mut child = cmd.spawn()
+            .map_err(|e| format!("步骤 {} 启动失败: {}", step_num, e))?;
 
-        if output.status.success() {
-            let _ = app.emit("workflow-event", serde_json::json!({
-                "type": "step_done",
-                "step": step_num,
-                "total": total,
-                "name": step.name,
-                "stdout": stdout,
-                "stderr": stderr
-            }));
+        // stdout 线程
+        let app2 = app.clone();
+        let tid = tab_id.clone();
+        if let Some(stdout) = child.stdout.take() {
+            std::thread::spawn(move || {
+                let mut reader = std::io::BufReader::new(stdout);
+                let mut buf = [0u8; 4096];
+                while let Ok(n) = reader.read(&mut buf) {
+                    if n == 0 { break; }
+                    let _ = app2.emit("pty-output", serde_json::json!({
+                        "processId": tid,
+                        "data": &buf[..n]
+                    }));
+                }
+            });
+        }
+
+        // stderr 线程
+        let app3 = app.clone();
+        let tid3 = tab_id.clone();
+        if let Some(stderr) = child.stderr.take() {
+            std::thread::spawn(move || {
+                let mut reader = std::io::BufReader::new(stderr);
+                let mut buf = [0u8; 4096];
+                while let Ok(n) = reader.read(&mut buf) {
+                    if n == 0 { break; }
+                    let _ = app3.emit("pty-output", serde_json::json!({
+                        "processId": tid3,
+                        "data": &buf[..n]
+                    }));
+                }
+            });
+        }
+
+        let status = child.wait().map_err(|e| format!("步骤 {} 执行异常: {}", step_num, e))?;
+
+        // ── 终端输出步骤结果 ──
+        if status.success() {
+            let ok = format!("\x1b[1;32m[OK]\x1b[0m 步骤 {}/{}\n", step_num, total);
+            app.emit("pty-output", serde_json::json!({ "processId": tab_id, "data": ok.as_bytes() })).ok();
+            app.emit("workflow-event", serde_json::json!({
+                "type": "step_done", "step": step_num, "total": total, "name": step.name
+            })).ok();
         } else {
-            let _ = app.emit("workflow-event", serde_json::json!({
-                "type": "step_fail",
-                "step": step_num,
-                "total": total,
-                "name": step.name,
-                "stdout": stdout,
-                "stderr": stderr
-            }));
-            return Err(format!("步骤 {} 「{}」失败:\n{}", step_num, step.name, stderr));
+            let code = status.code().unwrap_or(-1);
+            let fail = format!("\x1b[1;31m[FAIL]\x1b[0m 步骤 {}/{} (退出码 {}):\n", step_num, total, code);
+            app.emit("pty-output", serde_json::json!({ "processId": tab_id, "data": fail.as_bytes() })).ok();
+            app.emit("workflow-event", serde_json::json!({
+                "type": "step_fail", "step": step_num, "total": total, "name": step.name
+            })).ok();
+            return Err(format!("步骤 {} 失败，退出码 {}", step_num, code));
         }
     }
-    let _ = app.emit("workflow-event", serde_json::json!({
-        "type": "workflow_done",
-        "step": total,
-        "total": total
-    }));
+    app.emit("workflow-event", serde_json::json!({
+        "type": "workflow_done", "step": total, "total": total
+    })).ok();
+    let done = format!("\n\x1b[1;32m工作流完成\x1b[0m\n");
+    app.emit("pty-output", serde_json::json!({ "processId": tab_id, "data": done.as_bytes() })).ok();
     Ok(())
 }
 

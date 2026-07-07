@@ -137,7 +137,7 @@ onMounted(() => {
 
     <!-- 新增/编辑模态框 -->
     <Teleport to="body">
-      <div v-if="showModal" class="mbg" @click.self="showModal = false">
+      <div v-if="showModal" class="mbg" @mousedown.self="showModal = false">
         <div class="mw">
           <div class="mt">{{ modalMode === 'add' ? '新增环境变量' : '编辑环境变量' }}</div>
           <div class="mb">

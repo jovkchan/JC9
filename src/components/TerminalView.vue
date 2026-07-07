@@ -26,7 +26,7 @@ function onKd(e:KeyboardEvent){
 onMounted(async()=>{
   if(!container.value)return
   const cs = getComputedStyle(document.documentElement)
-  term=new Terminal({cursorBlink:true,fontSize:13,disableStdin:false,fontFamily:"'Microsoft YaHei Mono','Cascadia Code','Consolas',monospace",theme:{
+  term=new Terminal({cursorBlink:true,convertEol:true,fontSize:13,disableStdin:false,fontFamily:"'Microsoft YaHei Mono','Cascadia Code','Consolas',monospace",theme:{
     background: cs.getPropertyValue('--jc-term-bg').trim() || '#1e1e1e',
     foreground: cs.getPropertyValue('--jc-term-fg').trim() || '#ccc',
     cursor: cs.getPropertyValue('--jc-color-accent').trim() || '#8a58ff',

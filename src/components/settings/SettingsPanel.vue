@@ -25,6 +25,7 @@ const status = useStatusStore()
 const aiStore = useAiStore()
 
 const maximized = ref(false)
+const saveFeedback = ref('')
 
 async function doMinimize() { try { await win.minimize() } catch {} }
 async function doMaximize() {
@@ -326,6 +327,9 @@ async function saveSettings() {
   }
   await saveAllToJson()
   status.pushMessage('设置保存成功', 'success')
+  // 行内反馈
+  saveFeedback.value = '✅ 已保存'
+  setTimeout(() => { saveFeedback.value = '' }, 2000)
 }
 
 // ── Overlay click guard ──
@@ -634,6 +638,7 @@ onMounted(() => {
     <div class="settings-footer">
       <button class="footer-btn-cancel" @click="doClose">取消</button>
       <button class="footer-btn-save" @click="saveSettings">保存配置</button>
+      <span v-if="saveFeedback" class="save-feedback">{{ saveFeedback }}</span>
     </div>
   </div>
 </template>
@@ -713,6 +718,7 @@ onMounted(() => {
 .btn-danger { &:hover { border-color: #f85149 !important; color: #f85149 !important; } }
 .footer-btn-cancel { background: var(--jc-bg-btn); color: var(--jc-text-secondary); border: none; padding: 6px 14px; font-size: 12px; border-radius: 4px; cursor: pointer; &:hover { color: var(--jc-text-primary); } }
 .footer-btn-save { background: var(--jc-color-accent); color: #fff; border: none; padding: 6px 14px; font-size: 12px; font-weight: 600; border-radius: 4px; cursor: pointer; &:hover { opacity: 0.9; } &:disabled { opacity: 0.5; cursor: not-allowed; } }
+.save-feedback { font-size: 12px; color: var(--jc-color-success); margin-left: 8px; }
 
 /* Footer bar */
 .settings-footer { padding: 10px 16px; background: var(--jc-bg-panel); border-top: 1px solid var(--jc-border-default); display: flex; justify-content: flex-end; gap: 8px; }

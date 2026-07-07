@@ -94,25 +94,53 @@ export const useProjectStore = defineStore('project', () => {
     workflowRunning.value = true
     workflowProgress.value = null
 
+    // 创建工作流终端标签页
+    const wfProcessId = `workflow-${id.slice(0, 8)}`
+    const wfFullKey = cmdKey('workflow', wfProcessId)
+    const existing = runningTabs.value.findIndex(t => t.commandId === wfProcessId)
+    if (existing >= 0) {
+      activeTabIndex.value = existing
+    } else {
+      runningTabs.value.push({
+        projectId: 'workflow',
+        projectName: '工作流',
+        commandId: wfProcessId,
+        commandName: w.name,
+        command: `工作流: ${w.steps.length} 步`
+      })
+      activeTabIndex.value = runningTabs.value.length - 1
+    }
+    activeTabType.value = 'term'
+    // 重置输出缓冲区并标记运行中
+    outputMap.value[wfFullKey] = []
+    runningMap.value[wfFullKey] = 'running'
+    delete decodersMap[wfFullKey]
+    textBufferMap[wfFullKey] = ''
+
     // 监听进度事件
     const unlisten = await listen<any>('workflow-event', (event) => {
       workflowProgress.value = event.payload
-      if (event.payload.type === 'step_start') {
-        useStatusStore().pushMessage(`▶ 步骤 ${event.payload.step}/${event.payload.total}: ${event.payload.name}`, 'info')
-      } else if (event.payload.type === 'step_done') {
-        useStatusStore().pushMessage(`✅ 步骤 ${event.payload.step}/${event.payload.total}: ${event.payload.name}`, 'success')
-      } else if (event.payload.type === 'step_fail') {
-        useStatusStore().pushMessage(`❌ 步骤 ${event.payload.step}/${event.payload.total}: ${event.payload.name}`, 'error')
-      } else if (event.payload.type === 'workflow_done') {
+      const p = event.payload
+      if (p.type === 'step_start') {
+        useStatusStore().pushMessage(`▶ 步骤 ${p.step}/${p.total}: ${p.name}`, 'info')
+        // 标记 PTY 进程 ID 以便 terminal 显示输出
+        if (p.processId) {
+          runningMap.value[p.processId] = 'running'
+        }
+      } else if (p.type === 'step_fail') {
+        useStatusStore().pushMessage(`❌ 步骤 ${p.step}/${p.total}: ${p.name}`, 'error')
+      } else if (p.type === 'workflow_done') {
         useStatusStore().pushMessage(`🏁 工作流「${w.name}」执行完成`, 'success')
         workflowRunning.value = false
         workflowProgress.value = null
+        runningMap.value[wfFullKey] = 'stopped'
       }
     })
 
     try {
-      await invoke('run_workflow', { steps: w.steps })
+      await invoke('run_workflow', { tabId: wfFullKey, steps: w.steps })
     } catch (e) {
+      runningMap.value[wfFullKey] = 'stopped'
       useStatusStore().pushMessage(`工作流执行失败: ${e}`, 'error')
       workflowRunning.value = false
     } finally {
