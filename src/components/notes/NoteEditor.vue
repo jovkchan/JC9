@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { ref, watch, onUnmounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { useNotesStore } from '@/stores/notes'
 import type { Note } from '@/types/notes'
+import { MdEditor } from 'md-editor-v3'
+import 'md-editor-v3/lib/style.css'
 
 const store = useNotesStore()
 
@@ -16,10 +18,11 @@ const emit = defineEmits<{
 
 const title = ref(props.existingNote?.title ?? '')
 const content = ref(props.existingNote?.content ?? '')
-const format = ref<'plain' | 'markdown'>(props.existingNote?.format as 'plain' | 'markdown' ?? 'plain')
 const tagInput = ref(props.existingNote?.tags.join(', ') ?? '')
 const saving = ref(false)
 const lastSaved = ref('')
+
+const editorTheme = ref<'light' | 'dark'>('dark')
 
 // Track whether we're editing an existing note or creating new
 const editNoteId = ref<string | null>(props.existingNote?.id ?? null)
@@ -47,7 +50,6 @@ async function doSave() {
   syncTags()
 
   if (editNoteId.value) {
-    // Editing existing note — use saveNote
     const existing = store.notes.find(n => n.id === editNoteId.value)
     if (!existing) { saving.value = false; return }
 
@@ -55,24 +57,23 @@ async function doSave() {
       ...existing,
       title: title.value,
       content: content.value,
-      format: format.value,
+      format: 'markdown',
       tags: tags.value,
       updatedAt: new Date().toISOString(),
     }
     await store.saveNote(note)
     emit('saved', note)
   } else {
-    // Creating new note — create once, then switch to edit mode
     const note = await store.createNote({
       title: title.value,
       content: content.value,
-      format: format.value,
+      format: 'markdown',
       tags: tags.value,
       groupId: store.selectedGroupId,
       visibility: 'PRIVATE',
     })
     if (note) {
-      editNoteId.value = note.id  // ← Switch to edit mode after first save
+      editNoteId.value = note.id
       emit('saved', note)
     }
   }
@@ -82,13 +83,28 @@ async function doSave() {
 }
 
 function handleKeydown(e: KeyboardEvent) {
-  if (e.ctrlKey && e.key === 'Enter') {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
     e.preventDefault()
     doSave()
   }
 }
 
-watch([title, content, tagInput], () => scheduleSave())
+// Sync theme from document
+function syncTheme() {
+  const t = document.documentElement.getAttribute('data-theme')
+  editorTheme.value = t === 'light' ? 'light' : 'dark'
+}
+
+onMounted(() => syncTheme())
+
+// Watch theme changes
+const observer = new MutationObserver(() => syncTheme())
+onMounted(() => {
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+})
+onUnmounted(() => observer.disconnect())
+
+watch([title, tagInput], () => scheduleSave())
 
 onUnmounted(() => {
   if (saveTimer) {
@@ -97,9 +113,15 @@ onUnmounted(() => {
   }
 })
 
-function toggleFormat() {
-  format.value = format.value === 'markdown' ? 'plain' : 'markdown'
-}
+// Custom toolbar: include only relevant buttons
+const toolbars = [
+  'bold', 'italic', 'underline', 'strikeThrough', '-',
+  'title', 'sub', 'sup', '-',
+  'quote', 'unorderedList', 'orderedList', 'task', '-',
+  'codeRow', 'code', '-',
+  'link', 'image', 'table', '-',
+  'revoke', 'next', 'save', '=', 'preview', 'catalog'
+] as any
 </script>
 
 <template>
@@ -114,19 +136,21 @@ function toggleFormat() {
       <div class="editor-actions">
         <span v-if="lastSaved" class="saved-hint">已保存 {{ lastSaved }}</span>
         <span v-if="saving" class="saving-hint">保存中...</span>
-        <button class="fmt-btn" @click="toggleFormat" :title="format === 'markdown' ? '切换到纯文本' : '切换到 Markdown'">
-          {{ format === 'markdown' ? 'MD' : 'TXT' }}
-        </button>
         <button v-if="existingNote" class="cancel-btn" @click="emit('cancel')">✕</button>
       </div>
     </div>
 
-    <textarea
-      v-model="content"
-      class="content-area"
-      :placeholder="format === 'markdown' ? '支持 Markdown 语法...' : '开始写点什么... Ctrl+Enter 立即保存'"
-      @keydown="handleKeydown"
-    ></textarea>
+    <div class="md-editor-wrapper">
+      <MdEditor
+        v-model="content"
+        :theme="editorTheme"
+        language="zh-CN"
+        :noPrettier="true"
+        :toolbars="toolbars"
+        :autoDetectCode="true"
+        @onChange="scheduleSave"
+      />
+    </div>
 
     <div class="editor-footer">
       <input
@@ -193,21 +217,6 @@ function toggleFormat() {
   color: var(--jc-color-warning);
 }
 
-.fmt-btn {
-  background: var(--jc-bg-btn);
-  color: var(--jc-text-secondary);
-  border: none;
-  padding: 2px 8px;
-  font-size: 10px;
-  font-family: 'Cascadia Code', Consolas, monospace;
-  cursor: pointer;
-  border-radius: 3px;
-
-  &:hover {
-    color: var(--jc-color-accent);
-  }
-}
-
 .cancel-btn {
   background: none;
   color: var(--jc-text-secondary);
@@ -219,27 +228,14 @@ function toggleFormat() {
   &:hover { color: var(--jc-color-error); }
 }
 
-.content-area {
+.md-editor-wrapper {
   flex: 1;
   min-height: 0;
   margin: 8px 0;
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-default);
-  color: var(--jc-text-primary);
-  font-size: 13px;
-  font-family: 'Cascadia Code', Consolas, monospace;
-  line-height: 1.6;
-  padding: 10px;
-  resize: none;
-  outline: none;
-  border-radius: 3px;
 
-  &:focus {
-    border-color: var(--jc-color-accent);
-  }
-
-  &::placeholder {
-    color: var(--jc-text-secondary);
+  // Make md-editor-v3 fill the wrapper
+  :deep(.md-editor) {
+    height: 100% !important;
   }
 }
 

@@ -499,7 +499,7 @@ async function aiGenStep(step: { name: string; command: string; workingDir: stri
     const parsed = JSON.parse(text)
     const raw = provider === 'ollama' ? (parsed.message?.content || '') : (parsed.choices?.[0]?.message?.content || '')
     const cmd = raw.replace(/```[\s\S]*?```/g, '').replace(/`([^`]+)`/g, '$1').trim().split('\n')[0].trim()
-    if (cmd) { step.command = cmd; stepAiIdx = -1; stepAiMsg.value = ''; useStatusStore().pushMessage('✅ 命令已生成', 'success') }
+    if (cmd) { step.command = cmd; stepAiIdx.value = -1; stepAiMsg.value = ''; useStatusStore().pushMessage('✅ 命令已生成', 'success') }
     else { stepAiMsg.value = '⚠️ AI 未返回有效命令' }
   } catch (e) { stepAiMsg.value = `❌ ${e}` }
 }

@@ -36,3 +36,71 @@ input, textarea {
 * {
   @include scrollbar;
 }
+
+// ══════════════════════════════════════════════════════════════
+// md-editor-v3 主题覆盖 — 对齐 JC9 暗色终端风格
+// ══════════════════════════════════════════════════════════════
+
+// 暗色模式下覆盖 md-editor-v3 的默认暗色变量
+[data-theme="dark"] {
+  --md-bk-color: var(--jc-bg-panel);
+  --md-bk-color-outmost: var(--jc-bg-app);
+  --md-bk-color-block: var(--jc-bg-input);
+  --md-bk-color-block-hover: var(--jc-bg-hover);
+  --md-border-color: var(--jc-border-default);
+  --md-border-color-hover: var(--jc-border-strong);
+  --md-input-bg-color: var(--jc-bg-input);
+  --md-input-border-color: var(--jc-border-default);
+  --md-color: var(--jc-text-primary);
+  --md-color-secondary: var(--jc-text-secondary);
+  --md-color-highlight: var(--jc-text-highlight);
+  --md-color-hover: var(--jc-color-accent);
+  --md-color-active: var(--jc-color-accent);
+  --md-header-color: var(--jc-text-highlight);
+
+  // 工具栏
+  --md-toolbar-bg-color: var(--jc-bg-panel);
+  --md-toolbar-item-hover-bg-color: var(--jc-bg-hover);
+  --md-toolbar-item-active-bg-color: var(--jc-bg-selected);
+
+  // 预览区
+  --md-preview-bg-color: var(--jc-bg-panel);
+  --md-preview-color: var(--jc-text-primary);
+  --md-preview-blockquote-bg-color: var(--jc-bg-input);
+  --md-preview-blockquote-border-color: var(--jc-color-accent);
+  --md-preview-table-border-color: var(--jc-border-default);
+  --md-preview-table-bg-color-hover: var(--jc-bg-hover);
+  --md-preview-code-bg-color: var(--jc-bg-input);
+  --md-preview-code-color: var(--jc-color-success);
+  --md-preview-header-color: var(--jc-text-highlight);
+}
+
+// 亮色模式
+[data-theme="light"] {
+  --md-bk-color: var(--jc-bg-panel);
+  --md-bk-color-outmost: var(--jc-bg-app);
+  --md-bk-color-block: var(--jc-bg-input);
+  --md-bk-color-block-hover: var(--jc-bg-hover);
+  --md-border-color: var(--jc-border-default);
+  --md-border-color-hover: var(--jc-border-strong);
+  --md-input-bg-color: var(--jc-bg-input);
+  --md-input-border-color: var(--jc-border-default);
+  --md-color: var(--jc-text-primary);
+  --md-color-secondary: var(--jc-text-secondary);
+  --md-color-highlight: var(--jc-text-highlight);
+  --md-color-hover: var(--jc-color-accent);
+  --md-color-active: var(--jc-color-accent);
+  --md-header-color: var(--jc-text-highlight);
+  --md-toolbar-bg-color: var(--jc-bg-panel);
+  --md-toolbar-item-hover-bg-color: var(--jc-bg-hover);
+  --md-toolbar-item-active-bg-color: var(--jc-bg-selected);
+  --md-preview-bg-color: var(--jc-bg-panel);
+  --md-preview-color: var(--jc-text-primary);
+  --md-preview-blockquote-bg-color: var(--jc-bg-input);
+  --md-preview-blockquote-border-color: var(--jc-color-accent);
+  --md-preview-table-border-color: var(--jc-border-default);
+  --md-preview-table-bg-color-hover: var(--jc-bg-hover);
+  --md-preview-code-bg-color: var(--jc-bg-input);
+  --md-preview-code-color: var(--jc-primary);
+  --md-preview-header-color: var(--jc-text-highlight);
+}
