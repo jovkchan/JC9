@@ -309,7 +309,7 @@ onUnmounted(() => {
       <template v-else-if="store.sidebarTab==='workflows'"><div class="empty">点击工作流以执行</div></template>
       <template v-else-if="store.sidebarTab==='tools'"><div class="empty">选择工具开始使用</div></template>
       <template v-else-if="store.sidebarTab==='notes'">
-        <NoteFeedView @open-settings="notesStore.showSettings = true" />
+        <NoteFeedView />
       </template>
     </div>
 

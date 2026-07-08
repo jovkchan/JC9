@@ -3,47 +3,59 @@ import { ref, computed, nextTick } from 'vue'
 import { useNotesStore } from '@/stores/notes'
 import { invoke } from '@tauri-apps/api/core'
 import type { Note } from '@/types/notes'
-import { marked } from 'marked'
 
 const store = useNotesStore()
 
 // 右键菜单状态
 const ctxMenu = ref({ show: false, x: 0, y: 0, noteId: '' })
 
-// 编辑器输入框状态
+// 快速发布
 const newContent = ref('')
 const newTitle = ref('')
 const showTitleInput = ref(false)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 
-// 正在编辑的卡片 ID
-const inlineEditingId = ref<string | null>(null)
-const inlineEditContent = ref('')
-const inlineEditTitle = ref('')
-
-// ── Markdown 渲染引擎配置 ──
-const customRenderer = new marked.Renderer()
-let checkboxIndex = 0
-
-// 自定义列表项渲染以注入 Task Checkbox 的索引
-customRenderer.listitem = function (item: any) {
-  let text = item.text
-  if (item.task) {
-    const checked = item.checked ? 'checked' : ''
-    // 允许点击但拦截默认行为，注入 data-idx 属性
-    text = text.replace(/^\[[ xX]\]\s*/, `<input type="checkbox" class="feed-task-checkbox" data-idx="${checkboxIndex++}" ${checked} /> `)
-    return `<li class="feed-task-list-item">${text}</li>`
-  }
-  return `<li>${text}</li>`
+// ── 纯文本摘要（去 Markdown 语法）──
+function plainExcerpt(content: string, maxLen = 120): string {
+  if (!content) return ''
+  // 去掉代码块
+  let text = content.replace(/```[\s\S]*?```/g, '')
+  // 去掉行内代码
+  text = text.replace(/`([^`]+)`/g, '$1')
+  // 去掉 Markdown 链接，保留文字
+  text = text.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+  // 去掉图片
+  text = text.replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+  // 去掉标题标记
+  text = text.replace(/^#{1,6}\s+/gm, '')
+  // 去掉加粗/斜体
+  text = text.replace(/(\*{1,3}|_{1,3})(.*?)\1/g, '$2')
+  // 去掉 ~~删除线~~
+  text = text.replace(/~~(.*?)~~/g, '$1')
+  // 去掉列表标记
+  text = text.replace(/^[\s]*[-*+]\s+/gm, '')
+  text = text.replace(/^[\s]*\d+\.\s+/gm, '')
+  // 去掉任务标记
+  text = text.replace(/\[[ xX]\]\s*/g, '')
+  // 去掉分隔线
+  text = text.replace(/^---+/gm, '')
+  text = text.replace(/^___+/gm, '')
+  // 去掉引用
+  text = text.replace(/^>\s+/gm, '')
+  // 去掉 ++== 等自定义语法
+  text = text.replace(/\+\+/g, '').replace(/==/g, '')
+  // 合并多余空白
+  text = text.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim()
+  if (text.length <= maxLen) return text
+  return text.slice(0, maxLen) + '…'
 }
 
-function renderMarkdown(content: string) {
-  checkboxIndex = 0
-  const opt = { renderer: customRenderer, gfm: true, breaks: true }
-  let html = marked.parse(content, opt) as string
-  // 匹配 #标签 渲染为可点击超链接，避免在 <code> 标签中匹配
-  html = html.replace(/(^|\s)#([^\s#<>]+)/g, '$1<span class="feed-tag-link" data-tag="$2">#$2</span>')
-  return html
+// ── 从内容中取首行作为默认标题 ──
+function autoTitle(content: string): string {
+  if (!content) return ''
+  const line = content.split('\n').find(l => l.trim()) || ''
+  // 去掉 Markdown 标题标记
+  return line.replace(/^#+\s*/, '').trim()
 }
 
 // ── 时间格式化 ──
@@ -59,13 +71,13 @@ function formatTime(isoString: string) {
   return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
-// ── 提交新的备忘 ──
+// ── 快速发布 ──
 async function submitMemo() {
   const contentVal = newContent.value.trim()
   if (!contentVal) return
-  
+
   await store.createNote({
-    title: showTitleInput.value ? newTitle.value.trim() : '',
+    title: showTitleInput.value ? newTitle.value.trim() : autoTitle(contentVal),
     content: contentVal,
     format: 'markdown',
     tags: [],
@@ -86,7 +98,6 @@ function insertMarkup(prefix: string, suffix: string = '') {
   const end = el.selectionEnd
   const text = newContent.value
   const selected = text.substring(start, end)
-  
   newContent.value = text.substring(0, start) + prefix + selected + suffix + text.substring(end)
   nextTick(() => {
     el.focus()
@@ -100,13 +111,6 @@ function handleKeydown(e: KeyboardEvent) {
     e.preventDefault()
     submitMemo()
   }
-}
-
-// ── 原地编辑 ──
-function startInlineEdit(note: Note) {
-  inlineEditingId.value = note.id
-  inlineEditContent.value = note.content
-  inlineEditTitle.value = note.title
 }
 
 // ── 右键菜单 ──
@@ -126,63 +130,13 @@ async function moveNoteToGroup(groupId: string | null) {
   } catch (e) { console.error(e) }
 }
 
-function cancelInlineEdit() {
-  inlineEditingId.value = null
+// ── 点击卡片 → 打开 NoteEditor ──
+function openNote(note: Note) {
+  store.selectedNoteId = note.id
+  store.openNoteTab(note.id)
 }
 
-async function saveInlineEdit(note: Note) {
-  const updatedNote = {
-    ...note,
-    title: inlineEditTitle.value,
-    content: inlineEditContent.value,
-    updatedAt: new Date().toISOString()
-  }
-  await store.saveNote(updatedNote)
-  inlineEditingId.value = null
-}
-
-// ── 任务列表勾选与标签点击事件委托 ──
-async function handleCardInteraction(e: MouseEvent, note: Note) {
-  const target = e.target as HTMLElement
-  
-  // 1. 处理待办任务点击
-  if (target && target.classList.contains('feed-task-checkbox')) {
-    e.preventDefault()
-    e.stopPropagation()
-    const idx = parseInt(target.getAttribute('data-idx') || '0', 10)
-    
-    let count = 0
-    const updatedContent = note.content.replace(/([-*]\s+\[)([ xX])(\])/g, (match, prefix, status, suffix) => {
-      if (count === idx) {
-        const newStatus = status === ' ' ? 'x' : ' '
-        count++
-        return `${prefix}${newStatus}${suffix}`
-      }
-      count++
-      return match
-    })
-
-    const updatedNote = {
-      ...note,
-      content: updatedContent,
-      updatedAt: new Date().toISOString()
-    }
-    await store.saveNote(updatedNote)
-  }
-  
-  // 2. 处理标签点击过滤
-  if (target && target.classList.contains('feed-tag-link')) {
-    e.preventDefault()
-    e.stopPropagation()
-    const tag = target.getAttribute('data-tag')
-    if (tag) {
-      store.listTab = 'tags'
-      store.selectedTag = tag
-    }
-  }
-}
-
-// 清除当前所有的过滤状态
+// ── 清除所有过滤状态 ──
 function clearFilters() {
   store.selectedTag = null
   store.filterDate = null
@@ -252,82 +206,35 @@ const activeFilterSummary = computed(() => {
         :key="note.id"
         class="memo-card"
         :class="{pinned: note.isPinned}"
-        @click="handleCardInteraction($event, note)"
+        @click="openNote(note)"
         @contextmenu.stop.prevent="showCtxMenu($event, note.id)"
       >
-        <!-- 原地编辑状态 -->
-        <div v-if="inlineEditingId === note.id" class="card-edit-mode" @click.stop>
-          <input v-model="inlineEditTitle" placeholder="标题..." class="card-edit-title" />
-          <textarea v-model="inlineEditContent" class="card-edit-textarea"></textarea>
-          <div class="card-edit-actions">
-            <button class="edit-btn-cancel" @click="cancelInlineEdit">取消</button>
-            <button class="edit-btn-save" @click="saveInlineEdit(note)">保存</button>
+        <!-- 卡片头部 -->
+        <div class="card-header">
+          <div class="card-info">
+            <span class="card-title-text">{{ note.title || autoTitle(note.content) || '备忘' }}</span>
+            <span class="card-time">{{ formatTime(note.updatedAt || note.createdAt) }}</span>
+          </div>
+          <div class="card-actions">
+            <button class="act-btn pin" :class="{on: note.isPinned}" @click.stop="store.togglePin(note.id)" title="置顶">★</button>
+            <button class="act-btn" @click.stop="store.copyContent(note.id)" title="复制正文">📋</button>
+            <button class="act-btn delete" @click.stop="store.removeNote(note.id)" title="删除">✕</button>
           </div>
         </div>
 
-        <!-- 普通阅读态 -->
-        <div v-else class="card-read-mode">
-          <!-- 卡片头部信息 -->
-          <div class="card-header">
-            <div class="card-info">
-              <span class="card-title-text">{{ note.title || '备忘' }}</span>
-              <span class="card-time">{{ formatTime(note.updatedAt || note.createdAt) }}</span>
-            </div>
-            <!-- 卡片右侧动作 -->
-            <div class="card-actions">
-              <button
-                class="act-btn pin"
-                :class="{on: note.isPinned}"
-                @click.stop="store.togglePin(note.id)"
-                :title="note.isPinned ? '取消置顶' : '置顶'"
-              >
-                ★
-              </button>
-              <button
-                class="act-btn"
-                @click.stop="store.toggleArchive(note.id)"
-                :title="note.isArchived ? '取消归档' : '归档'"
-              >
-                📦
-              </button>
-              <button
-                class="act-btn"
-                @click.stop="startInlineEdit(note)"
-                title="编辑"
-              >
-                ✏️
-              </button>
-              <button
-                class="act-btn"
-                @click.stop="store.copyContent(note.id)"
-                title="复制正文"
-              >
-                📋
-              </button>
-              <button
-                class="act-btn delete"
-                @click.stop="store.removeNote(note.id)"
-                title="删除"
-              >
-                ✕
-              </button>
-            </div>
-          </div>
+        <!-- 纯文本摘要（无样式） -->
+        <div class="card-excerpt">{{ plainExcerpt(note.content) }}</div>
 
-          <!-- 卡片内容区 -->
-          <div class="card-body markdown-body" v-html="renderMarkdown(note.content)"></div>
-
-          <!-- 卡片底部标签 -->
-          <div class="card-footer" v-if="note.tags && note.tags.length > 0">
-            <span
-              v-for="tag in note.tags"
-              :key="tag"
-              class="feed-tag-badge"
-              @click.stop="store.listTab = 'tags'; store.selectedTag = tag"
-            >
-              #{{ tag }}
-            </span>
-          </div>
+        <!-- 标签（卡片主体视觉） -->
+        <div class="card-tags" v-if="note.tags && note.tags.length > 0">
+          <span
+            v-for="tag in note.tags"
+            :key="tag"
+            class="tag-badge"
+            @click.stop="store.listTab = 'tags'; store.selectedTag = tag"
+          >
+            #{{ tag }}
+          </span>
         </div>
       </div>
     </div>
@@ -578,22 +485,26 @@ const activeFilterSummary = computed(() => {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .card-info {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 
   .card-title-text {
     font-size: 13px;
     font-weight: 600;
     color: var(--jc-text-highlight);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .card-time {
-    font-size: 11px;
+    font-size: 10px;
     color: var(--jc-text-secondary);
   }
 }
@@ -601,6 +512,7 @@ const activeFilterSummary = computed(() => {
 .card-actions {
   display: flex;
   gap: 2px;
+  flex-shrink: 0;
   opacity: 0;
   transition: opacity 0.2s;
 
@@ -633,179 +545,45 @@ const activeFilterSummary = computed(() => {
 
   &.delete:hover {
     color: var(--jc-color-error);
-    background: rgba(var(--jc-color-error-rgb, 220, 38, 38), 0.1);
+    background: rgba(220, 38, 38, 0.1);
   }
 }
 
-// 卡片编辑模式
-.card-edit-mode {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-
-  .card-edit-title {
-    background: var(--jc-bg-input);
-    border: 1px solid var(--jc-border-default);
-    color: var(--jc-text-primary);
-    font-size: 12px;
-    font-weight: 600;
-    padding: 4px 8px;
-    border-radius: 4px;
-    outline: none;
-    &:focus {
-      border-color: var(--jc-color-accent);
-    }
-  }
-
-  .card-edit-textarea {
-    background: var(--jc-bg-input);
-    border: 1px solid var(--jc-border-default);
-    color: var(--jc-text-primary);
-    font-size: 13px;
-    line-height: 1.6;
-    padding: 8px;
-    min-height: 80px;
-    border-radius: 4px;
-    resize: vertical;
-    outline: none;
-    font-family: inherit;
-    &:focus {
-      border-color: var(--jc-color-accent);
-    }
-  }
-
-  .card-edit-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 6px;
-  }
-
-  .edit-btn-cancel {
-    background: var(--jc-bg-btn);
-    color: var(--jc-text-secondary);
-    border: none;
-    padding: 4px 10px;
-    border-radius: 4px;
-    font-size: 11px;
-    cursor: pointer;
-    &:hover {
-      color: var(--jc-text-primary);
-    }
-  }
-
-  .edit-btn-save {
-    background: var(--jc-color-accent);
-    color: #fff;
-    border: none;
-    padding: 4px 10px;
-    border-radius: 4px;
-    font-size: 11px;
-    font-weight: 600;
-    cursor: pointer;
-    &:hover {
-      opacity: 0.9;
-    }
-  }
-}
-
-// 卡片内容样式渲染与 Markdown 排版
-.card-body.markdown-body {
-  font-size: 13px;
-  color: var(--jc-text-primary);
-  line-height: 1.6;
+// 纯文本摘要
+.card-excerpt {
+  font-size: 12px;
+  color: var(--jc-text-secondary);
+  line-height: 1.5;
+  margin-bottom: 8px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
   word-break: break-word;
-
-  p {
-    margin: 4px 0;
-  }
-
-  ul, ol {
-    padding-left: 20px;
-    margin: 4px 0;
-  }
-
-  code {
-    background: var(--jc-bg-btn);
-    color: var(--jc-color-accent);
-    font-family: 'Cascadia Code', Consolas, monospace;
-    font-size: 11px;
-    padding: 2px 4px;
-    border-radius: 3px;
-  }
-
-  pre {
-    background: var(--jc-bg-input);
-    border: 1px solid var(--jc-border-default);
-    padding: 10px;
-    border-radius: 6px;
-    overflow-x: auto;
-    margin: 8px 0;
-
-    code {
-      background: transparent;
-      color: inherit;
-      padding: 0;
-    }
-  }
-
-  // 任务列表样式
-  .feed-task-list-item {
-    list-style-type: none;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-left: -16px;
-  }
-
-  .feed-task-checkbox {
-    width: 14px;
-    height: 14px;
-    cursor: pointer;
-    accent-color: var(--jc-color-accent);
-  }
-
-  // 行内标签可点击样式
-  .feed-tag-link {
-    color: var(--jc-color-accent);
-    font-weight: 500;
-    cursor: pointer;
-    text-decoration: none;
-    padding: 0 2px;
-    border-radius: 3px;
-    &:hover {
-      background: rgba(var(--jc-color-accent-rgb, 0, 102, 204), 0.1);
-      text-decoration: underline;
-    }
-  }
 }
 
-// 底部标签 Badge
-.card-footer {
+// 标签区（卡片主要视觉）
+.card-tags {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  margin-top: 10px;
-  border-top: 1px dashed var(--jc-border-default);
-  padding-top: 8px;
 }
 
-.feed-tag-badge {
-  font-size: 10px;
-  background: var(--jc-bg-btn);
-  color: var(--jc-text-secondary);
-  padding: 2px 6px;
-  border-radius: 4px;
+.tag-badge {
+  display: inline-block;
+  font-size: 11px;
+  color: var(--jc-color-accent);
+  background: color-mix(in srgb, var(--jc-color-accent) 12%, transparent);
+  padding: 2px 8px;
+  border-radius: 10px;
   cursor: pointer;
-  font-weight: 500;
-  transition: color 0.15s, background 0.15s;
+  transition: background 0.15s;
 
   &:hover {
-    color: var(--jc-color-accent);
-    background: var(--jc-bg-selected);
+    background: color-mix(in srgb, var(--jc-color-accent) 25%, transparent);
   }
 }
 
-// 右键菜单
 .ctx-overlay {
   position: fixed; inset: 0; z-index: 10000;
 }

@@ -63,6 +63,7 @@ const editor = useEditor({
       heading: { levels: [1, 2, 3, 4, 5, 6] },
       codeBlock: false,
       link: false,
+      underline: false, // StarterKit 自带 underline，禁用后使用独立扩展
     }),
     Markdown.configure({
       html: true,
