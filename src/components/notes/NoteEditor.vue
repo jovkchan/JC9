@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, onBeforeUnmount } from 'vue'
 import { useNotesStore } from '@/stores/notes'
-import { useProjectStore } from '@/stores/project'
 import { useExecInTerminal } from '@/composables/useExecInTerminal'
 import type { Note } from '@/types/notes'
 import { useEditor, EditorContent } from '@tiptap/vue-3'
@@ -24,7 +23,6 @@ import { common, createLowlight } from 'lowlight'
 const lowlight = createLowlight(common)
 
 const store = useNotesStore()
-const projectStore = useProjectStore()
 
 const { ctxShow, ctxStyle, runningTerminals, openCtx, closeCtx, execInTerminal, createAndExec } = useExecInTerminal()
 
@@ -78,11 +76,7 @@ const editor = useEditor({
       link: false,
       underline: false, // StarterKit 自带 underline，禁用后使用独立扩展
     }),
-    Markdown.configure({
-      html: true,
-      link: true,
-      tightLists: false,
-    }),
+    Markdown,
     Underline,
     Highlight.configure({ multicolor: true }),
     Link.configure({
@@ -120,10 +114,7 @@ const editor = useEditor({
   },
 })
 
-// Expose getMarkdown for parent to use
-function getMarkdown(): string {
-  return editor.value?.getMarkdown() ?? title.value
-}
+
 
 // ── Toolbar helpers ──
 function execCmd(cmd: string, value?: string) {
@@ -219,6 +210,11 @@ function handleKeydown(e: KeyboardEvent) {
     doSave()
   }
 }
+
+// ── 右键菜单：剪切/复制/粘贴 ──
+function doCut() { closeCtx(); document.execCommand('cut') }
+function doCopy() { closeCtx(); document.execCommand('copy') }
+function doPaste() { closeCtx(); editor.value?.chain().focus().run(); document.execCommand('paste') }
 
 watch([title, tagInput], () => scheduleSave())
 
@@ -318,9 +314,9 @@ onBeforeUnmount(() => {
         <div class="ctx-item" @click="execCmd('undo')" title="撤销"><span class="ctx-icon">↩</span> 撤销</div>
         <div class="ctx-item" @click="execCmd('redo')" title="重做"><span class="ctx-icon">↪</span> 重做</div>
         <div class="ctx-divider"></div>
-        <div class="ctx-item" @click="document.execCommand('cut')"><span class="ctx-icon">✂</span> 剪切</div>
-        <div class="ctx-item" @click="document.execCommand('copy')"><span class="ctx-icon">📋</span> 复制</div>
-        <div class="ctx-item" @click="document.execCommand('paste')"><span class="ctx-icon">📌</span> 粘贴</div>
+        <div class="ctx-item" @click="doCut"><span class="ctx-icon">✂</span> 剪切</div>
+        <div class="ctx-item" @click="doCopy"><span class="ctx-icon">📋</span> 复制</div>
+        <div class="ctx-item" @click="doPaste"><span class="ctx-icon">📌</span> 粘贴</div>
         <div class="ctx-divider"></div>
         <div class="ctx-title">发送到终端</div>
         <div

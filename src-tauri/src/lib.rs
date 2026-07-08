@@ -262,6 +262,13 @@ async fn run_workflow(app: tauri::AppHandle, tab_id: String, steps: Vec<database
         cmd.env("COLUMNS", "100");   // 限制终端宽度避免 vite 按超宽列渲染
         cmd.env("FORCE_COLOR", "1");  // 保留 ANSI 颜色
 
+        // Windows 下隐藏 CMD 窗口（仅后台执行，输出走 PTY 管道）
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        }
+
         let mut child = cmd.spawn()
             .map_err(|e| format!("步骤 {} 启动失败: {}", step_num, e))?;
 

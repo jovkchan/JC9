@@ -370,29 +370,30 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   // ── 发送命令到终端 ──
-  async function sendToTerminal(text: string, targetProcessId?: string) {
-    let pid = targetProcessId
+  async function sendToTerminal(text: string, targetProcessId?: string | null) {
+    // 确定目标终端
+    let resolvedPid = targetProcessId || undefined
 
-    if (!pid) {
-      // 没有指定终端 → 取最后一个活跃的
+    if (!resolvedPid) {
       const tabs = getRunningTerminals()
       if (tabs.length === 0) {
-        pid = await startQuickTerminal()
-        if (!pid) { useStatusStore().pushMessage('无法创建终端', 'error'); return }
+        const newPid = await startQuickTerminal()
+        if (!newPid) { useStatusStore().pushMessage('无法创建终端', 'error'); return }
+        resolvedPid = newPid
       } else {
-        pid = tabs[tabs.length - 1].processId
+        resolvedPid = tabs[tabs.length - 1].processId
       }
     }
 
     // 切换到终端 tab
-    const idx = runningTabs.value.findIndex(t => cmdKey(t.projectId, t.commandId) === pid)
+    const idx = runningTabs.value.findIndex(t => cmdKey(t.projectId, t.commandId) === resolvedPid)
     if (idx >= 0) { activeTabIndex.value = idx; activeTabType.value = 'term' }
 
     // 发送命令
     try {
       const encoded = text + '\r\n'
       await invoke('pty_write', {
-        processId: pid,
+        processId: resolvedPid,
         data: Array.from(new TextEncoder().encode(encoded)),
       })
       useStatusStore().pushMessage(`已发送到终端`, 'success')
