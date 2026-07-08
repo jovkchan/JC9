@@ -93,11 +93,12 @@ const editor = useEditor({
     attributes: {
       class: 'jc9-tiptap-editor',
     },
-    clipboardTextSerializer: () => {
-      // 复制时序列化为 Markdown（包括表格、下划线等）
+    clipboardTextSerializer: (slice) => {
+      // 只序列化选中的部分，而非整篇文档
       try {
-        const md = editor.value?.getMarkdown()
-        return md || ''
+        const json = slice.toJSON()
+        const md = editor.value?.markdown?.serialize(json) ?? ''
+        return md
       } catch { return '' }
     },
   },
