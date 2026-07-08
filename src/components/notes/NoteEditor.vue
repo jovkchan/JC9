@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, watch, onBeforeUnmount } from 'vue'
 import { useNotesStore } from '@/stores/notes'
+import { useProjectStore } from '@/stores/project'
+import { useExecInTerminal } from '@/composables/useExecInTerminal'
 import type { Note } from '@/types/notes'
 import { useEditor, EditorContent } from '@tiptap/vue-3'
 import { Markdown } from '@tiptap/markdown'
@@ -22,6 +24,17 @@ import { common, createLowlight } from 'lowlight'
 const lowlight = createLowlight(common)
 
 const store = useNotesStore()
+const projectStore = useProjectStore()
+
+const { ctxShow, ctxStyle, runningTerminals, openCtx, closeCtx, execInTerminal, createAndExec } = useExecInTerminal()
+
+function handleEditorContextMenu(e: MouseEvent) {
+  const sel = editor.value?.state.selection
+  if (!sel || sel.empty) return
+  const text = editor.value?.state.doc.textBetween(sel.from, sel.to)
+  if (!text || !text.trim()) return
+  openCtx(e, text.trim())
+}
 
 const props = defineProps<{
   existingNote?: Note | null
@@ -284,7 +297,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- TipTap WYSIWYG content area -->
-    <div class="tiptap-wrapper">
+    <div class="tiptap-wrapper" @contextmenu="handleEditorContextMenu">
       <EditorContent :editor="editor" />
     </div>
 
@@ -297,6 +310,35 @@ onBeforeUnmount(() => {
       <span class="char-count">{{ editor?.getText().length ?? 0 }} 字</span>
     </div>
   </div>
+
+  <!-- 右键菜单 -->
+  <Teleport to="body">
+    <div v-if="ctxShow" class="ctx-overlay" @click="closeCtx" @contextmenu.prevent="closeCtx">
+      <div class="ctx-menu" :style="ctxStyle" @click.stop>
+        <div class="ctx-item" @click="execCmd('undo')" title="撤销"><span class="ctx-icon">↩</span> 撤销</div>
+        <div class="ctx-item" @click="execCmd('redo')" title="重做"><span class="ctx-icon">↪</span> 重做</div>
+        <div class="ctx-divider"></div>
+        <div class="ctx-item" @click="document.execCommand('cut')"><span class="ctx-icon">✂</span> 剪切</div>
+        <div class="ctx-item" @click="document.execCommand('copy')"><span class="ctx-icon">📋</span> 复制</div>
+        <div class="ctx-item" @click="document.execCommand('paste')"><span class="ctx-icon">📌</span> 粘贴</div>
+        <div class="ctx-divider"></div>
+        <div class="ctx-title">发送到终端</div>
+        <div
+          v-for="t in runningTerminals"
+          :key="t.processId"
+          class="ctx-item"
+          @click="execInTerminal(t.processId)"
+        >
+          <span class="ctx-icon">▸</span>
+          {{ t.name }}
+        </div>
+        <div class="ctx-item" @click="createAndExec">
+          <span class="ctx-icon plus">＋</span>
+          新建终端
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped lang="scss">
@@ -654,5 +696,52 @@ onBeforeUnmount(() => {
   font-size: 10px;
   color: var(--jc-text-secondary);
   white-space: nowrap;
+}
+
+// 右键菜单
+.ctx-overlay {
+  position: fixed; inset: 0; z-index: 10000;
+}
+.ctx-menu {
+  position: fixed;
+  background: var(--jc-bg-elevated);
+  border: 1px solid var(--jc-border-default);
+  border-radius: 6px;
+  padding: 4px 0;
+  min-width: 160px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.3);
+}
+.ctx-title {
+  padding: 4px 12px;
+  font-size: 10px;
+  color: var(--jc-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--jc-border-default);
+  margin-bottom: 2px;
+}
+.ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--jc-text-primary);
+  white-space: nowrap;
+  &:hover {
+    background: var(--jc-bg-selected);
+    color: var(--jc-color-accent);
+  }
+}
+.ctx-divider {
+  height: 1px;
+  background: var(--jc-border-default);
+  margin: 2px 8px;
+}
+.ctx-icon {
+  color: var(--jc-color-success);
+  font-weight: bold;
+  &.plus { color: var(--jc-color-accent); }
 }
 </style>

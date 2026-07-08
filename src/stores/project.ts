@@ -349,5 +349,57 @@ export const useProjectStore = defineStore('project', () => {
   }
   function destroyListeners() { _unlistenExit?.(); _unlistenPty?.() }
 
-  return { projects, selectedProjectId, runningMap, outputMap, logStatsMap, runningTabs, docTabs, toolTabs, activeTabIndex, activeDocIndex, activeToolIndex, activeTabType, workflows, pendingInput, frequentWorkflows, favWorkflows, recentTools, clearTermSignal, sidebarTab, mainMode, workflowRunning, workflowProgress, loadProjects, saveProjects, addProject, removeProject, updateProjectName, addCommand, removeCommand, updateCommand, startCommand, stopCommand, restartCommand, closeTab, closeDocTab, openDoc, openDocFromText, clearOutput, clearLogStats, getOutput, initListeners, destroyListeners, cmdKey, detectProject, bufferPtyOutput, loadWorkflows, addWorkflow, removeWorkflow, updateWorkflow, toggleWfFav, runWorkflow, startDefaultTerminal, openTool, closeToolTab }
+  // ── 快速启动一个空 shell 终端 ──
+  let _quickTerminalSeq = 0
+  async function startQuickTerminal(): Promise<string | null> {
+    const name = `快速终端 ${++_quickTerminalSeq}`
+    // 用第一个项目，没有则创建一个
+    if (projects.value.length === 0) addProject('默认终端')
+    const p = projects.value[0]
+    const cmd: Command = { id: crypto.randomUUID(), name, command: '', workingDir: '' }
+    p.commands.push(cmd)
+    await startCommand(p.id, cmd)
+    return cmdKey(p.id, cmd.id)
+  }
+
+  /** 获取所有运行中终端的列表（用于选择发送目标） */
+  function getRunningTerminals(): { processId: string; name: string }[] {
+    return runningTabs.value
+      .filter(t => runningMap.value[cmdKey(t.projectId, t.commandId)] === 'running')
+      .map(t => ({ processId: cmdKey(t.projectId, t.commandId), name: t.commandName || t.command || '终端' }))
+  }
+
+  // ── 发送命令到终端 ──
+  async function sendToTerminal(text: string, targetProcessId?: string) {
+    let pid = targetProcessId
+
+    if (!pid) {
+      // 没有指定终端 → 取最后一个活跃的
+      const tabs = getRunningTerminals()
+      if (tabs.length === 0) {
+        pid = await startQuickTerminal()
+        if (!pid) { useStatusStore().pushMessage('无法创建终端', 'error'); return }
+      } else {
+        pid = tabs[tabs.length - 1].processId
+      }
+    }
+
+    // 切换到终端 tab
+    const idx = runningTabs.value.findIndex(t => cmdKey(t.projectId, t.commandId) === pid)
+    if (idx >= 0) { activeTabIndex.value = idx; activeTabType.value = 'term' }
+
+    // 发送命令
+    try {
+      const encoded = text + '\r\n'
+      await invoke('pty_write', {
+        processId: pid,
+        data: Array.from(new TextEncoder().encode(encoded)),
+      })
+      useStatusStore().pushMessage(`已发送到终端`, 'success')
+    } catch (e) {
+      useStatusStore().pushMessage(`发送到终端失败: ${e}`, 'error')
+    }
+  }
+
+  return { projects, selectedProjectId, runningMap, outputMap, logStatsMap, runningTabs, docTabs, toolTabs, activeTabIndex, activeDocIndex, activeToolIndex, activeTabType, workflows, pendingInput, frequentWorkflows, favWorkflows, recentTools, clearTermSignal, sidebarTab, mainMode, workflowRunning, workflowProgress, loadProjects, saveProjects, addProject, removeProject, updateProjectName, addCommand, removeCommand, updateCommand, startCommand, stopCommand, restartCommand, closeTab, closeDocTab, openDoc, openDocFromText, clearOutput, clearLogStats, getOutput, initListeners, destroyListeners, cmdKey, detectProject, bufferPtyOutput, loadWorkflows, addWorkflow, removeWorkflow, updateWorkflow, toggleWfFav, runWorkflow, startDefaultTerminal, openTool, closeToolTab, sendToTerminal, getRunningTerminals, startQuickTerminal }
 })
