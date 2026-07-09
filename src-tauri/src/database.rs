@@ -153,7 +153,8 @@ impl Database {
                 id TEXT PRIMARY KEY,
                 source_id TEXT NOT NULL,
                 content TEXT NOT NULL,
-                embedding BLOB NOT NULL
+                embedding BLOB NOT NULL,
+                vec_rowid INTEGER
             );
             CREATE TABLE IF NOT EXISTS react_checkpoints (
                 id TEXT PRIMARY KEY,
@@ -187,8 +188,22 @@ impl Database {
             );
             CREATE INDEX IF NOT EXISTS idx_tracing_events_session ON tracing_events(session_id, created_at);
             CREATE INDEX IF NOT EXISTS idx_tracing_events_type ON tracing_events(event_type, created_at);
+            -- FTS5 全文索引：内容同步表，自动跟随 knowledge 表更新
+            CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(title, content, tags, content=knowledge, content_rowid=rowid);
+            -- FTS5 触发器：保持 knowledge 和 knowledge_fts 同步
+            CREATE TRIGGER IF NOT EXISTS knowledge_ai AFTER INSERT ON knowledge BEGIN
+                INSERT INTO knowledge_fts(rowid, title, content, tags) VALUES (new.rowid, new.title, new.content, new.tags);
+            END;
+            CREATE TRIGGER IF NOT EXISTS knowledge_ad AFTER DELETE ON knowledge BEGIN
+                INSERT INTO knowledge_fts(knowledge_fts, rowid, title, content, tags) VALUES('delete', old.rowid, old.title, old.content, old.tags);
+            END;
+            CREATE TRIGGER IF NOT EXISTS knowledge_au AFTER UPDATE ON knowledge BEGIN
+                INSERT INTO knowledge_fts(knowledge_fts, rowid, title, content, tags) VALUES('delete', old.rowid, old.title, old.content, old.tags);
+                INSERT INTO knowledge_fts(rowid, title, content, tags) VALUES (new.rowid, new.title, new.content, new.tags);
+            END;
         ").map_err(|e| format!("create tables: {e}"))?;
         let _ = conn.execute("ALTER TABLE notes ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0", []);
+        let _ = conn.execute("ALTER TABLE embeddings ADD COLUMN vec_rowid INTEGER", []);
         Ok(())
     }
 
@@ -487,6 +502,33 @@ impl Database {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let count: i32 = conn.query_row("SELECT COUNT(*) FROM notes WHERE user_id = 'local' AND is_deleted = 0", [], |row| row.get(0)).map_err(|e| e.to_string())?;
         Ok(count)
+    }
+
+    /// 数据库诊断统计（knowledge / embeddings / vec_embeddings / fts 行数）
+    #[allow(dead_code)]
+    pub fn get_database_stats(&self) -> Result<serde_json::Value, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let count_table = |table: &str| -> i64 {
+            conn.query_row(&format!("SELECT COUNT(*) FROM {}", table), [], |r| r.get(0)).unwrap_or(-1)
+        };
+        let note_count: i64 = conn.query_row("SELECT COUNT(*) FROM notes WHERE is_deleted=0", [], |r| r.get(0)).unwrap_or(0);
+        Ok(serde_json::json!({
+            "knowledge": count_table("knowledge"),
+            "embeddings": count_table("embeddings"),
+            "vec_embeddings": count_table("vec_embeddings"),
+            "knowledge_fts": count_table("knowledge_fts"),
+            "notes": note_count
+        }))
+    }
+
+    /// 重建 FTS5 索引（knowledge_fts 内容同步表的初始化/修复）
+    #[allow(dead_code)]
+    pub fn rebuild_knowledge_fts(&self) -> Result<usize, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let affected: usize = conn.execute(
+            "INSERT INTO knowledge_fts(knowledge_fts) VALUES('rebuild')", []
+        ).map_err(|e| format!("FTS5 rebuild failed: {}", e))?;
+        Ok(affected)
     }
 
     // ── Checkpoint 持久化 ──

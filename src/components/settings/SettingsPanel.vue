@@ -17,6 +17,9 @@ onMounted(async () => {
       if (typeof v === 'string' && v) localStorage.setItem(k, v)
     }
   } catch { /* JSON 不存在或读取失败，忽略 */ }
+  // 加载 MCP Server 配置
+  await loadMcpServerConfig()
+  await loadMcpServerStatus()
 })
 
 const win = getCurrentWindow()
@@ -228,6 +231,103 @@ async function disconnectAllMcp() {
   for (const srv of aiStore.mcpServers) await aiStore.disconnectMcpServer(srv.name)
   await aiStore.loadMcpServers()
   status.pushMessage('已断开所有 MCP 服务器', 'success')
+}
+
+// ── JC9 内置 MCP Server ──
+const mcpServerRunning = ref(false)
+const mcpServerEnabled = ref(false)
+const mcpServerKey = ref('')
+const mcpServerUrl = ref('')
+const showMcpKey = ref(false)
+const mcpPortInput = ref('19799')
+const mcpServerMsg = ref('')
+const mcpLoading = ref(false)
+
+
+
+async function loadMcpServerStatus() {
+  try {
+    const status = await invoke<{ running: boolean; enabled: boolean; port: number; host: string }>('ai_get_mcp_server_status')
+    mcpServerRunning.value = status.running
+    mcpServerEnabled.value = status.enabled
+    mcpPortInput.value = status.port.toString()
+    mcpServerUrl.value = `http://${status.host}:${status.port}`
+  } catch { /* ignore */ }
+}
+
+interface McpServerConfigType {
+  enabled: boolean; port: number; apiKey: string; host: string; groupIds: string[]
+}
+
+const mcpSelectedGroups = ref<string[]>([])
+const mcpNoteGroups = ref<Array<{ id: string; name: string }>>([])
+
+function toggleMcpGroup(gid: string) {
+  const idx = mcpSelectedGroups.value.indexOf(gid)
+  if (idx >= 0) mcpSelectedGroups.value.splice(idx, 1)
+  else mcpSelectedGroups.value.push(gid)
+}
+
+async function loadMcpServerConfig() {
+  try {
+    const config = await invoke<McpServerConfigType>('ai_get_mcp_server_config')
+    mcpServerKey.value = config.apiKey
+    mcpPortInput.value = config.port.toString()
+    mcpServerUrl.value = `http://${config.host}:${config.port}`
+    mcpServerEnabled.value = config.enabled
+    mcpSelectedGroups.value = config.groupIds || []
+  } catch { /* ignore */ }
+  try {
+    mcpNoteGroups.value = await invoke<Array<{ id: string; name: string }>>('get_note_groups')
+  } catch { /* ignore */ }
+}
+
+async function startMcpServer() {
+  mcpLoading.value = true; mcpServerMsg.value = ''
+  try {
+    const config = await invoke<McpServerConfigType>('ai_get_mcp_server_config')
+    config.enabled = true
+    config.port = parseInt(mcpPortInput.value) || 19799
+    config.groupIds = mcpSelectedGroups.value
+    const resultMsg = await invoke<string>('ai_set_mcp_server_config', { config })
+    await loadMcpServerStatus()
+    await loadMcpServerConfig()
+    mcpServerMsg.value = resultMsg
+  } catch (e) { mcpServerMsg.value = `❌ ${e}` }
+  finally { mcpLoading.value = false }
+}
+
+async function stopMcpServer() {
+  mcpLoading.value = true; mcpServerMsg.value = ''
+  try {
+    const msg = await invoke<string>('ai_stop_mcp_server')
+    await loadMcpServerStatus()
+    mcpServerMsg.value = msg
+  } catch (e) { mcpServerMsg.value = `❌ ${e}` }
+  finally { mcpLoading.value = false }
+}
+
+async function regenerateMcpKey() {
+  mcpLoading.value = true; mcpServerMsg.value = ''
+  try {
+    const newKey = crypto.randomUUID()
+    const config = await invoke<McpServerConfigType>('ai_get_mcp_server_config')
+    config.apiKey = newKey
+    await invoke<string>('ai_set_mcp_server_config', { config })
+    await loadMcpServerConfig()
+    mcpServerMsg.value = '✅ Key 已重新生成'
+  } catch (e) { mcpServerMsg.value = `❌ ${e}` }
+  finally { mcpLoading.value = false }
+}
+
+function copyMcpUrl() {
+  navigator.clipboard.writeText(mcpServerUrl.value + '/sse')
+  status.pushMessage('MCP Server 地址已复制', 'success')
+}
+
+function copyMcpKeyToClipboard() {
+  navigator.clipboard.writeText(mcpServerKey.value)
+  status.pushMessage('API Key 已复制', 'success')
 }
 
 // ── Skills ──
@@ -566,7 +666,82 @@ onMounted(() => {
         <!-- MCP -->
         <div v-if="activeTab === 'mcp'" class="settings-pane">
           <h3 class="pane-title">MCP 服务器管理</h3>
-          <p class="pane-desc" style="margin-bottom:12px">连接外部 MCP 服务器，通过自定义工具扩展 AI Agent 能力。</p>
+          <p class="pane-desc" style="margin-bottom:12px">管理 JC9 内置 MCP Server 和连接的外部 MCP 服务器。</p>
+
+          <!-- JC9 内置 MCP Server -->
+          <div class="builtin-mcp-section">
+            <h4 style="font-size:12px;font-weight:600;color:var(--jc-text-highlight);margin:0 0 6px">🧠 JC9 MCP Server</h4>
+            <p class="pane-desc" style="margin-bottom:6px">让其他 AI Agent（如 Cline、Copilot）通过 MCP 协议连接 JC9，<br/>搜索/创建/更新笔记（基于 sqlite-vec 向量语义搜索）。启动后在目标 Agent 中配置：</p>
+            <div class="mcp-server-config-card">
+              <div class="mcp-config-row">
+                <span class="mcp-config-label">状态</span>
+                <span :class="['mcp-status-badge', { running: mcpServerRunning }]">
+                  {{ mcpServerRunning ? '🟢 运行中' : (mcpServerEnabled ? '🟡 已启用' : '🔴 已停止') }}
+                </span>
+              </div>
+              <div class="mcp-config-row">
+                <span class="mcp-config-label">地址</span>
+                <code class="mcp-config-value">{{ mcpServerUrl }}</code>
+                <button class="mcp-copy-btn" @click="copyMcpUrl">复制</button>
+              </div>
+              <div class="mcp-config-row">
+                <span class="mcp-config-label">API Key</span>
+                <code class="mcp-config-value mcp-key-text">{{ showMcpKey ? mcpServerKey : '••••••••' }}</code>
+                <button class="mcp-copy-btn" @click="showMcpKey = !showMcpKey">{{ showMcpKey ? '隐藏' : '显示' }}</button>
+                <button class="mcp-copy-btn" @click="copyMcpKeyToClipboard">复制</button>
+              </div>
+              <div class="mcp-config-row">
+                <span class="mcp-config-label">端口</span>
+                <div style="display:flex;align-items:center;gap:4px">
+                  <input v-model="mcpPortInput" class="mcp-port-input" type="number" min="1024" max="65535" @change="mcpPortInput = Math.max(1024, Math.min(65535, Number(mcpPortInput) || 19799)).toString()" />
+                  <span class="mcp-port-hint">1024-65535</span>
+                </div>
+              </div>
+              <div class="mcp-config-row">
+                <span class="mcp-config-label">白名单</span>
+                <div class="mcp-group-chips">
+                  <span v-for="g in mcpNoteGroups" :key="g.id"
+                    :class="['mcp-chip', { active: mcpSelectedGroups.includes(g.id) }]"
+                    @click="toggleMcpGroup(g.id)">
+                    {{ g.name }}
+                  </span>
+                </div>
+              </div>
+              <div class="mcp-config-row" style="font-size:10px;color:var(--jc-text-secondary)">
+                {{ mcpSelectedGroups.length === 0 ? '空=访问所有分组' : '已选 ' + mcpSelectedGroups.length + ' 个分组' }}
+              </div>
+              <div class="mcp-config-actions">
+                <button v-if="!mcpServerRunning" class="mcp-start-btn" @click="startMcpServer" :disabled="mcpLoading">启动</button>
+                <button v-if="mcpServerRunning" class="mcp-stop-btn" @click="stopMcpServer" :disabled="mcpLoading">停止</button>
+                <button class="mcp-copy-btn" @click="regenerateMcpKey" :disabled="mcpLoading">重新生成 Key</button>
+                <span v-if="mcpLoading" style="font-size:11px;color:var(--jc-text-secondary)">处理中...</span>
+              </div>
+              <div v-if="mcpServerMsg" :class="['mcp-server-msg', { success: mcpServerMsg.startsWith('✅'), error: mcpServerMsg.startsWith('❌') }]">{{ mcpServerMsg }}</div>
+              <details style="margin-top:6px;font-size:11px">
+                <summary style="cursor:pointer;color:var(--jc-text-secondary)">📖 在其他 AI Agent 中配置（点击展开）</summary>
+                <div style="margin-top:6px;background:var(--jc-bg-elevated);padding:8px;border-radius:4px;font-size:10px;line-height:1.6">
+                  <p><b>Cline / Claude Desktop 配置：</b></p>
+                  <pre style="background:var(--jc-bg-input);padding:6px;border-radius:3px;overflow-x:auto;white-space:pre-wrap">{
+  "mcpServers": {
+    "jc9": {
+      "url": "{{ mcpServerUrl }}/sse",
+      "headers": {
+        "Authorization": "Bearer {{ showMcpKey ? mcpServerKey : 'YOUR_API_KEY' }}"
+      }
+    }
+  }
+}</pre>
+                  <p style="margin-top:4px;color:var(--jc-text-secondary)">将以上 JSON 添加到目标工具的 MCP 配置文件中即可连接。</p>
+                </div>
+              </details>
+            </div>
+          </div>
+
+          <hr style="border:none;border-top:1px solid var(--jc-border-default);margin:12px 0" />
+
+          <!-- 外部 MCP 服务器 -->
+          <h4 style="font-size:12px;font-weight:600;color:var(--jc-text-highlight);margin:0 0 6px">🔗 外部 MCP 服务器</h4>
+          <p class="pane-desc" style="margin-bottom:6px">连接外部 MCP 服务器获取更多工具，扩展 AI Agent 能力。</p>
           <div class="mode-toggle">
             <button :class="['mode-btn', { active: mcpViewMode === 'list' }]" @click="mcpViewMode = 'list'">列表</button>
             <button :class="['mode-btn', { active: mcpViewMode === 'json' }]" @click="switchToJsonMode">JSON</button>
@@ -789,6 +964,27 @@ onMounted(() => {
 .mcp-json-actions { display: flex; gap: 8px; margin-top: 6px; }
 .mcp-json-apply { flex: 1; padding: 5px 10px; background: var(--jc-color-accent); color: #fff; border: none; border-radius: 4px; font-size: 11px; font-weight: 600; cursor: pointer; &:hover { opacity: 0.9; } &:disabled { opacity: 0.5; cursor: not-allowed; } }
 .mcp-json-clear { padding: 5px 10px; background: transparent; color: var(--jc-text-secondary); border: 1px solid var(--jc-border-default); border-radius: 4px; font-size: 11px; cursor: pointer; &:hover { color: #f85149; } }
+
+/* JC9 内置 MCP Server */
+.builtin-mcp-section { margin-bottom: 8px; }
+.mcp-server-config-card {
+  background: var(--jc-bg-elevated); border: 1px solid var(--jc-border-default); border-radius: 6px;
+  padding: 10px; display: flex; flex-direction: column; gap: 6px; font-size: 12px;
+}
+.mcp-config-row { display: flex; align-items: center; gap: 6px; }
+.mcp-config-label { font-size: 11px; color: var(--jc-text-secondary); min-width: 50px; flex-shrink: 0; }
+.mcp-config-value { font-family: monospace; font-size: 10px; background: var(--jc-bg-input); padding: 2px 6px; border-radius: 3px; word-break: break-all; flex: 1; }
+.mcp-key-text { max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+.mcp-copy-btn { background: none; border: 1px solid var(--jc-border-default); color: var(--jc-text-secondary); font-size: 10px; padding: 1px 6px; border-radius: 3px; cursor: pointer; flex-shrink: 0; &:hover { border-color: var(--jc-color-accent); color: var(--jc-color-accent); } }
+.mcp-status-badge { font-size: 11px; font-weight: 500; }
+.mcp-port-input { width: 70px; background: var(--jc-bg-input); border: 1px solid var(--jc-border-default); color: var(--jc-text-primary); font-size: 11px; padding: 2px 4px; border-radius: 3px; outline: none; text-align: center; &:focus { border-color: var(--jc-color-accent); } }
+.mcp-port-hint { font-size: 9px; color: var(--jc-text-secondary); }
+.mcp-group-chips { display:flex; flex-wrap:wrap; gap:4px; }
+.mcp-chip { font-size:10px; padding:2px 6px; border-radius:3px; background:var(--jc-bg-input); border:1px solid var(--jc-border-default); color:var(--jc-text-secondary); cursor:pointer; &.active { background:rgba(63,185,80,0.15); border-color:#3fb950; color:#3fb950; } &:hover { border-color:var(--jc-color-accent); } }
+.mcp-config-actions { display: flex; gap: 6px; align-items: center; margin-top: 4px; }
+.mcp-start-btn { background: var(--jc-color-success); color: #fff; border: none; padding: 4px 14px; border-radius: 4px; font-size: 11px; font-weight: 600; cursor: pointer; &:hover { opacity: 0.9; } &:disabled { opacity: 0.5; cursor: not-allowed; } }
+.mcp-stop-btn { background: #f85149; color: #fff; border: none; padding: 4px 14px; border-radius: 4px; font-size: 11px; font-weight: 600; cursor: pointer; &:hover { opacity: 0.9; } &:disabled { opacity: 0.5; cursor: not-allowed; } }
+.mcp-server-msg { font-size: 11px; padding: 4px 8px; border-radius: 4px; &.success { background: rgba(63,185,80,0.1); color: #3fb950; } &.error { background: rgba(248,81,73,0.1); color: #f85149; } }
 
 /* Backup */
 .backup-actions { display: flex; gap: 10px; margin-top: 8px; }

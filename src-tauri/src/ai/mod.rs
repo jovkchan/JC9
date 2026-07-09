@@ -25,6 +25,8 @@ pub mod frontend_tool;
 pub mod guardrails;
 pub mod tracer;
 pub mod browser;
+pub mod mcp_server;
+pub mod mcp_config;
 
 pub use types::*;
 pub use llm::{LlmProvider, LlmMessage, LlmResponse, MockLlmProvider, OpenAiProvider};
@@ -46,3 +48,4 @@ pub use frontend_tool::{FrontendProxyTool, pending_calls};
 pub use guardrails::{Guardrails, GuardrailLevel};
 pub use tracer::{Tracer, TraceEvent, TraceEventType};
 pub use browser::BrowserManager;
+pub use mcp_server::McpServer;

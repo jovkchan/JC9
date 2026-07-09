@@ -52,10 +52,13 @@ impl VectorStore {
 
         // 如果 sqlite-vec 加载成功，创建虚拟表
         if has_sqlite_vec {
-            let _ = conn_guard.execute(
+            match conn_guard.execute(
                 "CREATE VIRTUAL TABLE IF NOT EXISTS vec_embeddings USING vec0(embedding float[1536])",
                 [],
-            );
+            ) {
+                Ok(_) => println!("   vec_embeddings 虚拟表已就绪"),
+                Err(e) => println!("❌ vec_embeddings 虚拟表创建失败: {}", e),
+            }
         }
 
         drop(conn_guard);
@@ -74,6 +77,59 @@ impl VectorStore {
             has_sqlite_vec: self.has_sqlite_vec,
             embedding_dim: self.embedding_dim,
         }
+    }
+
+    /// 启动诊断：打印各表行数 + sqlite-vec 状态
+    pub fn log_diagnostics(&self) {
+        let conn = self.conn.lock().unwrap();
+        let count = |t: &str| -> i64 {
+            conn.query_row(&format!("SELECT COUNT(*) FROM {}", t), [], |r| r.get(0)).unwrap_or(-1)
+        };
+        println!("🧠 VectorStore 诊断 ─────────────────────");
+        println!("   sqlite-vec 已加载: {}", self.has_sqlite_vec);
+        println!("   embedding 维度:    {}", self.embedding_dim);
+        println!("   knowledge 条目:    {}", count("knowledge"));
+        println!("   embeddings 向量:   {}", count("embeddings"));
+        println!("   vec_embeddings:    {}", count("vec_embeddings"));
+        println!("   knowledge_fts:     {}", count("knowledge_fts"));
+        println!("   ────────────────────────────────────────");
+    }
+
+    /// 重建全部知识条目的向量：读取 knowledge 表，逐条生成并 upsert
+    pub async fn reindex_all(&self) -> Result<usize, String> {
+        let ids: Vec<(String, String)> = {
+            let conn = self.conn.lock().unwrap();
+            let mut stmt = conn.prepare("SELECT id, content FROM knowledge").map_err(|e| e.to_string())?;
+            let rows: Vec<(String, String)> = stmt.query_map([], |row| Ok((row.get::<_,String>(0)?, row.get::<_,String>(1)?)))
+                .map_err(|e| e.to_string())?
+                .filter_map(|r| r.ok())
+                .collect();
+            rows
+        };
+
+        let total = ids.len();
+        println!("🔄 开始重建 {} 条向量...", total);
+        let mut count = 0usize;
+        for (id, content) in &ids {
+            match self.generate_embedding(content).await {
+                Ok(embedding) => {
+                    let entry = VectorEntry {
+                        id: format!("emb_{}", id),
+                        source_id: id.clone(),
+                        content: content.clone(),
+                        embedding,
+                    };
+                    if let Err(e) = self.upsert(&entry).await {
+                        println!("   ❌ [{}/{}] upsert 失败: {}", count, total, e);
+                    } else {
+                        count += 1;
+                    }
+                }
+                Err(e) => println!("   ❌ [{}/{}] 向量生成失败: {}", count, total, e),
+            }
+        }
+        println!("✅ 重建完成: {}/{} 条已索引", count, total);
+        Ok(count)
     }
 
     /// 查找 sqlite-vec 扩展 DLL（找不到则从嵌入的字节自动释放）
@@ -166,22 +222,60 @@ impl VectorStore {
             }
             Err("Embedding API 返回格式异常".into())
         } else {
-            // 无 API Key 时，生成简单的哈希向量作为降级方案
-            Ok(Self::hash_embedding(text))
+            // 无 API Key 时：字符 3-gram 词袋向量（语义区分度远高于 SHA256 哈希）
+            Ok(Self::ngram_embedding(text, self.embedding_dim))
         }
     }
 
     /// 将文本哈希为模拟向量（7维，用于无 API 时的降级）
+    #[allow(dead_code)]
     fn hash_embedding(text: &str) -> Vec<f32> {
         use sha2::{Sha256, Digest};
         let hash = Sha256::digest(text.as_bytes());
-        // 将 32 字节哈希扩展为 1536 维向量
         let mut vec = Vec::with_capacity(1536);
-        for i in 0..1536 {
-            let byte_val = hash[i % 32] as f32 / 255.0;
+        for idx in 0..1536 {
+            let byte_val = hash[idx % 32] as f32 / 255.0;
             vec.push(byte_val);
         }
         vec
+    }
+
+    /// 字符 n-gram 词袋向量 — 比 hash_embedding 语义区分度高得多
+    /// 提取文本中所有 3-gram，哈希到 1536 维桶，加权后归一化
+    fn ngram_embedding(text: &str, dim: usize) -> Vec<f32> {
+        let mut vec = vec![0.0f32; dim];
+        let lower = text.to_lowercase();
+        let chars: Vec<char> = lower.chars().collect();
+        if chars.len() < 3 {
+            // 短文本：直接用字符填充
+            for (_i, &c) in chars.iter().enumerate() {
+                let bucket = (c as usize * 2654435761) % dim;
+                vec[bucket] += 1.0;
+            }
+            return Self::normalize(&vec);
+        }
+        let mut total = 0u32;
+        for window in chars.windows(3) {
+            let hash = (window[0] as u64).wrapping_mul(31).wrapping_add(window[1] as u64).wrapping_mul(31).wrapping_add(window[2] as u64);
+            let bucket = ((hash.wrapping_mul(2654435761)) as usize) % dim;
+            // 用 TF-IDF 风格：词频越高越重要
+            vec[bucket] += 1.0;
+            total += 1;
+        }
+        if total == 0 { return vec; }
+        // TF-IDF 权重（对数缩放+归一化）
+        for val in vec.iter_mut() {
+            if *val > 0.0 {
+                *val = (1.0 + (*val).ln()) / (1.0 + (total as f32).ln());
+            }
+        }
+        Self::normalize(&vec)
+    }
+
+    fn normalize(vec: &[f32]) -> Vec<f32> {
+        let norm: f32 = vec.iter().map(|x| x * x).sum::<f32>().sqrt();
+        if norm < 1e-9 { return vec.to_vec(); }
+        vec.iter().map(|x| x / norm).collect()
     }
 
     /// 存储向量条目
@@ -191,23 +285,37 @@ impl VectorStore {
             .flat_map(|f| f.to_le_bytes())
             .collect();
 
+        // 计算确定性整数 rowid（id → i64 hash），用于桥接 embeddings 和 vec_embeddings
+        let rowid = Self::id_to_rowid(&entry.id);
+
         let _ = conn.execute(
-            "INSERT OR REPLACE INTO embeddings (id, source_id, content, embedding) VALUES (?1, ?2, ?3, ?4)",
-            params![entry.id, entry.source_id, entry.content, blob],
+            "INSERT OR REPLACE INTO embeddings (id, source_id, content, embedding, vec_rowid) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![entry.id, entry.source_id, entry.content, blob, rowid],
         );
 
-        // 如果 sqlite-vec 可用，同时写入虚拟表
+        // 如果 sqlite-vec 可用，同时写入虚拟表（vec0 只有 rowid + embedding 两列）
         if self.has_sqlite_vec {
             let vec_blob: Vec<u8> = entry.embedding.iter()
                 .flat_map(|f| f.to_le_bytes())
                 .collect();
-            let _ = conn.execute(
-                "INSERT OR REPLACE INTO vec_embeddings (id, embedding) VALUES (?1, ?2)",
-                params![entry.id, vec_blob],
-            );
+            if let Err(e) = conn.execute(
+                "INSERT OR REPLACE INTO vec_embeddings(rowid, embedding) VALUES (?1, ?2)",
+                params![rowid, vec_blob],
+            ) {
+                println!("❌ vec_embeddings 写入失败 (rowid={}): {}", rowid, e);
+            }
         }
 
         Ok(())
+    }
+
+    /// 文本 ID → 确定性整数 rowid（乘法哈希）
+    fn id_to_rowid(id: &str) -> i64 {
+        let mut h: u64 = 5381;
+        for b in id.bytes() {
+            h = h.wrapping_mul(33).wrapping_add(b as u64);
+        }
+        (h & 0x7FFF_FFFF_FFFF_FFFF) as i64 // 保证非负
     }
 
     /// 向量相似度搜索 (KNN)
@@ -239,9 +347,10 @@ impl VectorStore {
             .flat_map(|f| f.to_le_bytes())
             .collect();
 
+        // vec0 虚拟表只有 rowid(INTEGER) + embedding(FLOAT[])，通过 vec_rowid 桥接到 embeddings 表
         let sql = format!(
-            "SELECT v.id, v.distance, e.content FROM vec_embeddings v 
-             JOIN embeddings e ON v.id = e.id 
+            "SELECT e.source_id, v.distance, e.content FROM vec_embeddings v 
+             JOIN embeddings e ON v.rowid = e.vec_rowid 
              WHERE v.embedding MATCH ?1 AND k = ?2 
              ORDER BY v.distance"
         );
@@ -340,10 +449,10 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     let mut norm_a = 0.0_f32;
     let mut norm_b = 0.0_f32;
 
-    for i in 0..a.len() {
-        dot += a[i] * b[i];
-        norm_a += a[i] * a[i];
-        norm_b += b[i] * b[i];
+    for idx in 0..a.len() {
+        dot += a[idx] * b[idx];
+        norm_a += a[idx] * a[idx];
+        norm_b += b[idx] * b[idx];
     }
 
     if norm_a == 0.0 || norm_b == 0.0 {

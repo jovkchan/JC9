@@ -14,6 +14,8 @@ pub struct KnowledgeBase {
 impl KnowledgeBase {
     pub fn new(conn: Arc<Mutex<Connection>>) -> Self {
         let vector_store = VectorStore::new(conn.clone());
+        // 启动诊断
+        vector_store.log_diagnostics();
 
         Self {
             conn,
@@ -228,10 +230,62 @@ impl KnowledgeBase {
         rows.filter_map(|r| r.ok()).collect()
     }
 
-    /// 纯 Rust TF-IDF 相关字频匹配检索算法
+    /// FTS5 全文关键词检索（BM25 排序）
     pub async fn search(&self, query: &str, limit: usize) -> Vec<KbEntry> {
+        let q_escaped = query.replace('\'', "''");
+        let fts_query = format!("\"{}\"", q_escaped);
+        let sql = "SELECT k.id,k.title,k.content,k.tags,k.entry_type,k.confidence,k.is_draft,k.created_at,k.updated_at
+                   FROM knowledge_fts f JOIN knowledge k ON f.rowid = k.rowid
+                   WHERE knowledge_fts MATCH ?1 ORDER BY rank LIMIT ?2";
+
+        // 在作用域内完成所有借用，确保 stmt/conn 在返回前释放
+        let result: Result<Vec<KbEntry>, String> = (|| {
+            let conn = self.conn.lock().map_err(|e| e.to_string())?;
+            let mut stmt = conn.prepare(&sql).map_err(|e| format!("FTS5 prepare: {}", e))?;
+            let rows = stmt.query_map(params![fts_query.as_str(), limit as i64], |row| {
+                let tags_str: String = row.get(3)?;
+                let tags = if tags_str.is_empty() { vec![] } else { tags_str.split(',').map(|s| s.to_string()).collect() };
+                let entry_type_str: String = row.get(4)?;
+                let entry_type = match entry_type_str.as_str() {
+                    "config_note" => KbEntryType::ConfigNote,
+                    "solution" => KbEntryType::Solution,
+                    "pitfall_note" => KbEntryType::PitfallNote,
+                    "pattern" => KbEntryType::Pattern,
+                    "api_reference" => KbEntryType::ApiReference,
+                    "takeaway" => KbEntryType::Takeaway,
+                    _ => KbEntryType::ConfigNote,
+                };
+                let created_at_str: String = row.get(7)?;
+                let updated_at_str: String = row.get(8)?;
+                Ok(KbEntry {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    content: row.get(2)?,
+                    tags,
+                    entry_type,
+                    source_session: None,
+                    confidence: row.get(5)?,
+                    is_draft: row.get::<_,i32>(6)? != 0,
+                    created_at: chrono::DateTime::parse_from_rfc3339(&created_at_str).map(|d| d.into()).unwrap_or_else(|_| Utc::now()),
+                    updated_at: chrono::DateTime::parse_from_rfc3339(&updated_at_str).map(|d| d.into()).unwrap_or_else(|_| Utc::now()),
+                    embedding: None,
+                })
+            }).map_err(|e| format!("FTS5 query: {}", e))?;
+            Ok(rows.filter_map(|r| r.ok()).collect())
+        })();
+
+        match result {
+            Ok(entries) => entries,
+            Err(e) => {
+                println!("⚠️  FTS5 查询失败: {}，回退到全量扫描", e);
+                self.fallback_search(query, limit).await
+            }
+        }
+    }
+
+    /// 回退关键词搜索（O(n) 全量扫描，仅当 FTS5 不可用时）
+    async fn fallback_search(&self, query: &str, limit: usize) -> Vec<KbEntry> {
         let all_entries = self.get_entries_internal(false).await;
-        
         let query_lower = query.to_lowercase();
         let query_terms: Vec<&str> = query_lower.split_whitespace().collect();
 
@@ -240,27 +294,17 @@ impl KnowledgeBase {
                 let title_lower = e.title.to_lowercase();
                 let content_lower = e.content.to_lowercase();
                 let tags_lower: Vec<String> = e.tags.iter().map(|t| t.to_lowercase()).collect();
-                
                 let mut score = 0.0;
                 for term in &query_terms {
-                    if title_lower.contains(term) {
-                        score += 3.0;
-                    }
-                    if content_lower.contains(term) {
-                        score += 1.0;
-                    }
-                    for tag in &tags_lower {
-                        if tag.contains(term) {
-                            score += 2.0;
-                        }
-                    }
+                    if title_lower.contains(term) { score += 3.0; }
+                    if content_lower.contains(term) { score += 1.0; }
+                    for tag in &tags_lower { if tag.contains(term) { score += 2.0; } }
                 }
                 score *= e.confidence;
                 (score, e)
             })
             .filter(|(s, _)| *s > 0.0)
             .collect();
-
         scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
         scored.into_iter().take(limit).map(|(_, e)| e).collect()
     }
@@ -273,6 +317,11 @@ impl KnowledgeBase {
     /// 检查是否使用 sqlite-vec 加速
     pub fn using_sqlite_vec(&self) -> bool {
         self.vector_store.using_sqlite_vec()
+    }
+
+    /// 重建全部知识条目的向量嵌入
+    pub async fn reindex_all(&self) -> Result<usize, String> {
+        self.vector_store.reindex_all().await
     }
 
     pub async fn search_by_type(&self, entry_type: KbEntryType, limit: usize) -> Vec<KbEntry> {

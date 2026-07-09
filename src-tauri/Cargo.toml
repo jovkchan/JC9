@@ -38,3 +38,8 @@ base64 = "0.22"
 url = "2"
 secrecy = "0.8"
 shell-words = "1.1"
+# MCP Server (HTTP + SSE)
+axum = { version = "0.7", features = ["macros"] }
+tower-http = { version = "0.5", features = ["cors"] }
+tokio-stream = "0.1"
+tokio-util = "0.7"

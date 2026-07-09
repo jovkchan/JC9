@@ -19,6 +19,7 @@ struct AppState {
     manager: ProcessManager,
     db: Database,
     ai_manager: std::sync::Arc<ai::agent_manager::AgentManager>,
+    mcp_server: std::sync::Arc<tokio::sync::Mutex<ai::mcp_server::McpServer>>,
     startup_logs: Mutex<Vec<serde_json::Value>>,
 }
 
@@ -1362,6 +1363,119 @@ async fn ai_reconnect_mcp_servers(
     Ok(results)
 }
 
+// ══════════════════════════════════════════════════════════════
+// JC9 MCP Server 管理命令（让其他 AI Agent 连接）
+// ══════════════════════════════════════════════════════════════
+
+/// 获取 MCP Server 配置
+#[tauri::command]
+async fn ai_get_mcp_server_config(state: State<'_, Mutex<AppState>>) -> Result<ai::mcp_server::McpServerConfig, String> {
+    let mcp_server = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.mcp_server.clone()
+    };
+    let server = mcp_server.lock().await;
+    Ok(server.get_config().await)
+}
+
+/// 更新并应用 MCP Server 配置
+#[tauri::command]
+async fn ai_set_mcp_server_config(
+    state: State<'_, Mutex<AppState>>,
+    config: ai::mcp_server::McpServerConfig,
+) -> Result<String, String> {
+    let mcp_server = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        (app_state.mcp_server.clone(), app_state.db.conn.clone())
+    };
+    let (mcp_server, db_conn) = mcp_server;
+    let mut server = mcp_server.lock().await;
+    let was_enabled = server.get_config().await.enabled;
+    server.update_config(config.clone()).await;
+
+    // 持久化到数据库
+    ai::mcp_config::save_mcp_config(&db_conn, &config)
+        .map_err(|e| format!("保存配置失败: {}", e))?;
+
+    // 根据配置变更自动启停
+    if config.enabled && !was_enabled {
+        server.start().await?;
+        Ok(format!("✅ MCP Server 已启动 (端口 {})", config.port))
+    } else if !config.enabled && was_enabled {
+        server.stop().await;
+        Ok("✅ MCP Server 已停止".into())
+    } else if config.enabled {
+        server.restart().await?;
+        Ok(format!("✅ MCP Server 已重启 (端口 {})", config.port))
+    } else {
+        Ok("✅ 配置已保存".into())
+    }
+}
+
+/// 启动 MCP Server
+#[tauri::command]
+async fn ai_start_mcp_server(state: State<'_, Mutex<AppState>>) -> Result<String, String> {
+    let (mcp_server, db_conn) = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        (app_state.mcp_server.clone(), app_state.db.conn.clone())
+    };
+    let mut server = mcp_server.lock().await;
+    let mut config = server.get_config().await;
+    config.enabled = true;
+    server.update_config(config.clone()).await;
+    server.start().await?;
+    ai::mcp_config::save_mcp_config(&db_conn, &config)
+        .map_err(|e| format!("保存配置失败: {}", e))?;
+    Ok(format!("✅ MCP Server 已启动 (端口 {})", config.port))
+}
+
+/// 停止 MCP Server
+#[tauri::command]
+async fn ai_stop_mcp_server(state: State<'_, Mutex<AppState>>) -> Result<String, String> {
+    let (mcp_server, db_conn) = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        (app_state.mcp_server.clone(), app_state.db.conn.clone())
+    };
+    let mut server = mcp_server.lock().await;
+    let mut config = server.get_config().await;
+    config.enabled = false;
+    server.update_config(config.clone()).await;
+    server.stop().await;
+    ai::mcp_config::save_mcp_config(&db_conn, &config)
+        .map_err(|e| format!("保存配置失败: {}", e))?;
+    Ok("✅ MCP Server 已停止".into())
+}
+
+/// 重建全部知识条目向量嵌入（同步写入 embeddings + vec_embeddings）
+#[tauri::command]
+async fn ai_reindex_knowledge(state: State<'_, Mutex<AppState>>) -> Result<String, String> {
+    let kb = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.ai_manager.knowledge_base().clone()
+    };
+    match kb.reindex_all().await {
+        Ok(n) => Ok(format!("✅ 重建完成: {} 条向量已生成到 embeddings 和 vec_embeddings", n)),
+        Err(e) => Err(format!("重建失败: {}", e)),
+    }
+}
+
+/// 获取 MCP Server 运行状态
+#[tauri::command]
+async fn ai_get_mcp_server_status(state: State<'_, Mutex<AppState>>) -> Result<serde_json::Value, String> {
+    let mcp_server = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.mcp_server.clone()
+    };
+    let server = mcp_server.lock().await;
+    let config = server.get_config().await;
+    Ok(serde_json::json!({
+        "running": server.is_running(),
+        "enabled": config.enabled,
+        "port": config.port,
+        "host": config.host,
+    }))
+}
+
 #[tauri::command]
 async fn ai_list_drafts(state: State<'_, Mutex<AppState>>) -> Result<Vec<ai::types::KbEntry>, String> {
     let ai_manager = {
@@ -1709,12 +1823,59 @@ pub fn run() {
                 db_conn.clone(),
                 Some(app.handle().clone()),
             ));
+            // ── MCP Server ──
+            let mcp_server = std::sync::Arc::new(tokio::sync::Mutex::new(
+                ai::mcp_server::McpServer::new()
+            ));
+
             app.manage(Mutex::new(AppState {
                 manager: ProcessManager::new(),
                 db,
-                ai_manager,
+                ai_manager: ai_manager.clone(),
+                mcp_server,
                 startup_logs: Mutex::new(Vec::new()),
             }));
+
+            // ── 将知识库注入 MCP Server（后台异步启动）──
+            {
+                let state = app.state::<Mutex<AppState>>();
+                let guard = state.lock().unwrap();
+                let server_clone = guard.mcp_server.clone();
+                let kb = ai_manager.knowledge_base().clone();
+                let db_clone = guard.db.conn.clone();
+                drop(guard);
+
+                tauri::async_runtime::spawn(async move {
+                    let mut server = server_clone.lock().await;
+                    server.set_knowledge_base(kb);
+                    server.set_db_conn(db_clone.clone());
+
+                    // 从数据库读取配置
+                    let saved_config = ai::mcp_config::load_mcp_config(&db_clone);
+                    match saved_config {
+                        Ok(Some(config)) => {
+                            server.update_config(config).await;
+                            if server.get_config().await.enabled {
+                                match server.start().await {
+                                    Ok(()) => println!("🧠 JC9 MCP Server 已自动启动 (端口 {})", server.get_config().await.port),
+                                    Err(e) => println!("⚠️  MCP Server 启动失败: {}", e),
+                                }
+                            } else {
+                                println!("🧠 MCP Server 未启用（可在设置中开启）");
+                            }
+                        }
+                        Ok(None) => {
+                            // 首次：持久化默认配置
+                            let default_config = server.get_config().await;
+                            let _ = ai::mcp_config::save_mcp_config(&db_clone, &default_config);
+                            println!("🧠 MCP Server 默认配置已生成（未启用）");
+                        }
+                        Err(e) => {
+                            println!("❌ 读取 MCP Server 配置失败: {}", e);
+                        }
+                    }
+                });
+            }
 
             // ── 启动诊断：逐条记录到 AppState.startup_logs ──
             let state = app.state::<Mutex<AppState>>();
@@ -2038,6 +2199,13 @@ pub fn run() {
             ai_submit_frontend_tool_result,
             list_system_skills,
             proxy_ai_request,
+            // JC9 MCP Server (built-in)
+            ai_get_mcp_server_config,
+            ai_set_mcp_server_config,
+            ai_start_mcp_server,
+            ai_stop_mcp_server,
+            ai_get_mcp_server_status,
+            ai_reindex_knowledge,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
