@@ -260,7 +260,10 @@ interface McpServerConfigType {
 }
 
 const mcpSelectedGroups = ref<string[]>([])
-const mcpNoteGroups = ref<Array<{ id: string; name: string }>>([])
+const mcpNoteGroups = ref<Array<{ id: string; name: string; parentId: string | null }>>([])
+
+// 白名单只显示根分组（选根即自动包含全部子孙分组）
+const mcpRootGroups = computed(() => mcpNoteGroups.value.filter(g => !g.parentId))
 
 function toggleMcpGroup(gid: string) {
   const idx = mcpSelectedGroups.value.indexOf(gid)
@@ -278,7 +281,7 @@ async function loadMcpServerConfig() {
     mcpSelectedGroups.value = config.groupIds || []
   } catch { /* ignore */ }
   try {
-    mcpNoteGroups.value = await invoke<Array<{ id: string; name: string }>>('get_note_groups')
+    mcpNoteGroups.value = await invoke<Array<{ id: string; name: string; parentId: string | null }>>('get_note_groups')
   } catch { /* ignore */ }
 }
 
@@ -700,7 +703,7 @@ onMounted(() => {
               <div class="mcp-config-row">
                 <span class="mcp-config-label">白名单</span>
                 <div class="mcp-group-chips">
-                  <span v-for="g in mcpNoteGroups" :key="g.id"
+                  <span v-for="g in mcpRootGroups" :key="g.id"
                     :class="['mcp-chip', { active: mcpSelectedGroups.includes(g.id) }]"
                     @click="toggleMcpGroup(g.id)">
                     {{ g.name }}
@@ -708,7 +711,7 @@ onMounted(() => {
                 </div>
               </div>
               <div class="mcp-config-row" style="font-size:10px;color:var(--jc-text-secondary)">
-                {{ mcpSelectedGroups.length === 0 ? '空=访问所有分组' : '已选 ' + mcpSelectedGroups.length + ' 个分组' }}
+                {{ mcpSelectedGroups.length === 0 ? '空=访问所有分组' : '已选 ' + mcpSelectedGroups.length + ' 个根分组（含全部子分组）' }}
               </div>
               <div class="mcp-config-actions">
                 <button v-if="!mcpServerRunning" class="mcp-start-btn" @click="startMcpServer" :disabled="mcpLoading">启动</button>

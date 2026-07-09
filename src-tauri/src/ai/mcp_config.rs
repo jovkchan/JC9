@@ -14,6 +14,7 @@ pub fn load_mcp_config(conn: &Arc<Mutex<rusqlite::Connection>>) -> Result<Option
         Some(json_str) => {
             let config: McpServerConfig = serde_json::from_str(&json_str)
                 .map_err(|e| format!("解析 MCP 配置失败: {}", e))?;
+            println!("📂 加载 MCP 配置: groupIds={:?}", config.groupIds);
             Ok(Some(config))
         }
         None => Ok(None),
@@ -24,6 +25,7 @@ pub fn load_mcp_config(conn: &Arc<Mutex<rusqlite::Connection>>) -> Result<Option
 pub fn save_mcp_config(conn: &Arc<Mutex<rusqlite::Connection>>, config: &McpServerConfig) -> Result<(), String> {
     let json_str = serde_json::to_string(config)
         .map_err(|e| format!("序列化 MCP 配置失败: {}", e))?;
+    println!("💾 保存 MCP 配置: groupIds={:?}", config.groupIds);
 
     let conn = conn.lock().map_err(|e| e.to_string())?;
     conn.execute(

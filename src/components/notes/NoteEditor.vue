@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onBeforeUnmount } from 'vue'
+import { ref, watch, computed, onBeforeUnmount } from 'vue'
 import { useNotesStore } from '@/stores/notes'
 import { useExecInTerminal } from '@/composables/useExecInTerminal'
 import type { Note } from '@/types/notes'
@@ -61,6 +61,42 @@ function syncTags() {
 }
 syncTags()
 
+// 实时提取正文中的 #标签（不包含在代码块内的）
+const inlineTags = ref<string[]>([])
+function extractInlineTags(md: string): string[] {
+  // 移除代码块内容后提取 #tag
+  const cleaned = md.replace(/```[\s\S]*?```/g, '').replace(/`[^`]+`/g, '')
+  const matches = cleaned.match(/#([^\s#.,;:!?()（）\[\]{}]+)/g)
+  if (!matches) return []
+  return Array.from(new Set(matches.map(m => m.slice(1).trim()).filter(t => t.length >= 1 && t.length <= 40)))
+}
+
+// 每 500ms 扫描一次正文内联标签
+let tagScanTimer: ReturnType<typeof setInterval> | null = null
+function startTagScan() {
+  tagScanTimer = setInterval(() => {
+    const md = editor.value?.getMarkdown() ?? ''
+    inlineTags.value = extractInlineTags(md)
+  }, 500)
+}
+onBeforeUnmount(() => { if (tagScanTimer) clearInterval(tagScanTimer) })
+
+// 合并内联标签到手动标签
+function mergeInlineTag(tag: string) {
+  if (!tags.value.includes(tag)) {
+    tags.value.push(tag)
+    tagInput.value = tags.value.join(', ')
+  }
+}
+
+// 存时自动合并所有内联标签
+function mergeAllInlineTags() {
+  for (const t of inlineTags.value) {
+    if (!tags.value.includes(t)) tags.value.push(t)
+  }
+  tagInput.value = tags.value.join(', ')
+}
+
 // ── 原生 Markdown → TipTap ──
 // 用 contentType: 'markdown' 让 Markdown 扩展自行解析
 // （包括 Underline 的 ++text++ 和 Highlight 的 ==text== 及嵌套）
@@ -112,6 +148,11 @@ const editor = useEditor({
   onUpdate: () => {
     scheduleSave()
   },
+})
+
+// 编辑器就绪后启动标签扫描
+watch(editor, (ed) => {
+  if (ed) startTagScan()
 })
 
 
@@ -172,6 +213,7 @@ async function doSave() {
   if (!title.value.trim() && !md.trim()) return
   saving.value = true
   syncTags()
+  mergeAllInlineTags()  // 自动将 #内联标签 合并到 tags
 
   if (editNoteId.value) {
     const existing = store.notes.find(n => n.id === editNoteId.value)
@@ -298,11 +340,22 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="editor-footer">
-      <input
-        v-model="tagInput"
-        class="tag-input"
-        placeholder="标签, 用逗号分隔"
-      />
+      <div class="tag-area">
+        <input
+          v-model="tagInput"
+          class="tag-input"
+          placeholder="标签, 用逗号分隔"
+        />
+        <div v-if="inlineTags.length" class="inline-tags">
+          <span class="inline-tags-hint">正文内联:</span>
+          <span
+            v-for="t in inlineTags.filter(x => !tags.includes(x))" :key="t"
+            class="inline-tag-chip"
+            @click="mergeInlineTag(t)"
+            title="点击添加到标签"
+          >#{{ t }} +</span>
+        </div>
+      </div>
       <span class="char-count">{{ editor?.getText().length ?? 0 }} 字</span>
     </div>
   </div>
@@ -668,13 +721,18 @@ onBeforeUnmount(() => {
 .editor-footer {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   flex-shrink: 0;
 }
 
-.tag-input {
+.tag-area {
   flex: 1;
+  min-width: 0;
+}
+
+.tag-input {
+  width: 100%;
   background: transparent;
   border: none;
   color: var(--jc-text-secondary);
@@ -686,6 +744,31 @@ onBeforeUnmount(() => {
     color: var(--jc-text-secondary);
     opacity: 0.5;
   }
+}
+
+.inline-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  padding-top: 2px;
+}
+
+.inline-tags-hint {
+  font-size: 9px;
+  color: var(--jc-text-secondary);
+  opacity: 0.6;
+}
+
+.inline-tag-chip {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(63, 185, 128, 0.12);
+  color: #3fb950;
+  cursor: pointer;
+  transition: background .15s;
+  &:hover { background: rgba(63, 185, 128, 0.25); }
 }
 
 .char-count {

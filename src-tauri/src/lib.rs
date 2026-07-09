@@ -574,28 +574,31 @@ async fn save_note(state: State<'_, Mutex<AppState>>, note: Note) -> Result<(), 
         app_state.db.save_note(&note)?;
         app_state.ai_manager.clone()
     };
-    // 异步同步到知识库（失败不影响笔记保存）
-    let entry = note_to_kb_entry(&note);
-    tokio::spawn(async move {
-        ai_manager.knowledge_base().add_entry(entry).await;
-    });
+    // 归档 → 从知识库移除；未归档 → 同步到知识库
+    let kb_id = format!("note_{}", note.id);
+    let kb = ai_manager.knowledge_base().clone();
+    if note.is_archived {
+        tokio::spawn(async move { kb.remove_entry(&kb_id).await; });
+    } else {
+        let entry = note_to_kb_entry(&note);
+        tokio::spawn(async move { kb.add_entry(entry).await; });
+    }
     Ok(())
 }
 
 #[tauri::command]
 async fn delete_note(state: State<'_, Mutex<AppState>>, id: String, permanent: Option<bool>) -> Result<(), String> {
-    let ai_manager = if permanent.unwrap_or(false) {
+    let ai_manager = {
         let app_state = state.lock().map_err(|e| e.to_string())?;
-        app_state.db.permanently_delete_note(&id)?;
-        Some(app_state.ai_manager.clone())
-    } else {
-        state.lock().map_err(|e| e.to_string())?.db.delete_note(&id)?;
-        None
+        if permanent.unwrap_or(false) {
+            app_state.db.permanently_delete_note(&id)?;
+        } else {
+            app_state.db.delete_note(&id)?;
+        }
+        // 软删除和硬删除都清理知识库向量
+        app_state.ai_manager.clone()
     };
-    // 永久删除时同步清理知识库
-    if let Some(am) = ai_manager {
-        am.knowledge_base().remove_entry(&format!("note_{}", id)).await;
-    }
+    ai_manager.knowledge_base().remove_entry(&format!("note_{}", id)).await;
     Ok(())
 }
 

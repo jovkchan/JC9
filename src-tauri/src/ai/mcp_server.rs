@@ -27,15 +27,14 @@ use super::types::*;
 // ══════════════════════════════════════════════════════════════
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct McpServerConfig {
     pub enabled: bool,
     pub port: u16,
-    pub api_key: String,
+    pub apiKey: String,
     pub host: String,
     /// 白名单分组ID列表：空=不限，非空=只允许访问这些分组
     #[serde(default)]
-    pub group_ids: Vec<String>,
+    pub groupIds: Vec<String>,
 }
 
 impl Default for McpServerConfig {
@@ -43,9 +42,9 @@ impl Default for McpServerConfig {
         Self {
             enabled: true,
             port: 19799,
-            api_key: uuid::Uuid::new_v4().to_string(),
+            apiKey: uuid::Uuid::new_v4().to_string(),
             host: "127.0.0.1".into(),
-            group_ids: vec![],
+            groupIds: vec![],
         }
     }
 }
@@ -106,8 +105,8 @@ impl McpServer {
 
         let host = config.host.clone();
         let start_port = config.port;
-        let api_key = config.api_key.clone();
-        let group_ids = config.group_ids.clone();
+        let api_key = config.apiKey.clone();
+        let group_ids = config.groupIds.clone();
 
         // 尝试绑定端口：从配置端口开始，失败则 +1 重试，最多试 10 个
         let max_attempts = 10;
@@ -400,17 +399,35 @@ fn get_kb(state: &Arc<AppState>) -> Result<Arc<KnowledgeBase>, String> {
 }
 
 /// 检查分组是否在白名单内（白名单为空则不限）
-fn group_allowed(state: &Arc<AppState>, group_id: Option<&str>) -> bool {
+/// 支持继承：如果笔记分组的任一祖先在白名单中，也视为允许
+fn group_allowed(state: &Arc<AppState>, group_id: Option<&str>, conn: &Connection) -> bool {
     if state.group_ids.is_empty() { return true; }
-    match group_id {
-        Some(gid) => state.group_ids.iter().any(|id| id == gid),
-        None => false,
+    let mut current = match group_id {
+        Some(gid) => gid.to_string(),
+        None => return false,
+    };
+    // 最多向上查 20 层防止死循环
+    for _ in 0..20 {
+        if state.group_ids.iter().any(|id| id == &current) {
+            return true;
+        }
+        // 查父分组
+        let parent: Option<String> = conn.query_row(
+            "SELECT parent_id FROM note_groups WHERE id = ?1",
+            params![current],
+            |row| row.get(0),
+        ).ok().flatten();
+        match parent {
+            Some(p) => current = p,
+            None => break,
+        }
     }
+    false
 }
 
 fn read_note_from_db(conn: &Connection, note_id: &str) -> Result<Option<Value>, String> {
     let mut stmt = conn.prepare(
-        "SELECT id,group_id,title,content,format,is_pinned,tags,visibility,created_at,updated_at
+        "SELECT id,group_id,title,content,format,is_pinned,tags,visibility,created_at,updated_at,is_archived
          FROM notes WHERE id=?1 AND is_deleted=0"
     ).map_err(|e| e.to_string())?;
 
@@ -427,6 +444,7 @@ fn read_note_from_db(conn: &Connection, note_id: &str) -> Result<Option<Value>, 
             "tags": tags,
             "createdAt": row.get::<_,String>(8).unwrap_or_default(),
             "updatedAt": row.get::<_,String>(9).unwrap_or_default(),
+            "isArchived": row.get::<_,i32>(10).unwrap_or(0)!=0,
         }))
     }) {
         Ok(note) => Ok(Some(note)),
@@ -546,10 +564,10 @@ async fn cmd_note_search(state: &Arc<AppState>, args: &Value) -> Result<Value, S
             if let Some(mut note) = read_note_from_db(&conn, nid)? {
                 let note_gid = note["groupId"].as_str();
                 let in_group = group_id.as_deref().map_or_else(
-                    || group_allowed(state, note_gid),
+                    || group_allowed(state, note_gid, &conn),
                     |gid| note_gid == Some(gid)
                 );
-                if in_group {
+                if in_group && !note.get("isArchived").and_then(|v| v.as_bool()).unwrap_or(false) {
                     seen.insert(nid.clone());
                     note["score"] = json!(score);
                     note["matchSource"] = json!(source);
@@ -569,10 +587,10 @@ async fn cmd_note_search(state: &Arc<AppState>, args: &Value) -> Result<Value, S
                 if let Some(mut note) = read_note_from_db(&conn, nid)? {
                     let note_gid = note["groupId"].as_str();
                     let in_group = group_id.as_deref().map_or_else(
-                        || group_allowed(state, note_gid),
+                        || group_allowed(state, note_gid, &conn),
                         |gid| note_gid == Some(gid)
                     );
-                    if in_group {
+                    if in_group && !note.get("isArchived").and_then(|v| v.as_bool()).unwrap_or(false) {
                         seen.insert(nid.to_string());
                         note["score"] = json!(score);
                         note["matchSource"] = json!("vector_fallback");

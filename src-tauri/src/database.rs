@@ -426,6 +426,15 @@ impl Database {
         conn.execute("INSERT OR REPLACE INTO notes (id, user_id, group_id, title, content, format, is_pinned, tags, visibility, sort_order, version, is_deleted, is_archived, created_at, updated_at) VALUES (?1, 'local', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![note.id, group_id, note.title, note.content, note.format, note.is_pinned as i32, tags_json, note.visibility, note.sort_order, note.version, note.is_deleted as i32, note.is_archived as i32, note.created_at, note.updated_at],
         ).map_err(|e| e.to_string())?;
+
+        // 同步写入 tags 表（去重：同名标签只保留一条）
+        for tag in &note.tags {
+            let tag_id = format!("tag_{}", tag.to_lowercase());
+            let _ = conn.execute(
+                "INSERT OR IGNORE INTO tags (id, user_id, name, color) VALUES (?1, 'local', ?2, '')",
+                params![tag_id, tag],
+            );
+        }
         Ok(())
     }
 
