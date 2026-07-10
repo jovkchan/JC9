@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed, onBeforeUnmount } from 'vue'
+import { ref, watch, onBeforeUnmount } from 'vue'
 import { useNotesStore } from '@/stores/notes'
 import { useExecInTerminal } from '@/composables/useExecInTerminal'
 import type { Note } from '@/types/notes'
