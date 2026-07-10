@@ -324,7 +324,7 @@ async fn handle_tools_list() -> Result<Value, String> {
         "tools": [
             {
                 "name": "jc9_note_search",
-                "description": "搜索笔记。先用向量语义搜索(sqlite-vec)理解查询意图，再结合关键词排序，返回最匹配的笔记列表(含ID/标题/内容预览/匹配分数)。典型用法：用户提问项目相关问题时先调用此工具搜索笔记，从结果中获取笔记ID后调用jc9_note_read读取全文。支持中文自然语言描述。",
+                "description": "搜索笔记。先用向量语义搜索(sqlite-vec)理解查询意图，再结合关键词排序，返回最匹配的笔记列表(含ID/标题/内容预览/匹配分数)。典型用法：用户提问项目相关问题时先调用此工具搜索笔记，从结果中获取笔记ID后调用jc9_note_read读取全文。支持中文自然语言描述。搜索结果中的 id 字段可用于创建笔记链接：[标题](jclink://note/ID)。",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -348,7 +348,7 @@ async fn handle_tools_list() -> Result<Value, String> {
             },
             {
                 "name": "jc9_note_create",
-                "description": "创建新笔记。标题和内容为必填。创建后自动同步到知识库并生成向量嵌入，后续可通过jc9_note_search搜索到。返回新建笔记的ID。\n\n📝 笔记编写标准（务必遵守）：\n1. 结构先行：使用 # 标题分层（H1→H2→H3），每个 ## 章节围绕一个独立子主题，确保信息自解释\n2. 元数据驱动：正文以 YAML Frontmatter 开头声明 id/type/tags（如 type: Guide, tags: [Vue,性能]）\n3. 表达清晰：段落首句概括主旨；并列信息用 - 列表；技术内容用 ` 代码块包裹\n4. 关键词密度：关键术语保留高频词（如 sqlite-vec、混合检索），配合 FTS5 全文搜索提升命中率\n5. 标签：通过 tags 参数传入分类标签，格式 [\"架构\",\"配置\"]",
+                "description": "创建新笔记。标题和内容为必填。创建后自动同步到知识库并生成向量嵌入，后续可通过jc9_note_search搜索到。返回新建笔记的ID。\n\n📝 笔记编写标准（务必遵守）：\n1. 结构先行：使用 # 标题分层（H1→H2→H3），每个 ## 章节围绕一个独立子主题，确保信息自解释\n2. 元数据驱动：正文以 YAML Frontmatter 开头声明 id/type/tags（如 type: Guide, tags: [Vue,性能]）\n3. 表达清晰：段落首句概括主旨；并列信息用 - 列表；技术内容用 ` 代码块包裹\n4. 关键词密度：关键术语保留高频词（如 sqlite-vec、混合检索），配合 FTS5 全文搜索提升命中率\n5. 标签：通过 tags 参数传入分类标签，格式 [\"架构\",\"配置\"]\n\n🔗 笔记链接规范：\n- 语法：[笔记标题](jclink://note/笔记ID)\n- 示例：[项目架构设计](jclink://note/abc123-...)\n- 当需要在笔记A中引用笔记B时，使用此 Markdown 链接语法\n- 编辑器输入 / 然后选择\"链接笔记\"可通过搜索快速插入\n- 点击链接直接跳转到目标笔记（无需浏览器）\n- 创建笔记后务必记录返回的 id，以便后续创建链接",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -401,7 +401,7 @@ async fn handle_tools_list() -> Result<Value, String> {
             },
             {
                 "name": "jc9_note_update",
-                "description": "更新已有笔记的标题和/或正文。需要笔记ID（从jc9_note_search或jc9_note_list获取），title 和 content 至少提供一个，tags 可选。更新后自动同步知识库向量。",
+                "description": "更新已有笔记的标题和/或正文。需要笔记ID（从jc9_note_search或jc9_note_list获取），title 和 content 至少提供一个，tags 可选。更新后自动同步知识库向量。🔗 支持笔记链接语法：[标题](jclink://note/ID)，点击可跳转。",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -701,7 +701,7 @@ async fn cmd_note_search(state: &Arc<AppState>, args: &Value) -> Result<Value, S
     let mut lines = vec![format!("搜索到 {} 条匹配笔记：\n", results.len())];
     for r in &results {
         let title = r["title"].as_str().unwrap_or("无标题");
-        let nid = truncate_chars(r["id"].as_str().unwrap_or(""), 8);
+        let nid = r["id"].as_str().unwrap_or("");
         let score = r["score"].as_f64().unwrap_or(0.0);
         let source = r.get("matchSource").and_then(|s| s.as_str()).unwrap_or("?");
         let preview = r.get("content").and_then(|c| c.as_str()).map(|c| {
@@ -773,7 +773,7 @@ async fn cmd_note_create(state: &Arc<AppState>, args: &Value) -> Result<Value, S
         }).await;
     });
 
-    Ok(json!({"content":[{"type":"text","text":format!("✅ 笔记已创建，ID: {}",note_id)}],"id":note_id}))
+    Ok(json!({"content":[{"type":"text","text":format!("√笔记已创建，ID: {}",note_id)}],"id":note_id}))
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -864,7 +864,7 @@ async fn cmd_note_list(state: &Arc<AppState>, args: &Value) -> Result<Value, Str
     let mut lines = vec![format!("共 {} 条笔记：\n", notes.len())];
     for n in &notes {
         let title = n["title"].as_str().unwrap_or("无标题");
-        let nid = truncate_chars(n["id"].as_str().unwrap_or(""), 8);
+        let nid = n["id"].as_str().unwrap_or("");
         let updated = truncate_chars(n["updatedAt"].as_str().unwrap_or(""), 10);
         lines.push(format!("  [{nid}] {title} ({updated})"));
     }

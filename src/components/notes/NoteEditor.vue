@@ -110,8 +110,11 @@ function handleJclinkClick(e: MouseEvent) {
   if (!linkEl) return
   e.preventDefault()
   e.stopPropagation()
-  const noteId = linkEl.dataset.noteId
-  if (noteId) store.openNoteTab(noteId)
+  const linkId = linkEl.dataset.noteId
+  if (!linkId) return
+  // 支持完整 UUID 和短 ID（前 8 位前缀匹配）
+  const fullId = store.notes.find(n => n.id.startsWith(linkId))?.id
+  if (fullId) store.openNoteTab(fullId)
 }
 
 onMounted(() => document.addEventListener('click', handleJclinkClick))

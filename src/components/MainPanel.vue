@@ -54,6 +54,13 @@ watch(activeNoteId, (id) => {
   if (id !== null) store.activeTabType = 'note'
 })
 
+function getNoteGroupPath(noteId: string | null): string {
+  if (!noteId) return ''
+  const note = notesStore.notes.find(n => n.id === noteId)
+  if (!note?.groupId) return ''
+  return notesStore.getGroupPath(note.groupId).map(g => g.name).join(' / ')
+}
+
 function getEditingNote(noteId: string | null) {
   if (!noteId) return null
   return notesStore.notes.find(n => n.id === noteId) ?? null
@@ -71,6 +78,70 @@ const ctxShow = ref(false)
 const ctxPos = ref({ x: 0, y: 0 })
 const ctxIdx = ref(-1)
 const showLogPid = ref('')
+
+// ── Note tab context menu ──
+const noteCtxShow = ref(false)
+const noteCtxPos = ref({ x: 0, y: 0 })
+const noteCtxTabId = ref<string | null>(null)
+
+function openNoteCtx(e: MouseEvent, tabId: string) {
+  e.preventDefault()
+  noteCtxPos.value = { x: e.clientX, y: e.clientY }
+  noteCtxTabId.value = tabId
+  noteCtxShow.value = true
+}
+
+function closeNoteCtx() { noteCtxShow.value = false }
+
+function noteCtxClose() {
+  if (noteCtxTabId.value) {
+    notesStore.closeNoteTab(noteCtxTabId.value)
+    if (!notesStore.activeNoteTabId) store.activeTabType = 'term'
+  }
+  closeNoteCtx()
+}
+
+function noteCtxRefresh() {
+  // 重新打开同一个笔记（强制刷新编辑器）
+  if (noteCtxTabId.value) {
+    const id = noteCtxTabId.value
+    notesStore.closeNoteTab(id)
+    setTimeout(() => notesStore.openNoteTab(id), 50)
+  }
+  closeNoteCtx()
+}
+
+function noteCtxCloseOthers() {
+  if (!noteCtxTabId.value) return
+  const keep = noteCtxTabId.value
+  const ids = [...notesStore.noteTabs.filter(t => t.id !== keep).map(t => t.id)]
+  ids.forEach(id => notesStore.closeNoteTab(id))
+  notesStore.activeNoteTabId = keep
+  closeNoteCtx()
+}
+
+function noteCtxCloseRight() {
+  if (!noteCtxTabId.value) return
+  const tabs = [...notesStore.noteTabs]
+  const idx = tabs.findIndex(t => t.id === noteCtxTabId.value)
+  if (idx >= 0) tabs.slice(idx + 1).forEach(t => notesStore.closeNoteTab(t.id))
+  closeNoteCtx()
+}
+
+function noteCtxCloseLeft() {
+  if (!noteCtxTabId.value) return
+  const tabs = [...notesStore.noteTabs]
+  const idx = tabs.findIndex(t => t.id === noteCtxTabId.value)
+  if (idx > 0) tabs.slice(0, idx).forEach(t => notesStore.closeNoteTab(t.id))
+  closeNoteCtx()
+}
+
+function noteCtxCloseAll() {
+  const ids = [...notesStore.noteTabs.map(t => t.id)]
+  ids.forEach(id => notesStore.closeNoteTab(id))
+  store.activeTabType = 'term'
+  closeNoteCtx()
+}
 
 const renameShow = ref(false)
 const renameValue = ref('')
@@ -152,7 +223,7 @@ function checkReminders() {
 
       if (nowTimeMinute >= taskTimeStr) {
         if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-          new Notification(`📅 备忘待办提醒: ${note.title || '备忘'}`, {
+          new Notification(`备忘待办提醒: ${note.title || '备忘'}`, {
             body: taskDesc
           })
           notifiedTasks.add(taskKey)
@@ -173,6 +244,7 @@ function handleKeyDownSearch(e: KeyboardEvent) {
 
 onMounted(() => {
   document.addEventListener('click', closeCtx)
+  document.addEventListener('click', closeNoteCtx)
   document.addEventListener('keydown', handleKeyDownSearch)
   if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
     Notification.requestPermission()
@@ -183,6 +255,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   document.removeEventListener('click', closeCtx)
+  document.removeEventListener('click', closeNoteCtx)
   document.removeEventListener('keydown', handleKeyDownSearch)
   if (reminderTimer) clearInterval(reminderTimer)
 })
@@ -221,7 +294,8 @@ onUnmounted(() => {
         :class="['tab',{on:store.activeTabType==='note'&&activeNoteId===t.id}]"
         role="tab" :aria-selected="store.activeTabType==='note'&&activeNoteId===t.id" tabindex="0"
         @click="store.activeTabType='note'; notesStore.activeNoteTabId = t.id"
-        @keyup.enter="store.activeTabType='note'; notesStore.activeNoteTabId = t.id">
+        @keyup.enter="store.activeTabType='note'; notesStore.activeNoteTabId = t.id"
+        @contextmenu="openNoteCtx($event, t.id)">
         <span class="tl">{{ t.title || '新笔记' }}</span>
         <button class="tx" @click.stop="notesStore.closeNoteTab(t.id); if(!notesStore.activeNoteTabId)store.activeTabType='term'" aria-label="关闭标签">✕</button>
       </div>
@@ -293,7 +367,11 @@ onUnmounted(() => {
 
     <!-- Note content -->
     <div v-for="t in notesStore.noteTabs" :key="'nc'+t.id" class="content" v-show="store.activeTabType==='note'&&activeNoteId===t.id">
-      <div class="bar"><code class="cmdtext">笔记{{ t.id ? ': ' + (getEditingNote(t.id)?.title || '无标题') : '' }}</code></div>
+      <div class="bar">
+        
+        <code class="cmdtext">笔记{{ t.id ? ': ' + (getEditingNote(t.id)?.title || '无标题') : '' }}</code>
+        <span v-if="getNoteGroupPath(t.id)" class="note-group-path">{{ getNoteGroupPath(t.id) }}</span>
+      </div>
       <div class="note-body">
         <NoteEditor
           v-if="activeNoteId === t.id"
@@ -339,6 +417,18 @@ onUnmounted(() => {
       </div>
     </Teleport>
 
+    <!-- 笔记标签页右键菜单 -->
+    <Teleport to="body">
+      <div v-if="noteCtxShow" class="ctx" :style="{left:noteCtxPos.x+'px',top:noteCtxPos.y+'px'}" @click.stop>
+        <div class="ci" @click="noteCtxRefresh">刷新</div>
+        <div class="ci" @click="noteCtxClose">关闭</div>
+        <div class="ci" @click="noteCtxCloseOthers">关闭其他</div>
+        <div class="ci" @click="noteCtxCloseRight">关闭右侧标签页</div>
+        <div class="ci" @click="noteCtxCloseLeft">关闭左侧标签页</div>
+        <div class="ci" @click="noteCtxCloseAll">全部关闭</div>
+      </div>
+    </Teleport>
+
     <!-- 笔记设置面板 -->
     <NoteSettings :show="notesStore.showSettings" @close="notesStore.showSettings = false" />
     
@@ -363,6 +453,7 @@ onUnmounted(() => {
 .content { flex:1; display:flex; flex-direction:column; overflow:hidden; }
 .bar { @include bar; }
 .cmdtext { font-size:11px; color:var(--jc-color-success); font-family:'Cascadia Code',Consolas,monospace; }
+.note-group-path { font-size:10px; color:var(--jc-text-secondary); margin-right:8px; }
 .acts { display:flex; gap:6px; }
 .btn { @include btn-base; font-size:11px; }
 .btn.pri { @include btn-primary; }

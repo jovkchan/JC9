@@ -35,6 +35,36 @@ export const useNotesStore = defineStore('notes', () => {
       .sort((a, b) => a.sortOrder - b.sortOrder)
   }
 
+  /** 递归获取某分组及其所有后代分组的 ID 集合 */
+  function getDescendantGroupIds(groupId: string): Set<string> {
+    const ids = new Set<string>([groupId])
+    for (const g of groups.value) {
+      if (g.parentId && ids.has(g.parentId)) {
+        ids.add(g.id)
+      }
+    }
+    // 多轮扫描直到稳定（处理深层嵌套）
+    let prev = 0
+    while (ids.size > prev) {
+      prev = ids.size
+      for (const g of groups.value) {
+        if (g.parentId && ids.has(g.parentId)) ids.add(g.id)
+      }
+    }
+    return ids
+  }
+
+  /** 获取分组面包屑路径（从根到目标） */
+  function getGroupPath(groupId: string): NoteGroup[] {
+    const path: NoteGroup[] = []
+    let current = groups.value.find(g => g.id === groupId)
+    while (current) {
+      path.unshift(current)
+      current = current.parentId ? groups.value.find(g => g.id === current!.parentId) : undefined
+    }
+    return path
+  }
+
   async function loadGroups() {
     // 重试 3 次，应对 Tauri state 尚未 manage 的时序问题
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -120,9 +150,10 @@ export const useNotesStore = defineStore('notes', () => {
       list = list.filter(n => !n.isArchived)
     }
 
-    // 3. 分组过滤
+    // 3. 分组过滤（包含所有子分组笔记）
     if (selectedGroupId.value && listTab.value === 'notes') {
-      list = list.filter(n => n.groupId === selectedGroupId.value)
+      const descendantIds = getDescendantGroupIds(selectedGroupId.value)
+      list = list.filter(n => n.groupId && descendantIds.has(n.groupId))
     }
 
     // 4. 标签过滤 (标签Tab中选中的标签)
@@ -387,7 +418,7 @@ export const useNotesStore = defineStore('notes', () => {
     listTab, searchQuery, filterDate, selectedTag, showSettings, showSearchPanel,
     // Groups
     groups, selectedGroupId, groupTree,
-    loadGroups, addGroup, updateGroup, removeGroup,
+    loadGroups, addGroup, updateGroup, removeGroup, getGroupPath,
     // Notes
     notes, selectedNoteId, filteredNotes, pinnedNotes, unpinnedNotes,
     loadNotes, loadAllNotes, saveNote, createNote,

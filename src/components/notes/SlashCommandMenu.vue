@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { useNotesStore } from '@/stores/notes'
 import type { Note } from '@/types/notes'
 
 const props = defineProps<{
@@ -14,8 +13,6 @@ const emit = defineEmits<{
   insertLink: [noteId: string, noteTitle: string]
   command: [cmdId: string]
 }>()
-
-const store = useNotesStore()
 
 // ── State ──
 type Stage = 'commands' | 'search'
