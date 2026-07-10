@@ -1378,7 +1378,9 @@ async fn ai_get_mcp_server_config(state: State<'_, Mutex<AppState>>) -> Result<a
         app_state.mcp_server.clone()
     };
     let server = mcp_server.lock().await;
-    Ok(server.get_config().await)
+    let config = server.get_config().await;
+    println!("📤 ai_get_mcp_server_config: group_ids={:?}", config.group_ids);
+    Ok(config)
 }
 
 /// 更新并应用 MCP Server 配置
@@ -1387,6 +1389,7 @@ async fn ai_set_mcp_server_config(
     state: State<'_, Mutex<AppState>>,
     config: ai::mcp_server::McpServerConfig,
 ) -> Result<String, String> {
+    println!("🔧 ai_set_mcp_server_config: group_ids={:?}, enabled={}", config.group_ids, config.enabled);
     let mcp_server = {
         let app_state = state.lock().map_err(|e| e.to_string())?;
         (app_state.mcp_server.clone(), app_state.db.conn.clone())
@@ -1413,6 +1416,24 @@ async fn ai_set_mcp_server_config(
     } else {
         Ok("✅ 配置已保存".into())
     }
+}
+
+/// 仅保存白名单（不重启服务器）
+#[tauri::command]
+async fn ai_save_mcp_whitelist(
+    state: State<'_, Mutex<AppState>>,
+    groupIds: Vec<String>,
+) -> Result<(), String> {
+    let (mcp_server, db_conn) = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        (app_state.mcp_server.clone(), app_state.db.conn.clone())
+    };
+    let mut server = mcp_server.lock().await;
+    let mut config = server.get_config().await;
+    config.group_ids = groupIds;
+    server.update_config(config.clone()).await;
+    ai::mcp_config::save_mcp_config(&db_conn, &config)?;
+    Ok(())
 }
 
 /// 启动 MCP Server
@@ -2209,6 +2230,7 @@ pub fn run() {
             ai_stop_mcp_server,
             ai_get_mcp_server_status,
             ai_reindex_knowledge,
+            ai_save_mcp_whitelist,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

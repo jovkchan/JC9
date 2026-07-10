@@ -269,16 +269,32 @@ function toggleMcpGroup(gid: string) {
   const idx = mcpSelectedGroups.value.indexOf(gid)
   if (idx >= 0) mcpSelectedGroups.value.splice(idx, 1)
   else mcpSelectedGroups.value.push(gid)
+  console.log('🔧 白名单选择:', JSON.stringify(mcpSelectedGroups.value))
+  saveMcpWhitelist()  // 即时持久化
+}
+
+let whitelistSaveTimer: ReturnType<typeof setTimeout> | null = null
+async function saveMcpWhitelist() {
+  if (whitelistSaveTimer) clearTimeout(whitelistSaveTimer)
+  whitelistSaveTimer = setTimeout(async () => {
+    try {
+      await invoke('ai_save_mcp_whitelist', { groupIds: [...mcpSelectedGroups.value] })
+      console.log('🔧 白名单已保存:', JSON.stringify(mcpSelectedGroups.value))
+    } catch (e) { console.error('保存白名单失败:', e) }
+  }, 300)
 }
 
 async function loadMcpServerConfig() {
   try {
     const config = await invoke<McpServerConfigType>('ai_get_mcp_server_config')
-    mcpServerKey.value = config.apiKey
-    mcpPortInput.value = config.port.toString()
-    mcpServerUrl.value = `http://${config.host}:${config.port}`
-    mcpServerEnabled.value = config.enabled
-    mcpSelectedGroups.value = config.groupIds || []
+    const raw: any = config
+    const ids: string[] = raw.groupIds ?? raw.group_ids ?? []
+    mcpSelectedGroups.value = ids
+    mcpServerKey.value = raw.apiKey ?? raw.api_key ?? ''
+    mcpPortInput.value = (raw.port ?? 19799).toString()
+    mcpServerUrl.value = `http://${raw.host ?? '127.0.0.1'}:${raw.port ?? 19799}`
+    mcpServerEnabled.value = raw.enabled ?? false
+    console.log('🔧 加载白名单:', JSON.stringify(mcpSelectedGroups.value), 'raw keys:', Object.keys(raw))
   } catch { /* ignore */ }
   try {
     mcpNoteGroups.value = await invoke<Array<{ id: string; name: string; parentId: string | null }>>('get_note_groups')
@@ -291,10 +307,12 @@ async function startMcpServer() {
     const config = await invoke<McpServerConfigType>('ai_get_mcp_server_config')
     config.enabled = true
     config.port = parseInt(mcpPortInput.value) || 19799
-    config.groupIds = mcpSelectedGroups.value
+    config.groupIds = [...mcpSelectedGroups.value]  // 浅拷贝确保是 plain array
+    console.log('🔧 保存白名单:', JSON.stringify(config.groupIds))
     const resultMsg = await invoke<string>('ai_set_mcp_server_config', { config })
     await loadMcpServerStatus()
     await loadMcpServerConfig()
+    console.log('🔧 加载后白名单:', JSON.stringify(mcpSelectedGroups.value))
     mcpServerMsg.value = resultMsg
   } catch (e) { mcpServerMsg.value = `❌ ${e}` }
   finally { mcpLoading.value = false }

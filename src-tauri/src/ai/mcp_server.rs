@@ -30,11 +30,12 @@ use super::types::*;
 pub struct McpServerConfig {
     pub enabled: bool,
     pub port: u16,
-    pub apiKey: String,
+    #[serde(alias = "apiKey")]
+    pub api_key: String,
     pub host: String,
-    /// 白名单分组ID列表：空=不限，非空=只允许访问这些分组
     #[serde(default)]
-    pub groupIds: Vec<String>,
+    #[serde(alias = "groupIds")]
+    pub group_ids: Vec<String>,
 }
 
 impl Default for McpServerConfig {
@@ -42,9 +43,9 @@ impl Default for McpServerConfig {
         Self {
             enabled: true,
             port: 19799,
-            apiKey: uuid::Uuid::new_v4().to_string(),
+            api_key: uuid::Uuid::new_v4().to_string(),
             host: "127.0.0.1".into(),
-            groupIds: vec![],
+            group_ids: vec![],
         }
     }
 }
@@ -105,8 +106,8 @@ impl McpServer {
 
         let host = config.host.clone();
         let start_port = config.port;
-        let api_key = config.apiKey.clone();
-        let group_ids = config.groupIds.clone();
+        let api_key = config.api_key.clone();
+        let group_ids = config.group_ids.clone();
 
         // 尝试绑定端口：从配置端口开始，失败则 +1 重试，最多试 10 个
         let max_attempts = 10;
