@@ -107,14 +107,14 @@ function slashExecuteCommand(cmdId: string) {
 function handleJclinkClick(e: MouseEvent) {
   const target = e.target as HTMLElement
   const linkEl = target.closest('.note-link') as HTMLElement | null
-  if (!linkEl) return
-  e.preventDefault()
-  e.stopPropagation()
-  const linkId = linkEl.dataset.noteId
-  if (!linkId) return
-  // 支持完整 UUID 和短 ID（前 8 位前缀匹配）
-  const fullId = store.notes.find(n => n.id.startsWith(linkId))?.id
-  if (fullId) store.openNoteTab(fullId)
+  if (linkEl) {
+    e.preventDefault()
+    e.stopPropagation()
+    const linkId = linkEl.dataset.noteId
+    if (!linkId) return
+    const fullId = store.notes.find(n => n.id.startsWith(linkId))?.id
+    if (fullId) store.openNoteTab(fullId)
+  }
 }
 
 onMounted(() => document.addEventListener('click', handleJclinkClick))
@@ -160,10 +160,20 @@ const { ctxShow, ctxStyle, runningTerminals, openCtx, closeCtx, execInTerminal, 
 
 function handleEditorContextMenu(e: MouseEvent) {
   const sel = editor.value?.state.selection
-  if (!sel || sel.empty) return
-  const text = editor.value?.state.doc.textBetween(sel.from, sel.to)
-  if (!text || !text.trim()) return
-  openCtx(e, text.trim())
+  if (sel && !sel.empty) {
+    const text = editor.value?.state.doc.textBetween(sel.from, sel.to)
+    if (text && text.trim()) {
+      openCtx(e, text.trim())
+      return
+    }
+  }
+  // 无选中文本 → 弹出 / 命令菜单
+  e.preventDefault()
+  const view = editor.value?.view
+  if (view) {
+    const pos = view.posAtCoords({ left: e.clientX, top: e.clientY })
+    if (pos) showSlashMenu(view, pos.pos)
+  }
 }
 
 const props = defineProps<{
