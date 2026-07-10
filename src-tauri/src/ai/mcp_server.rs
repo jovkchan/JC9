@@ -61,6 +61,7 @@ pub struct McpServer {
     running: Arc<AtomicBool>,
     shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
     sse_clients: Arc<RwLock<HashMap<String, mpsc::Sender<Result<Event, String>>>>>,
+    pub group_ids_lock: Option<Arc<RwLock<Vec<String>>>>,
 }
 
 impl McpServer {
@@ -72,6 +73,7 @@ impl McpServer {
             running: Arc::new(AtomicBool::new(false)),
             shutdown_tx: None,
             sse_clients: Arc::new(RwLock::new(HashMap::new())),
+            group_ids_lock: None,
         }
     }
 
@@ -148,12 +150,14 @@ impl McpServer {
         let sse_clients = self.sse_clients.clone();
         let running = self.running.clone();
 
+        let gids = Arc::new(RwLock::new(group_ids));
+        self.group_ids_lock = Some(gids.clone());
         let shared_state = Arc::new(AppState {
             knowledge_base: kb,
             db_conn: db,
             sse_clients,
             api_key: Arc::new(api_key),
-            group_ids,
+            group_ids: gids,
         });
 
         let app = Router::new()
@@ -196,12 +200,13 @@ impl McpServer {
 // Axum 共享状态
 // ══════════════════════════════════════════════════════════════
 
+#[derive(Clone)]
 struct AppState {
     knowledge_base: Option<Arc<KnowledgeBase>>,
     db_conn: Option<Arc<std::sync::Mutex<Connection>>>,
     sse_clients: Arc<RwLock<HashMap<String, mpsc::Sender<Result<Event, String>>>>>,
     api_key: Arc<String>,
-    group_ids: Vec<String>,
+    group_ids: Arc<RwLock<Vec<String>>>,
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -401,18 +406,16 @@ fn get_kb(state: &Arc<AppState>) -> Result<Arc<KnowledgeBase>, String> {
 
 /// 检查分组是否在白名单内（白名单为空则不限）
 /// 支持继承：如果笔记分组的任一祖先在白名单中，也视为允许
-fn group_allowed(state: &Arc<AppState>, group_id: Option<&str>, conn: &Connection) -> bool {
-    if state.group_ids.is_empty() { return true; }
+fn group_allowed(whitelist: &[String], group_id: Option<&str>, conn: &Connection) -> bool {
+    if whitelist.is_empty() { return true; }
     let mut current = match group_id {
         Some(gid) => gid.to_string(),
         None => return false,
     };
-    // 最多向上查 20 层防止死循环
     for _ in 0..20 {
-        if state.group_ids.iter().any(|id| id == &current) {
+        if whitelist.iter().any(|id| id == &current) {
             return true;
         }
-        // 查父分组
         let parent: Option<String> = conn.query_row(
             "SELECT parent_id FROM note_groups WHERE id = ?1",
             params![current],
@@ -427,12 +430,22 @@ fn group_allowed(state: &Arc<AppState>, group_id: Option<&str>, conn: &Connectio
 }
 
 fn read_note_from_db(conn: &Connection, note_id: &str) -> Result<Option<Value>, String> {
-    let mut stmt = conn.prepare(
+    let sql = if note_id.len() < 32 {
+        // 短 ID（如搜索预览的 8 位前缀）：用 LIKE 匹配
+        "SELECT id,group_id,title,content,format,is_pinned,tags,visibility,created_at,updated_at,is_archived
+         FROM notes WHERE id LIKE ?1 AND is_deleted=0 LIMIT 1"
+    } else {
         "SELECT id,group_id,title,content,format,is_pinned,tags,visibility,created_at,updated_at,is_archived
          FROM notes WHERE id=?1 AND is_deleted=0"
-    ).map_err(|e| e.to_string())?;
+    };
+    let param = if note_id.len() < 32 {
+        format!("{}%", note_id)
+    } else {
+        note_id.to_string()
+    };
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
 
-    match stmt.query_row(params![note_id], |row| {
+    match stmt.query_row(params![param], |row| {
         let tags_str: String = row.get::<_,String>(6).unwrap_or_default();
         let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
         Ok(json!({
@@ -554,18 +567,19 @@ async fn cmd_note_search(state: &Arc<AppState>, args: &Value) -> Result<Value, S
     ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     ranked.truncate(l * 3); // 多取一些做分组过滤
 
-    // 3. 从 DB 读取匹配的笔记
+    // 3. 先读取白名单（异步），再锁 DB
+    let whitelist = state.group_ids.read().await.clone();
     let mut results: Vec<Value> = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
     {
-        let conn = db.lock().map_err(|e| e.to_string())?;
+        let conn = db.lock().unwrap_or_else(|e| e.into_inner());
         for (nid, score, source) in &ranked {
             if seen.contains(nid) { continue; }
             if let Some(mut note) = read_note_from_db(&conn, nid)? {
                 let note_gid = note["groupId"].as_str();
                 let in_group = group_id.as_deref().map_or_else(
-                    || group_allowed(state, note_gid, &conn),
+                    || group_allowed(&whitelist, note_gid, &conn),
                     |gid| note_gid == Some(gid)
                 );
                 if in_group && !note.get("isArchived").and_then(|v| v.as_bool()).unwrap_or(false) {
@@ -580,7 +594,7 @@ async fn cmd_note_search(state: &Arc<AppState>, args: &Value) -> Result<Value, S
 
     // 如果混合检索结果不足，回头多取一些向量结果补全
     if results.len() < l && semantic.len() > ranked.len() {
-        let conn = db.lock().map_err(|e| e.to_string())?;
+        let conn = db.lock().unwrap_or_else(|e| e.into_inner());
         for (sid, score, _) in &semantic {
             if results.len() >= l { break; }
             if let Some(nid) = sid.strip_prefix("note_") {
@@ -588,7 +602,7 @@ async fn cmd_note_search(state: &Arc<AppState>, args: &Value) -> Result<Value, S
                 if let Some(mut note) = read_note_from_db(&conn, nid)? {
                     let note_gid = note["groupId"].as_str();
                     let in_group = group_id.as_deref().map_or_else(
-                        || group_allowed(state, note_gid, &conn),
+                        || group_allowed(&whitelist, note_gid, &conn),
                         |gid| note_gid == Some(gid)
                     );
                     if in_group && !note.get("isArchived").and_then(|v| v.as_bool()).unwrap_or(false) {
@@ -633,7 +647,7 @@ async fn cmd_note_search(state: &Arc<AppState>, args: &Value) -> Result<Value, S
 async fn cmd_note_read(state: &Arc<AppState>, args: &Value) -> Result<Value, String> {
     let db = get_db(state)?;
     let note_id = args["id"].as_str().ok_or("缺少 id 参数")?;
-    let conn = db.lock().map_err(|e| e.to_string())?;
+    let conn = db.lock().unwrap_or_else(|e| e.into_inner());
     let note = read_note_from_db(&conn, note_id)?.ok_or_else(|| format!("笔记不存在: {}", note_id))?;
     let title = note["title"].as_str().unwrap_or("");
     let content = note["content"].as_str().unwrap_or("");
@@ -651,7 +665,8 @@ async fn cmd_note_create(state: &Arc<AppState>, args: &Value) -> Result<Value, S
     let title = args["title"].as_str().ok_or("缺少 title 参数")?;
     let content = args["content"].as_str().ok_or("缺少 content 参数")?;
     // 未指定 groupId 时取白名单第一个分组，白名单为空则不设分组
-    let group_id = args["groupId"].as_str().or_else(|| state.group_ids.first().map(|s| s.as_str()));
+    let group_id = args["groupId"].as_str().map(|s| s.to_string()).or_else(|| state.group_ids.blocking_read().first().map(|s| s.clone()));
+    let group_id = group_id.as_deref();
     let tags: Vec<String> = args["tags"].as_array()
         .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
         .unwrap_or_default();
@@ -660,7 +675,7 @@ async fn cmd_note_create(state: &Arc<AppState>, args: &Value) -> Result<Value, S
     let now = Utc::now().to_rfc3339();
     let tags_json = serde_json::to_string(&tags).unwrap_or_default();
 
-    let conn = db.lock().map_err(|e| e.to_string())?;
+    let conn = db.lock().unwrap_or_else(|e| e.into_inner());
     conn.execute(
         "INSERT INTO notes(id,user_id,group_id,title,content,format,is_pinned,tags,visibility,sort_order,version,is_deleted,is_archived,created_at,updated_at)
          VALUES(?1,'local',?2,?3,?4,'markdown',0,?5,'PRIVATE',0,1,0,0,?6,?6)",
@@ -697,14 +712,14 @@ async fn cmd_note_update_title(state: &Arc<AppState>, args: &Value) -> Result<Va
 
     // 先读内容（释放锁），再更新标题
     let content = {
-        let conn = db.lock().map_err(|e| e.to_string())?;
+        let conn = db.lock().unwrap_or_else(|e| e.into_inner());
         read_note_from_db(&conn, note_id)?.and_then(|n| n["content"].as_str().map(String::from))
     };
     if content.is_none() {
         return Err("笔记不存在或已删除".into());
     }
 
-    let conn = db.lock().map_err(|e| e.to_string())?;
+    let conn = db.lock().unwrap_or_else(|e| e.into_inner());
     conn.execute(
         "UPDATE notes SET title=?1,updated_at=?2 WHERE id=?3 AND is_deleted=0",
         params![new_title, now, note_id],
@@ -738,17 +753,20 @@ async fn cmd_note_update_title(state: &Arc<AppState>, args: &Value) -> Result<Va
 
 async fn cmd_note_list(state: &Arc<AppState>, args: &Value) -> Result<Value, String> {
     let db = get_db(state)?;
-    let group_id = args["groupId"].as_str();
+    let group_id = args["groupId"].as_str().map(|s| s.to_string());
     let limit = args["limit"].as_i64().unwrap_or(50) as usize;
-    let conn = db.lock().map_err(|e| e.to_string())?;
+
+    // 先读取白名单（异步），再锁 DB（同步），避免 MutexGuard 跨 await
+    let whitelist = state.group_ids.read().await.clone();
+    let conn = db.lock().unwrap_or_else(|e| e.into_inner());
 
     let notes = if group_id.is_some() {
-        list_notes_from_db(&conn, group_id, limit)?
-    } else if state.group_ids.is_empty() {
+        list_notes_from_db(&conn, group_id.as_deref(), limit)?
+    } else if whitelist.is_empty() {
         list_notes_from_db(&conn, None::<&str>, limit)?
     } else {
         let mut all = Vec::new();
-        for gid in &state.group_ids {
+        for gid in &whitelist {
             all.append(&mut list_notes_from_db(&conn, Some(gid), limit)?);
         }
         all.sort_by(|a, b| b["updatedAt"].as_str().unwrap_or("").cmp(&a["updatedAt"].as_str().unwrap_or("")));
@@ -778,7 +796,7 @@ async fn cmd_note_list(state: &Arc<AppState>, args: &Value) -> Result<Value, Str
 
 async fn cmd_note_groups(state: &Arc<AppState>) -> Result<Value, String> {
     let db = get_db(state)?;
-    let conn = db.lock().map_err(|e| e.to_string())?;
+    let conn = db.lock().unwrap_or_else(|e| e.into_inner());
     let groups = list_groups_from_db(&conn)?;
     Ok(json!({"content":[{"type":"text","text":serde_json::to_string_pretty(&groups).unwrap_or_default()}],"groups":groups,"total":groups.len()}))
 }
@@ -789,7 +807,7 @@ async fn cmd_note_groups(state: &Arc<AppState>) -> Result<Value, String> {
 
 async fn cmd_database_stats(state: &Arc<AppState>) -> Result<Value, String> {
     let db = get_db(state)?;
-    let conn = db.lock().map_err(|e| e.to_string())?;
+    let conn = db.lock().unwrap_or_else(|e| e.into_inner());
     let count = |table: &str| -> i64 {
         conn.query_row(&format!("SELECT COUNT(*) FROM {}", table), [], |r| r.get(0)).unwrap_or(-1)
     };

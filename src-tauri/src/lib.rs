@@ -1428,11 +1428,15 @@ async fn ai_save_mcp_whitelist(
         let app_state = state.lock().map_err(|e| e.to_string())?;
         (app_state.mcp_server.clone(), app_state.db.conn.clone())
     };
-    let mut server = mcp_server.lock().await;
+    let server = mcp_server.lock().await;
     let mut config = server.get_config().await;
-    config.group_ids = groupIds;
+    config.group_ids = groupIds.clone();
     server.update_config(config.clone()).await;
     ai::mcp_config::save_mcp_config(&db_conn, &config)?;
+    // 同步更新运行中 AppState 的 group_ids（实时生效）
+    if let Some(ref lock) = server.group_ids_lock {
+        *lock.write().await = groupIds;
+    }
     Ok(())
 }
 
