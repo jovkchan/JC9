@@ -17,6 +17,7 @@ use serde_json::{json, Value};
 use chrono::Utc;
 use futures_util::stream::Stream;
 use rusqlite::{params, Connection};
+use tower_http::cors::CorsLayer;
 
 use super::mcp_types::*;
 use super::knowledge_base::KnowledgeBase;
@@ -163,6 +164,7 @@ impl McpServer {
         let app = Router::new()
             .route("/sse", get(handle_sse).post(handle_message))
             .route("/message", post(handle_message))
+            .layer(CorsLayer::very_permissive())
             .with_state(shared_state);
 
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
@@ -210,6 +212,22 @@ struct AppState {
 }
 
 // ══════════════════════════════════════════════════════════════
+// 认证辅助
+// ══════════════════════════════════════════════════════════════
+
+/// 校验 API Key：Header 需 `Bearer <key>`，查询参数需裸 key
+fn check_auth(headers: &HeaderMap, params: &HashMap<String, String>, api_key: &str) -> bool {
+    let expected = format!("Bearer {}", api_key);
+    if let Some(v) = headers.get("authorization").and_then(|v| v.to_str().ok()) {
+        return v == expected;
+    }
+    if let Some(key) = params.get("api_key") {
+        return key == api_key;
+    }
+    false
+}
+
+// ══════════════════════════════════════════════════════════════
 // SSE 端点
 // ══════════════════════════════════════════════════════════════
 
@@ -218,11 +236,7 @@ async fn handle_sse(
     headers: HeaderMap,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, String>>>, StatusCode> {
-    // 支持 Header 认证和 URL 查询参数认证
-    let auth_from_header = headers.get("authorization").and_then(|v| v.to_str().ok()).unwrap_or("");
-    let auth_from_param = params.get("api_key").map(|s| format!("Bearer {}", s)).unwrap_or_default();
-    let auth = if !auth_from_header.is_empty() { auth_from_header } else { &auth_from_param };
-    if auth != format!("Bearer {}", state.api_key) && auth != state.api_key.as_str() {
+    if !check_auth(&headers, &params, &state.api_key) {
         return Err(StatusCode::UNAUTHORIZED);
     }
     let client_id = uuid::Uuid::new_v4().to_string();
@@ -230,8 +244,10 @@ async fn handle_sse(
     state.sse_clients.write().await.insert(client_id.clone(), tx.clone());
     let _ = tx.send(Ok(Event::default().event("endpoint").data("/message"))).await;
     let _ = tx.send(Ok(Event::default().event("initialized").data("{}"))).await;
-    // 每 30 秒心跳保活，防止 SSE 超时断开
+    // 每 30 秒心跳保活，防止 SSE 超时断开；断开时自动清理 sse_clients
     let keepalive_tx = tx.clone();
+    let sse_clients = state.sse_clients.clone();
+    let cid = client_id.clone();
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
@@ -239,6 +255,8 @@ async fn handle_sse(
                 break; // 客户端已断开
             }
         }
+        // 清理已断开的客户端
+        sse_clients.write().await.remove(&cid);
     });
     Ok(Sse::new(ReceiverStream::new(rx)))
 }
@@ -249,8 +267,14 @@ async fn handle_sse(
 
 async fn handle_message(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(params): Query<HashMap<String, String>>,
     Json(body): Json<serde_json::Value>,
 ) -> (StatusCode, Json<Value>) {
+    // 认证校验：/message 端点也必须验证 API Key
+    if !check_auth(&headers, &params, &state.api_key) {
+        return (StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"})));
+    }
     let msg: McpMessage = match serde_json::from_value(body) {
         Ok(m) => m,
         Err(e) => return (StatusCode::OK, Json(json!({"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":format!("JSON 解析错误: {}", e)}}))),
@@ -441,6 +465,11 @@ fn get_kb(state: &Arc<AppState>) -> Result<Arc<KnowledgeBase>, String> {
     state.knowledge_base.clone().ok_or("知识库未初始化".into())
 }
 
+/// 安全截取字符串前 n 个字符（按 Unicode 字符，非字节）
+fn truncate_chars(s: &str, n: usize) -> String {
+    s.chars().take(n).collect()
+}
+
 /// 检查分组是否在白名单内（白名单为空则不限）
 /// 支持继承：如果笔记分组的任一祖先在白名单中，也视为允许
 fn group_allowed(whitelist: &[String], group_id: Option<&str>, conn: &Connection) -> bool {
@@ -618,10 +647,15 @@ async fn cmd_note_search(state: &Arc<AppState>, args: &Value) -> Result<Value, S
                 let note_gid = note["groupId"].as_str();
                 let in_group = group_id.as_deref().map_or_else(
                     || group_allowed(&whitelist, note_gid, &conn),
-                    |gid| note_gid == Some(gid)
+                    |gid| note_gid == Some(gid) && group_allowed(&whitelist, Some(gid), &conn)
                 );
                 if in_group && !note.get("isArchived").and_then(|v| v.as_bool()).unwrap_or(false) {
                     seen.insert(nid.clone());
+                    // 搜索结果只返回预览，不返回完整 content（减少响应体大小）
+                    if let Some(content) = note["content"].as_str().map(String::from) {
+                        note["contentPreview"] = json!(content.chars().take(200).collect::<String>());
+                        note["content"] = json!(content.chars().take(100).collect::<String>());
+                    }
                     note["score"] = json!(score);
                     note["matchSource"] = json!(source);
                     results.push(note);
@@ -641,10 +675,14 @@ async fn cmd_note_search(state: &Arc<AppState>, args: &Value) -> Result<Value, S
                     let note_gid = note["groupId"].as_str();
                     let in_group = group_id.as_deref().map_or_else(
                         || group_allowed(&whitelist, note_gid, &conn),
-                        |gid| note_gid == Some(gid)
+                        |gid| note_gid == Some(gid) && group_allowed(&whitelist, Some(gid), &conn)
                     );
                     if in_group && !note.get("isArchived").and_then(|v| v.as_bool()).unwrap_or(false) {
                         seen.insert(nid.to_string());
+                        if let Some(content) = note["content"].as_str().map(String::from) {
+                            note["contentPreview"] = json!(content.chars().take(200).collect::<String>());
+                            note["content"] = json!(content.chars().take(100).collect::<String>());
+                        }
                         note["score"] = json!(score);
                         note["matchSource"] = json!("vector_fallback");
                         results.push(note);
@@ -663,7 +701,7 @@ async fn cmd_note_search(state: &Arc<AppState>, args: &Value) -> Result<Value, S
     let mut lines = vec![format!("搜索到 {} 条匹配笔记：\n", results.len())];
     for r in &results {
         let title = r["title"].as_str().unwrap_or("无标题");
-        let nid = &r["id"].as_str().unwrap_or("")[..8.min(r["id"].as_str().unwrap_or("").len())];
+        let nid = truncate_chars(r["id"].as_str().unwrap_or(""), 8);
         let score = r["score"].as_f64().unwrap_or(0.0);
         let source = r.get("matchSource").and_then(|s| s.as_str()).unwrap_or("?");
         let preview = r.get("content").and_then(|c| c.as_str()).map(|c| {
@@ -826,8 +864,8 @@ async fn cmd_note_list(state: &Arc<AppState>, args: &Value) -> Result<Value, Str
     let mut lines = vec![format!("共 {} 条笔记：\n", notes.len())];
     for n in &notes {
         let title = n["title"].as_str().unwrap_or("无标题");
-        let nid = &n["id"].as_str().unwrap_or("")[..8.min(n["id"].as_str().unwrap_or("").len())];
-        let updated = &n["updatedAt"].as_str().unwrap_or("")[..10];
+        let nid = truncate_chars(n["id"].as_str().unwrap_or(""), 8);
+        let updated = truncate_chars(n["updatedAt"].as_str().unwrap_or(""), 10);
         lines.push(format!("  [{nid}] {title} ({updated})"));
     }
     lines.push("\n提示：使用 jc9_note_read 传入笔记ID 读取全文，或用 jc9_note_search 进行语义搜索。".into());
@@ -853,8 +891,16 @@ async fn cmd_note_groups(state: &Arc<AppState>) -> Result<Value, String> {
 async fn cmd_database_stats(state: &Arc<AppState>) -> Result<Value, String> {
     let db = get_db(state)?;
     let conn = db.lock().unwrap_or_else(|e| e.into_inner());
+    // 使用白名单匹配表名，避免 SQL 注入风险
     let count = |table: &str| -> i64 {
-        conn.query_row(&format!("SELECT COUNT(*) FROM {}", table), [], |r| r.get(0)).unwrap_or(-1)
+        let sql = match table {
+            "knowledge" => "SELECT COUNT(*) FROM knowledge",
+            "embeddings" => "SELECT COUNT(*) FROM embeddings",
+            "vec_embeddings" => "SELECT COUNT(*) FROM vec_embeddings",
+            "knowledge_fts" => "SELECT COUNT(*) FROM knowledge_fts",
+            _ => return -1,
+        };
+        conn.query_row(sql, [], |r| r.get(0)).unwrap_or(-1)
     };
     let note_count: i64 = conn.query_row("SELECT COUNT(*) FROM notes WHERE is_deleted=0", [], |r| r.get(0)).unwrap_or(0);
     let stats = json!({
