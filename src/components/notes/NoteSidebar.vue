@@ -111,6 +111,7 @@ const renameNoteId = ref('')
 const deleteConfirmShow = ref(false)
 const deleteNoteId = ref('')
 const deleteNoteTitle = ref('')
+const deletePermanent = ref(false)
 
 onMounted(async () => {
   await store.loadGroups()
@@ -192,7 +193,15 @@ async function moveNoteToGroup(groupId: string | null) {
     closeCtx()
   } catch (e) { console.error(e) }
 }
-async function confirmDelete() { await store.removeNote(deleteNoteId.value); deleteConfirmShow.value = false }
+async function confirmDelete() {
+  if (deletePermanent.value) {
+    await store.permanentlyDeleteNote(deleteNoteId.value)
+  } else {
+    await store.removeNote(deleteNoteId.value)
+  }
+  deleteConfirmShow.value = false
+  deletePermanent.value = false
+}
 
 // ── Computed ──
 
@@ -366,7 +375,7 @@ onMounted(() => document.addEventListener('click', closeGroupCtx))
         <span class="ns-label">{{ n.title || '无标题' }}</span>
         <button class="ns-restore-btn" @click.stop="store.restoreNote(n.id)" title="恢复">恢复</button>
         <button class="ns-del" style="display:inline"
-          @click.stop="deleteNoteId = n.id; deleteNoteTitle = n.title || '无标题'; deleteConfirmShow = true"
+          @click.stop="deleteNoteId = n.id; deleteNoteTitle = n.title || '无标题'; deletePermanent = true; deleteConfirmShow = true"
           title="永久删除">✕</button>
       </div>
     </div>
@@ -498,10 +507,10 @@ onMounted(() => document.addEventListener('click', closeGroupCtx))
         <div class="mw" style="min-width:320px">
           <div class="mt">删除笔记</div>
           <div class="mb">
-            <p style="color:var(--jc-text-secondary);font-size:12px">确定要删除笔记「{{ deleteNoteTitle }}」吗？<br /><span
-                style="font-size:11px">删除后可在回收站恢复</span></p>
+            <p style="color:var(--jc-text-secondary);font-size:12px">确定要{{ deletePermanent ? '永久' : '' }}删除笔记「{{ deleteNoteTitle }}」吗？<br /><span
+                style="font-size:11px">{{ deletePermanent ? '此操作不可恢复' : '删除后可在回收站恢复' }}</span></p>
             <div class="acts"><button class="btn" @click="deleteConfirmShow = false">取消</button><button class="btn pri"
-                style="background:var(--jc-color-error)" @click="confirmDelete">删除</button></div>
+                :style="{ background: deletePermanent ? '#da3633' : 'var(--jc-color-error)' }" @click="confirmDelete">{{ deletePermanent ? '永久删除' : '删除' }}</button></div>
           </div>
         </div>
       </div>

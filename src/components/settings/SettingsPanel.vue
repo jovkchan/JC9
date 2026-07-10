@@ -341,6 +341,28 @@ async function regenerateMcpKey() {
   finally { mcpLoading.value = false }
 }
 
+function handleConfigExpand(e: Event) {
+  const details = e.target as HTMLDetailsElement
+  if (details?.open) loadMcpServerStatus()
+}
+
+const mcpConfigPreview = computed(() => {
+  const key = showMcpKey.value ? mcpServerKey.value : 'YOUR_API_KEY'
+  return JSON.stringify({
+    mcpServers: {
+      jc9: {
+        type: 'http',
+        url: `${mcpServerUrl.value}/sse?api_key=${key}`
+      }
+    }
+  }, null, 2)
+})
+
+function copyMcpConfigJson() {
+  navigator.clipboard.writeText(mcpConfigPreview.value)
+  status.pushMessage('MCP 配置 JSON 已复制', 'success')
+}
+
 function copyMcpUrl() {
   navigator.clipboard.writeText(mcpServerUrl.value + '/sse')
   status.pushMessage('MCP Server 地址已复制', 'success')
@@ -597,7 +619,7 @@ onMounted(() => {
                 <div v-if="newModelForm.provider === 'vllm'" class="vllm-model-area">
                   <div class="vllm-toolbar">
                     <span class="vllm-count" v-if="!loadingModels">{{ vllmModels.length }} 个模型</span>
-                    <button class="vllm-refresh-btn" :disabled="loadingModels" @click="fetchVllmModelsForm">🔄 刷新</button>
+                    <button class="vllm-refresh-btn" :disabled="loadingModels" @click="fetchVllmModelsForm">刷新</button>
                   </div>
                   <div v-if="loadingModels" class="vllm-loading">获取中...</div>
                   <div v-else-if="vllmModels.length === 0" class="vllm-empty">点击刷新从 /models 获取</div>
@@ -738,20 +760,14 @@ onMounted(() => {
                 <span v-if="mcpLoading" style="font-size:11px;color:var(--jc-text-secondary)">处理中...</span>
               </div>
               <div v-if="mcpServerMsg" :class="['mcp-server-msg', { success: mcpServerMsg.startsWith('✅'), error: mcpServerMsg.startsWith('❌') }]">{{ mcpServerMsg }}</div>
-              <details style="margin-top:6px;font-size:11px">
-                <summary style="cursor:pointer;color:var(--jc-text-secondary)">📖 在其他 AI Agent 中配置（点击展开）</summary>
+              <details style="margin-top:6px;font-size:11px" @toggle="handleConfigExpand">
+                <summary style="cursor:pointer;color:var(--jc-text-secondary);display:inline-flex;align-items:center;gap:6px">
+                  在其他 AI Agent 中配置（点击展开）
+                  <button class="mcp-copy-btn" @click.stop.prevent="copyMcpConfigJson" title="复制配置 JSON">复制</button>
+                </summary>
                 <div style="margin-top:6px;background:var(--jc-bg-elevated);padding:8px;border-radius:4px;font-size:10px;line-height:1.6">
-                  <p><b>Cline / Claude Desktop 配置：</b></p>
-                  <pre style="background:var(--jc-bg-input);padding:6px;border-radius:3px;overflow-x:auto;white-space:pre-wrap">{
-  "mcpServers": {
-    "jc9": {
-      "url": "{{ mcpServerUrl }}/sse",
-      "headers": {
-        "Authorization": "Bearer {{ showMcpKey ? mcpServerKey : 'YOUR_API_KEY' }}"
-      }
-    }
-  }
-}</pre>
+                  <p><b>VS Code / Cline 配置：</b></p>
+                  <pre style="background:var(--jc-bg-input);padding:6px;border-radius:3px;overflow-x:auto;white-space:pre-wrap">{{ mcpConfigPreview }}</pre>
                   <p style="margin-top:4px;color:var(--jc-text-secondary)">将以上 JSON 添加到目标工具的 MCP 配置文件中即可连接。</p>
                 </div>
               </details>

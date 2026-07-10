@@ -230,6 +230,16 @@ async fn handle_sse(
     state.sse_clients.write().await.insert(client_id.clone(), tx.clone());
     let _ = tx.send(Ok(Event::default().event("endpoint").data("/message"))).await;
     let _ = tx.send(Ok(Event::default().event("initialized").data("{}"))).await;
+    // 每 30 秒心跳保活，防止 SSE 超时断开
+    let keepalive_tx = tx.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+            if keepalive_tx.send(Ok(Event::default().comment("keepalive"))).await.is_err() {
+                break; // 客户端已断开
+            }
+        }
+    });
     Ok(Sse::new(ReceiverStream::new(rx)))
 }
 
@@ -364,6 +374,31 @@ async fn handle_tools_list() -> Result<Value, String> {
                 "name": "jc9_reindex",
                 "description": "重建全部知识条目的向量嵌入。遍历 knowledge 表，逐条重新生成 n-gram 词袋向量并写入 embeddings 和 vec_embeddings 表。执行耗时与条目数成正比。",
                 "inputSchema": {"type":"object","properties":{},"required":[]}
+            },
+            {
+                "name": "jc9_note_update",
+                "description": "更新已有笔记的标题和/或正文。需要笔记ID（从jc9_note_search或jc9_note_list获取），title 和 content 至少提供一个，tags 可选。更新后自动同步知识库向量。",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type":"string","description":"笔记ID，从jc9_note_search或jc9_note_list返回结果中获取"},
+                        "title": {"type":"string","description":"可选：新标题"},
+                        "content": {"type":"string","description":"可选：新正文（Markdown）"},
+                        "tags": {"type":"array","items":{"type":"string"},"description":"可选：新标签列表"}
+                    },
+                    "required": ["id"]
+                }
+            },
+            {
+                "name": "jc9_note_delete",
+                "description": "删除笔记（软删除，可在回收站恢复）。需要笔记ID。删除后自动从知识库移除向量索引。",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type":"string","description":"笔记ID，从jc9_note_search或jc9_note_list返回结果中获取"}
+                    },
+                    "required": ["id"]
+                }
             }
         ]
     }))
@@ -388,6 +423,8 @@ async fn handle_tools_call(state: &Arc<AppState>, msg: &McpMessage) -> Result<Va
         "jc9_note_groups" => cmd_note_groups(state).await,
         "jc9_database_stats" => cmd_database_stats(state).await,
         "jc9_reindex" => cmd_reindex(state).await,
+        "jc9_note_update" => cmd_note_update(state, &args).await,
+        "jc9_note_delete" => cmd_note_delete(state, &args).await,
         _ => Err(format!("未知工具: {}", tool_name)),
     }
 }
@@ -666,8 +703,8 @@ async fn cmd_note_create(state: &Arc<AppState>, args: &Value) -> Result<Value, S
     let title = args["title"].as_str().ok_or("缺少 title 参数")?;
     let content = args["content"].as_str().ok_or("缺少 content 参数")?;
     // 未指定 groupId 时取白名单第一个分组，白名单为空则不设分组
-    let group_id = args["groupId"].as_str().map(|s| s.to_string()).or_else(|| state.group_ids.blocking_read().first().map(|s| s.clone()));
-    let group_id = group_id.as_deref();
+    let default_gid = state.group_ids.read().await.first().cloned();
+    let group_id = args["groupId"].as_str().or(default_gid.as_deref());
     let tags: Vec<String> = args["tags"].as_array()
         .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
         .unwrap_or_default();
@@ -712,9 +749,16 @@ async fn cmd_note_update_title(state: &Arc<AppState>, args: &Value) -> Result<Va
     let now = Utc::now().to_rfc3339();
 
     // 先读内容（释放锁），再更新标题
-    let content = {
+    let (content, full_id) = {
         let conn = db.lock().unwrap_or_else(|e| e.into_inner());
-        read_note_from_db(&conn, note_id)?.and_then(|n| n["content"].as_str().map(String::from))
+        let note = read_note_from_db(&conn, note_id)?;
+        match note {
+            Some(ref n) => (
+                n["content"].as_str().map(String::from),
+                n["id"].as_str().map(String::from).unwrap_or_else(|| note_id.to_string()),
+            ),
+            None => (None, note_id.to_string()),
+        }
     };
     if content.is_none() {
         return Err("笔记不存在或已删除".into());
@@ -723,13 +767,13 @@ async fn cmd_note_update_title(state: &Arc<AppState>, args: &Value) -> Result<Va
     let conn = db.lock().unwrap_or_else(|e| e.into_inner());
     conn.execute(
         "UPDATE notes SET title=?1,updated_at=?2 WHERE id=?3 AND is_deleted=0",
-        params![new_title, now, note_id],
+        params![new_title, now, full_id],
     ).map_err(|e| format!("更新标题失败: {}", e))?;
     drop(conn);
 
     // 异步更新知识库
     let kb = get_kb(state)?;
-    let nid = note_id.to_string();
+    let nid = full_id.clone();
     let nt = new_title.to_string();
     if let Some(c) = content {
         tokio::spawn(async move {
@@ -839,4 +883,88 @@ async fn cmd_reindex(state: &Arc<AppState>) -> Result<Value, String> {
         })),
         Err(e) => Err(format!("重建失败: {}", e)),
     }
+}
+
+// ══════════════════════════════════════════════════════════════
+// cmd_note_update — 更新笔记（标题/正文/标签）
+// ══════════════════════════════════════════════════════════════
+
+async fn cmd_note_update(state: &Arc<AppState>, args: &Value) -> Result<Value, String> {
+    let db = get_db(state)?;
+    let note_id = args["id"].as_str().ok_or("缺少 id 参数")?;
+    let new_title = args["title"].as_str();
+    let new_content = args["content"].as_str();
+    let new_tags: Option<Vec<String>> = args["tags"].as_array()
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect());
+
+    if new_title.is_none() && new_content.is_none() && new_tags.is_none() {
+        return Err("至少需要提供 title、content 或 tags 中的一个".into());
+    }
+
+    let now = Utc::now().to_rfc3339();
+    let conn = db.lock().unwrap_or_else(|e| e.into_inner());
+
+    // 读取现笔记
+    let existing = read_note_from_db(&conn, note_id)?
+        .ok_or_else(|| format!("笔记不存在: {}", note_id))?;
+
+    let title = new_title.unwrap_or(existing["title"].as_str().unwrap_or(""));
+    let content = new_content.unwrap_or(existing["content"].as_str().unwrap_or(""));
+    let tags = new_tags.unwrap_or_else(|| {
+        existing["tags"].as_array()
+            .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .unwrap_or_default()
+    });
+    let tags_json = serde_json::to_string(&tags).unwrap_or_default();
+    let full_id = existing["id"].as_str().unwrap_or(note_id);
+
+    conn.execute(
+        "UPDATE notes SET title=?1, content=?2, tags=?3, updated_at=?4 WHERE id=?5 AND is_deleted=0",
+        params![title, content, tags_json, now, full_id],
+    ).map_err(|e| format!("更新笔记失败: {}", e))?;
+    drop(conn);
+
+    // 异步更新知识库向量
+    let kb = get_kb(state)?;
+    let nid = full_id.to_string();
+    let t = title.to_string();
+    let c = content.to_string();
+    tokio::spawn(async move {
+        kb.remove_entry(&format!("note_{}", nid)).await;
+        kb.add_entry(KbEntry {
+            id: format!("note_{}", nid), title: t, content: c,
+            entry_type: KbEntryType::ConfigNote, tags,
+            source_session: None, confidence: 0.0, is_draft: false,
+            created_at: Utc::now(), updated_at: Utc::now(), embedding: None,
+        }).await;
+    });
+
+    Ok(json!({"content":[{"type":"text","text":format!("✅ 笔记已更新: {}",note_id)}]}))
+}
+
+// ══════════════════════════════════════════════════════════════
+// cmd_note_delete — 删除笔记（软删除）
+// ══════════════════════════════════════════════════════════════
+
+async fn cmd_note_delete(state: &Arc<AppState>, args: &Value) -> Result<Value, String> {
+    let db = get_db(state)?;
+    let note_id = args["id"].as_str().ok_or("缺少 id 参数")?;
+
+    let conn = db.lock().unwrap_or_else(|e| e.into_inner());
+    let note = read_note_from_db(&conn, note_id)?.ok_or_else(|| format!("笔记不存在: {}", note_id))?;
+    let full_id = note["id"].as_str().unwrap_or(note_id);
+    conn.execute(
+        "UPDATE notes SET is_deleted=1, updated_at=?1 WHERE id=?2",
+        params![Utc::now().to_rfc3339(), full_id],
+    ).map_err(|e| format!("删除笔记失败: {}", e))?;
+    drop(conn);
+
+    // 异步从知识库移除
+    let kb = get_kb(state)?;
+    let nid = note_id.to_string();
+    tokio::spawn(async move {
+        kb.remove_entry(&format!("note_{}", nid)).await;
+    });
+
+    Ok(json!({"content":[{"type":"text","text":format!("✅ 笔记已删除（可在回收站恢复）: {}",note_id)}]}))
 }

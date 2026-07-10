@@ -564,7 +564,7 @@ fn delete_note_group(state: State<'_, Mutex<AppState>>, id: String) -> Result<()
 
 #[tauri::command]
 fn get_notes(state: State<'_, Mutex<AppState>>, group_id: Option<String>) -> Result<Vec<Note>, String> {
-    state.lock().map_err(|e| e.to_string())?.db.get_notes(group_id.as_deref(), false)
+    state.lock().map_err(|e| e.to_string())?.db.get_notes(group_id.as_deref(), true)
 }
 
 #[tauri::command]
