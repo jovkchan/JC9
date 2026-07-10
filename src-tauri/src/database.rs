@@ -742,6 +742,7 @@ pub struct WorkflowStep {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 pub struct Workflow {
     pub id: String,
     pub name: String,

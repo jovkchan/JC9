@@ -1,13 +1,30 @@
 <script setup lang="ts">
-import { ref, watch, onBeforeUnmount } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useNotesStore } from '@/stores/notes'
 import { useExecInTerminal } from '@/composables/useExecInTerminal'
 import type { Note } from '@/types/notes'
 import { useEditor, EditorContent } from '@tiptap/vue-3'
+import { Extension } from '@tiptap/core'
 import { Markdown } from '@tiptap/markdown'
 import StarterKit from '@tiptap/starter-kit'
 import Image from '@tiptap/extension-image'
 import Link from '@tiptap/extension-link'
+import { mergeAttributes } from '@tiptap/core'
+
+// 自定义链接：jclink:// 渲染为 span（避免浏览器导航），其他正常渲染为 a
+const CustomLink = Link.extend({
+  renderHTML({ HTMLAttributes }) {
+    const href = (HTMLAttributes.href as string) || ''
+    if (href.startsWith('jclink://note/')) {
+      return ['span', mergeAttributes(HTMLAttributes, {
+        class: 'note-link',
+        'data-note-id': href.replace('jclink://note/', ''),
+        title: href,
+      }), 0]
+    }
+    return ['a', mergeAttributes(HTMLAttributes, { rel: 'noopener noreferrer' }), 0]
+  },
+})
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { Table } from '@tiptap/extension-table'
@@ -19,8 +36,120 @@ import Highlight from '@tiptap/extension-highlight'
 import Placeholder from '@tiptap/extension-placeholder'
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
 import { common, createLowlight } from 'lowlight'
+import { Plugin, PluginKey } from 'prosemirror-state'
+import SlashCommandMenu from './SlashCommandMenu.vue'
 
 const lowlight = createLowlight(common)
+
+// ── Slash Command State ──
+const slashMenuVisible = ref(false)
+const slashMenuRect = ref<{ top: number; left: number } | null>(null)
+const slashFromPos = ref<number | null>(null)  // position of '/' in the doc
+
+function showSlashMenu(view: { coordsAtPos: (pos: number) => { top: number; left: number; bottom: number; right: number } }, pos: number) {
+  const coords = view.coordsAtPos(pos)
+  const menuHeight = 320 // 菜单最大高度
+  const spaceBelow = window.innerHeight - coords.bottom
+  const spaceAbove = coords.top
+  // 下面空间不足且上方空间更大 → 向上弹出
+  const flipUp = spaceBelow < menuHeight && spaceAbove > spaceBelow
+  const gap = 8 // 光标与菜单间距
+  slashMenuRect.value = {
+    top: flipUp ? undefined : coords.bottom + gap,
+    bottom: flipUp ? window.innerHeight - coords.top + gap : undefined,
+    left: coords.left,
+    flipUp,
+  } as any
+  slashMenuVisible.value = true
+  slashFromPos.value = pos
+}
+
+function hideSlashMenu() {
+  slashMenuVisible.value = false
+  slashMenuRect.value = null
+  slashFromPos.value = null
+}
+
+function slashInsertLink(noteId: string, noteTitle: string) {
+  const ed = editor.value
+  if (!ed || slashFromPos.value === null) return
+  const from = slashFromPos.value
+  ed.chain()
+    .focus()
+    .deleteRange({ from, to: ed.state.selection.from })
+    .insertContent({
+      type: 'text',
+      text: noteTitle,
+      marks: [{ type: 'link', attrs: { href: `jclink://note/${noteId}` } }],
+    })
+    .run()
+  hideSlashMenu()
+}
+
+function slashExecuteCommand(cmdId: string) {
+  const ed = editor.value
+  if (!ed) return
+  // 删除 / 字符
+  if (slashFromPos.value !== null) {
+    const from = slashFromPos.value
+    ed.chain().focus().deleteRange({ from, to: ed.state.selection.from }).run()
+  }
+  switch (cmdId) {
+    case 'table': ed.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(); break
+    case 'code': ed.chain().focus().toggleCodeBlock().run(); break
+    case 'hr': ed.chain().focus().setHorizontalRule().run(); break
+    case 'task': ed.chain().focus().toggleTaskList().run(); break
+  }
+  hideSlashMenu()
+}
+
+// 笔记链接点击跳转
+function handleJclinkClick(e: MouseEvent) {
+  const target = e.target as HTMLElement
+  const linkEl = target.closest('.note-link') as HTMLElement | null
+  if (!linkEl) return
+  e.preventDefault()
+  e.stopPropagation()
+  const noteId = linkEl.dataset.noteId
+  if (noteId) store.openNoteTab(noteId)
+}
+
+onMounted(() => document.addEventListener('click', handleJclinkClick))
+onBeforeUnmount(() => document.removeEventListener('click', handleJclinkClick))
+
+// ProseMirror plugin: detect '/' at start of line
+const slashPluginKey = new PluginKey('slash-command')
+const slashPlugin = new Plugin({
+  key: slashPluginKey,
+  props: {
+    handleTextInput(view, from, _to, text) {
+      if (text !== '/') return false
+      // Check if '/' is at start of line or after whitespace at start of line
+      const $pos = view.state.doc.resolve(from)
+      const nodeBefore = $pos.nodeBefore
+      const isAtLineStart = $pos.parentOffset === 0
+      const isAfterSpace = nodeBefore?.isText && nodeBefore.text?.endsWith(' ')
+      const isAfterNewline = !nodeBefore
+      if (!isAtLineStart && !isAfterSpace && !isAfterNewline) return false
+      // Don't trigger inside code blocks
+      if (view.state.selection.$head.parent.type.name === 'codeBlock') return false
+      showSlashMenu(view, from)  // from 是 / 的插入位置
+      return false // let the '/' be typed normally
+    },
+    handleKeyDown(_view, event) {
+      if (!slashMenuVisible.value) return false
+      if (event.key === 'Escape') {
+        hideSlashMenu()
+        return true
+      }
+      // Don't interfere - menu handles its own keyboard
+      if (['ArrowUp', 'ArrowDown', 'Enter'].includes(event.key) && slashMenuVisible.value) {
+        return true // absorb these keys, menu handles them
+      }
+      return false
+    },
+  },
+})
 
 const store = useNotesStore()
 
@@ -115,8 +244,8 @@ const editor = useEditor({
     Markdown,
     Underline,
     Highlight.configure({ multicolor: true }),
-    Link.configure({
-      openOnClick: false,
+    CustomLink.configure({
+      openOnClick: true,
       HTMLAttributes: { rel: 'noopener noreferrer' },
     }),
     Image.configure({ inline: false }),
@@ -128,8 +257,13 @@ const editor = useEditor({
     TableHeader,
     CodeBlockLowlight.configure({ lowlight }),
     Placeholder.configure({
-      placeholder: '开始写点什么...',
+      placeholder: '开始写点什么...（输入 / 打开命令菜单）',
       emptyEditorClass: 'is-editor-empty',
+    }),
+    // Slash command extension
+    Extension.create({
+      name: 'slashCommand',
+      addProseMirrorPlugins() { return [slashPlugin] },
     }),
   ],
   editorProps: {
@@ -338,6 +472,15 @@ onBeforeUnmount(() => {
     <div class="tiptap-wrapper" @contextmenu="handleEditorContextMenu">
       <EditorContent :editor="editor" />
     </div>
+
+    <!-- Slash Command Menu -->
+    <SlashCommandMenu
+      :visible="slashMenuVisible"
+      :editorRect="slashMenuRect"
+      @close="hideSlashMenu"
+      @insertLink="slashInsertLink"
+      @command="slashExecuteCommand"
+    />
 
     <div class="editor-footer">
       <div class="tag-area">
@@ -646,6 +789,16 @@ onBeforeUnmount(() => {
     text-decoration: underline;
     cursor: pointer;
     &:hover { color: var(--jc-color-accent-hover); }
+  }
+  // 笔记内部链接
+  .note-link {
+    color: #58a6ff;
+    text-decoration: none;
+    border-bottom: 1px dashed #58a6ff;
+    padding: 0 1px;
+    cursor: pointer;
+    &:hover { background: rgba(88,166,255,0.1); border-bottom-style: solid; }
+    &::before { content: '📝 '; font-size: 0.85em; }
   }
 
   // Images
