@@ -538,34 +538,35 @@ async fn cmd_note_search(state: &Arc<AppState>, args: &Value) -> Result<Value, S
         kb.search(&q, l * 2)
     );
 
-    // 2. 加权合并（向量权重 0.55，FTS5 权重 0.45）
-    let mut scored: std::collections::HashMap<String, (f32, &str)> = std::collections::HashMap::new();
+    // 2. RRF (Reciprocal Rank Fusion) 合并 — 比加权求和更鲁棒
+    //    score = Σ 1/(k + rank_i)，k=60
+    const RRF_K: f32 = 60.0;
+    let mut rrf: std::collections::HashMap<String, (f32, &str)> = std::collections::HashMap::new();
 
-    // 向量结果：score ∈ [0,1] 余弦相似度
-    for (sid, score, _) in &semantic {
+    for (rank, (sid, _, _)) in semantic.iter().enumerate() {
         if let Some(nid) = sid.strip_prefix("note_") {
-            scored.entry(nid.to_string())
-                .and_modify(|(s, src)| { *s += score * 0.55; *src = "hybrid"; })
-                .or_insert((score * 0.55, "vector"));
+            let s = 1.0 / (RRF_K + rank as f32 + 1.0);
+            rrf.entry(nid.to_string())
+                .and_modify(|(sc, src)| { *sc += s; *src = "hybrid"; })
+                .or_insert((s, "vector"));
         }
     }
-
-    // FTS5 结果：score 用 confidence 归一化，[0,1]
-    for entry in &keyword {
+    for (rank, entry) in keyword.iter().enumerate() {
         if let Some(nid) = entry.id.strip_prefix("note_") {
-            let kw_score = entry.confidence.min(1.0) as f32;
-            scored.entry(nid.to_string())
-                .and_modify(|(s, src)| { *s += kw_score * 0.45; *src = "hybrid"; })
-                .or_insert((kw_score * 0.45, "keyword"));
+            let s = 1.0 / (RRF_K + rank as f32 + 1.0);
+            rrf.entry(nid.to_string())
+                .and_modify(|(sc, src)| { *sc += s; *src = "hybrid"; })
+                .or_insert((s, "keyword"));
         }
     }
 
-    // 按加权分排序
-    let mut ranked: Vec<(String, f32, &str)> = scored.into_iter()
-        .map(|(id, (score, src))| (id, score, src))
+    // 按 RRF 分排序，归一化到 [0,1]
+    let max_rrf = if rrf.is_empty() { 1.0 } else { rrf.values().map(|(s, _)| *s).fold(0.0f32, f32::max) };
+    let mut ranked: Vec<(String, f32, &str)> = rrf.into_iter()
+        .map(|(id, (score, src))| (id, if max_rrf > 0.0 { score / max_rrf } else { 0.0 }, src))
         .collect();
     ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    ranked.truncate(l * 3); // 多取一些做分组过滤
+    ranked.truncate(l * 3);
 
     // 3. 先读取白名单（异步），再锁 DB
     let whitelist = state.group_ids.read().await.clone();

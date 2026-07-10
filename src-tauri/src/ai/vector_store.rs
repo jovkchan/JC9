@@ -246,29 +246,37 @@ impl VectorStore {
         let mut vec = vec![0.0f32; dim];
         let lower = text.to_lowercase();
         let chars: Vec<char> = lower.chars().collect();
-        if chars.len() < 3 {
-            // 短文本：直接用字符填充
-            for (_i, &c) in chars.iter().enumerate() {
-                let bucket = (c as usize * 2654435761) % dim;
-                vec[bucket] += 1.0;
-            }
-            return Self::normalize(&vec);
-        }
+        if chars.is_empty() { return vec; }
+
         let mut total = 0u32;
-        for window in chars.windows(3) {
-            let hash = (window[0] as u64).wrapping_mul(31).wrapping_add(window[1] as u64).wrapping_mul(31).wrapping_add(window[2] as u64);
-            let bucket = ((hash.wrapping_mul(2654435761)) as usize) % dim;
-            // 用 TF-IDF 风格：词频越高越重要
-            vec[bucket] += 1.0;
+        let hash_ngram = |s: &[char]| -> usize {
+            let h = s.iter().fold(0u64, |acc, &c| acc.wrapping_mul(31).wrapping_add(c as u64));
+            ((h.wrapping_mul(2654435761)) as usize) % dim
+        };
+
+        // 2-gram
+        for w in chars.windows(2) {
+            vec[hash_ngram(w)] += 1.0;
             total += 1;
         }
+        // 3-gram (higher weight)
+        for w in chars.windows(3) {
+            vec[hash_ngram(w)] += 1.5;
+            total += 1;
+        }
+
         if total == 0 { return vec; }
-        // TF-IDF 权重（对数缩放+归一化）
+
+        // BM25-style TF saturation
+        let avg_tf = (total as f32 / dim as f32).max(0.001);
+        let k1 = 1.2f32;
         for val in vec.iter_mut() {
             if *val > 0.0 {
-                *val = (1.0 + (*val).ln()) / (1.0 + (total as f32).ln());
+                let tf = *val;
+                *val = (tf * (k1 + 1.0)) / (tf + k1 * (1.0 - 0.75 + 0.75 * avg_tf));
             }
         }
+
         Self::normalize(&vec)
     }
 
