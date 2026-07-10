@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, nextTick } from 'vue'
+import { ref, onMounted, computed, nextTick, reactive } from 'vue'
 import { useNotesStore } from '@/stores/notes'
 import { invoke } from '@tauri-apps/api/core'
 import ActivityCalendar from './ActivityCalendar.vue'
@@ -16,6 +16,12 @@ const editingGroupId = ref('')
 const editingGroupName = ref('')
 const calendarOpen = ref(false)
 const showTrash = ref(false)
+const readNoteIds = reactive(new Set<string>(JSON.parse(localStorage.getItem('jc9_read_notes') || '[]')))
+
+function markRead(noteId: string) {
+  readNoteIds.add(noteId)
+  localStorage.setItem('jc9_read_notes', JSON.stringify([...readNoteIds]))
+}
 
 const searchQuery = computed({
   get: () => store.searchQuery,
@@ -134,7 +140,8 @@ async function confirmRenameGroup() {
 }
 
 function handleNewNote() { store.openNoteTab('') }
-function handleOpenNote(noteId: string) { store.selectedNoteId = noteId; store.openNoteTab(noteId) }
+function handleRefresh() { store.loadAllNotes(); store.loadGroups() }
+function handleOpenNote(noteId: string) { store.selectedNoteId = noteId; store.openNoteTab(noteId); markRead(noteId) }
 function handleSelectDate(date: string | null) { filterDate.value = date }
 
 function smartPosY(e: MouseEvent, menuH: number): { y: number; upward: boolean; bottom: number } {
@@ -181,7 +188,7 @@ async function moveNoteToGroup(groupId: string | null) {
   if (!ctxNote.value) return
   try {
     await invoke('move_note', { noteId: ctxNote.value.id, groupId })
-    await store.loadNotes(store.selectedGroupId)
+    await store.loadAllNotes()  // 加载全部笔记，而非单个分组
     closeCtx()
   } catch (e) { console.error(e) }
 }
@@ -312,6 +319,12 @@ onMounted(() => document.addEventListener('click', closeGroupCtx))
           <path d="M8 3v10M3 8h10" />
         </svg>
       </button>
+      <button class="ns-btn icon" title="刷新列表" @click="handleRefresh">
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M1 8a7 7 0 0 1 13.2-3.2M15 8a7 7 0 0 1-13.2 3.2"/>
+          <path d="M11 1.5V5h-3.5M5 14.5V11h3.5"/>
+        </svg>
+      </button>
       <button class="ns-btn icon" :class="{ on: showTrash }" @click="showTrash = !showTrash" title="回收站">
         <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3"
           stroke-linecap="round" stroke-linejoin="round">
@@ -382,7 +395,7 @@ onMounted(() => document.addEventListener('click', closeGroupCtx))
           :class="{ sel: store.selectedNoteId === item.note.id, pinned: item.note.isPinned }"
           :style="{ paddingLeft: (24 + item.depth * 16) + 'px' }"
           @click="handleOpenNote(item.note.id)" @contextmenu="openCtx($event, item.note)" :title="item.note.title">
-          <span class="ns-dot"></span><span class="ns-label">{{ item.note.title || '无标题' }}</span>
+          <span class="ns-dot" :class="[item.note.content ? 'has-content' : 'empty', readNoteIds.has(item.note.id) ? 'read' : '']"></span><span class="ns-label">{{ item.note.title || '无标题' }}</span>
         </div>
       </template>
 
@@ -400,7 +413,7 @@ onMounted(() => document.addEventListener('click', closeGroupCtx))
       <div v-if="starredNotes.length === 0" class="ns-empty">暂无星标笔记</div>
       <div v-for="n in starredNotes" :key="n.id" class="ns-item note" :class="{ sel: store.selectedNoteId === n.id }"
         @click="handleOpenNote(n.id)" @contextmenu="openCtx($event, n)" :title="n.title">
-        <span class="ns-dot"></span><span class="ns-label">{{ n.title || '无标题' }}</span>
+        <span class="ns-dot" :class="[n.content ? 'has-content' : 'empty', readNoteIds.has(n.id) ? 'read' : '']"></span><span class="ns-label">{{ n.title || '无标题' }}</span>
       </div>
     </div>
 
@@ -410,7 +423,7 @@ onMounted(() => document.addEventListener('click', closeGroupCtx))
       <div v-for="n in store.notes.filter(x => !x.isDeleted && x.isArchived)" :key="n.id" class="ns-item note"
         :class="{ sel: store.selectedNoteId === n.id }" @click="handleOpenNote(n.id)" @contextmenu="openCtx($event, n)"
         :title="n.title">
-        <span class="ns-dot"></span><span class="ns-label">{{ n.title || '无标题' }}</span>
+        <span class="ns-dot" :class="[n.content ? 'has-content' : 'empty', readNoteIds.has(n.id) ? 'read' : '']"></span><span class="ns-label">{{ n.title || '无标题' }}</span>
       </div>
     </div>
 
@@ -762,7 +775,12 @@ onMounted(() => document.addEventListener('click', closeGroupCtx))
     height: 5px;
     border-radius: 50%;
     background: var(--jc-text-secondary);
-    flex-shrink: 0
+    flex-shrink: 0;
+    transition: background .2s;
+
+    &.has-content { background: #3fb950; }
+    &.has-content.read { background: #58a6ff; }
+    &.empty { background: var(--jc-text-secondary); opacity: 0.5; }
   }
 
   &.pinned .ns-dot {
