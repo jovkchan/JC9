@@ -578,14 +578,9 @@ const showMemoryModal = ref(false)
 const memoryModalMode = ref<'view' | 'edit'>('view')  // 默认查看模式
 const viewingMemory = ref<Memory | null>(null)
 
-// 记忆按 scope 分组（从当前加载列表中提取）
-const memoryScopes = computed(() => {
-  const scopes = new Set<string>()
-  for (const m of memoryList.value) {
-    if (m.scope) scopes.add(m.scope)
-  }
-  return Array.from(scopes).sort()
-})
+// 记忆按 scope 分组（首次加载全部时缓存，避免筛选后标签消失）
+const allMemoryScopes = ref<string[]>([])
+const memoryScopes = computed(() => allMemoryScopes.value)
 
 async function loadMemoryList() {
   try {
@@ -593,9 +588,28 @@ async function loadMemoryList() {
       search: memorySearch.value,
       page: memoryPage.value,
       pageSize: memoryPageSize,
+      scope: memoryScope.value,
     })
     memoryList.value = result.items
     memoryTotal.value = result.total
+    // 加载"全部"时缓存所有 scope，让标签页始终可见
+    if (!memoryScope.value) {
+      const scopes = new Set<string>()
+      for (const m of result.items) { if (m.scope) scopes.add(m.scope) }
+      allMemoryScopes.value = Array.from(scopes).sort()
+    } else if (allMemoryScopes.value.length === 0) {
+      // scope 标签未缓存时（首次打开就带筛选的场景），先加载一次全部来填充
+      const full = await invoke<{ items: Memory[]; total: number }>('get_memories', {
+        search: '', page: 1, pageSize: 1, scope: '',
+      })
+      // 再请求一次获取所有 scope
+      const all = await invoke<{ items: Memory[]; total: number }>('get_memories', {
+        search: '', page: 1, pageSize: Math.max(full.total, 1), scope: '',
+      })
+      const scopes = new Set<string>()
+      for (const m of all.items) { if (m.scope) scopes.add(m.scope) }
+      allMemoryScopes.value = Array.from(scopes).sort()
+    }
   } catch { memoryList.value = []; memoryTotal.value = 0 }
 }
 
@@ -1046,36 +1060,39 @@ async function compressMemories() {
         </div>
 
         <!-- 记忆 -->
-        <div v-if="activeTab === 'memory'" class="settings-pane">
-          <div style="display:flex;align-items:center;justify-content:space-between">
-            <div>
-              <h3 class="pane-title" style="border:none;padding:0;margin:0">Agent 记忆管理</h3>
-              <p class="pane-desc" style="margin:2px 0 0">基于 AI Agent 记忆系统设计。记忆按 scope（项目）分组隔离。</p>
+        <div v-if="activeTab === 'memory'" class="settings-pane" style="display:flex;flex-direction:column;overflow:hidden;height:100%">
+          <!-- 固定头部：标题、scope 标签、搜索 -->
+          <div style="flex-shrink:0">
+            <div style="display:flex;align-items:center;justify-content:space-between">
+              <div>
+                <h3 class="pane-title" style="border:none;padding:0;margin:0">Agent 记忆管理</h3>
+                <p class="pane-desc" style="margin:2px 0 0">基于 AI Agent 记忆系统设计。记忆按 scope（项目）分组隔离。</p>
+              </div>
+              <button class="footer-btn-save" style="font-size:11px;padding:4px 10px" @click="openCreateMemory">+ 添加记忆</button>
             </div>
-            <button class="footer-btn-save" style="font-size:11px;padding:4px 10px" @click="openCreateMemory">+ 添加记忆</button>
+
+            <!-- Scope Tabs -->
+            <div class="memory-scope-tabs" style="display:flex;gap:4px;margin-top:10px;flex-wrap:wrap">
+              <span :class="['memory-scope-tab', { active: !memoryScope }]" @click="memoryScope = ''; resetMemoryForm(); memoryPage = 1; loadMemoryList()">
+                全部
+              </span>
+              <span v-for="sc in memoryScopes" :key="sc"
+                :class="['memory-scope-tab', { active: memoryScope === sc }]"
+                @click="memoryScope = sc; resetMemoryForm(); memoryPage = 1; loadMemoryList()">
+                {{ sc }}
+              </span>
+            </div>
+
+            <!-- 搜索 -->
+            <div style="display:flex;gap:6px;margin-top:8px">
+              <input v-model="memorySearch" class="form-input" placeholder="搜索标题或内容..." style="flex:1" @keyup.enter="searchMemory" />
+              <button class="footer-btn-save" style="font-size:11px;padding:4px 10px" @click="searchMemory">搜索</button>
+              <button v-if="memorySearch" class="footer-btn-cancel" style="font-size:11px;padding:4px 8px" @click="memorySearch = ''; searchMemory()">清除</button>
+            </div>
           </div>
 
-          <!-- Scope Tabs -->
-          <div class="memory-scope-tabs" style="display:flex;gap:4px;margin-top:10px;flex-wrap:wrap">
-            <span :class="['memory-scope-tab', { active: !memoryScope }]" @click="memoryScope = ''; resetMemoryForm()">
-              全部
-            </span>
-            <span v-for="sc in memoryScopes" :key="sc"
-              :class="['memory-scope-tab', { active: memoryScope === sc }]"
-              @click="memoryScope = sc; resetMemoryForm()">
-              {{ sc }}
-            </span>
-          </div>
-
-          <!-- 搜索 -->
-          <div style="display:flex;gap:6px;margin-top:8px">
-            <input v-model="memorySearch" class="form-input" placeholder="搜索标题或内容..." style="flex:1" @keyup.enter="searchMemory" />
-            <button class="footer-btn-save" style="font-size:11px;padding:4px 10px" @click="searchMemory">搜索</button>
-            <button v-if="memorySearch" class="footer-btn-cancel" style="font-size:11px;padding:4px 8px" @click="memorySearch = ''; searchMemory()">清除</button>
-          </div>
-
-          <!-- 记忆列表 -->
-          <div class="memory-section" style="margin-top:10px">
+          <!-- 滚动列表区域 -->
+          <div class="memory-section" style="margin-top:10px;flex:1;overflow-y:auto;min-height:0">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
               <h4 style="margin:0">📋 记忆列表 ({{ memoryTotal }})</h4>
               <button v-if="compressSelected.length > 1" class="footer-btn-save" style="font-size:11px;padding:3px 8px" @click="compressMemories">🗜 压缩选中 ({{ compressSelected.length }})</button>

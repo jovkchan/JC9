@@ -59,7 +59,7 @@ function clearAll() {
             <span class="np-count">{{ s.messages.length }}</span>
           </div>
           <div class="np-header-right">
-            <button class="np-btn" @click="copyAll" title="复制全部">📋 复制</button>
+            <button class="np-btn" @click="copyAll" title="复制全部"><svg viewBox="0 0 1024 1024" width="14" height="14" fill="currentColor" style="vertical-align:-2px;margin-right:3px"><path d="M281.6 32h374.464a70.4 70.4 0 0 1 49.792 20.608l201.536 201.536a70.4 70.4 0 0 1 20.608 49.792V806.4a57.6 57.6 0 0 1-57.6 57.6H281.6a57.6 57.6 0 0 1-57.6-57.6V89.6a57.6 57.6 0 0 1 57.6-57.6z m19.2 768h550.4a12.8 12.8 0 0 0 12.8-12.8V303.936a6.4 6.4 0 0 0-0.512-2.496l-1.344-2.048-201.536-201.536a6.4 6.4 0 0 0-4.48-1.856H300.8a12.8 12.8 0 0 0-12.8 12.8v678.4c0 7.04 5.76 12.8 12.8 12.8z"/><path d="M256 160v64H172.8a12.8 12.8 0 0 0-12.8 12.8v678.4c0 7.04 5.76 12.8 12.8 12.8h550.4a12.8 12.8 0 0 0 12.8-12.8V832h64v102.4a57.6 57.6 0 0 1-57.6 57.6H153.6a57.6 57.6 0 0 1-57.6-57.6V217.6a57.6 57.6 0 0 1 57.6-57.6H256zM672 64v211.2c0 7.04 5.76 12.8 12.8 12.8H896v64h-243.2a44.8 44.8 0 0 1-44.8-44.8V64h64z"/></svg> 复制</button>
             <button class="np-btn np-btn-danger" @click="clearAll" title="清空">🗑 清空</button>
             <button class="np-close" @click="s.closeNotificationPanel()" title="关闭">✕</button>
           </div>

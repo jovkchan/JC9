@@ -41,6 +41,7 @@ import IconGenerator from '@/components/tools/IconGenerator.vue'
 
 import NoteFeedView from '@/components/notes/NoteFeedView.vue'
 import NoteSettings from '@/components/notes/NoteSettings.vue'
+import VersionHistory from '@/components/notes/VersionHistory.vue'
 import AiHelper from '@/components/tools/AiHelper.vue'
 import FloatingSearch from '@/components/notes/FloatingSearch.vue'
 
@@ -372,13 +373,16 @@ onUnmounted(() => {
         <code class="cmdtext">笔记{{ t.id ? ': ' + (getEditingNote(t.id)?.title || '无标题') : '' }}</code>
         <span v-if="getNoteGroupPath(t.id)" class="note-group-path">{{ getNoteGroupPath(t.id) }}</span>
       </div>
-      <div class="note-body">
-        <NoteEditor
-          v-if="activeNoteId === t.id"
-          :existing-note="getEditingNote(t.id) ?? null"
-          @saved="onNoteSaved"
-          @cancel="notesStore.closeNoteTab(t.id)"
-        />
+      <div class="note-body" :class="{ 'with-history': notesStore.showVersionHistory }">
+        <div class="note-editor-wrapper">
+          <NoteEditor
+            v-if="activeNoteId === t.id"
+            :existing-note="getEditingNote(t.id) ?? null"
+            @saved="onNoteSaved"
+            @cancel="notesStore.closeNoteTab(t.id)"
+          />
+        </div>
+        <VersionHistory v-if="notesStore.showVersionHistory && activeNoteId === t.id" />
       </div>
     </div>
 
@@ -463,6 +467,8 @@ onUnmounted(() => {
 .tool-view-body { flex:1; display:flex; overflow:hidden; }
 .doc-body { flex:1; overflow-y:auto; padding:12px; font-family:'Cascadia Code',Consolas,monospace; font-size:12px; color:var(--jc-text-primary); white-space:pre-wrap; background:var(--jc-bg-app); }
 .note-body { flex:1; display:flex; overflow:hidden; flex-direction:column; }
+.note-body.with-history { flex-direction:row; }
+.note-editor-wrapper { flex:1; display:flex; flex-direction:column; min-height:0; min-width:0; }
 .ctx { @include ctx-menu; min-width:130px; }
 .ci { @include ctx-item; }
 </style>

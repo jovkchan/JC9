@@ -191,12 +191,16 @@ const saving = ref(false)
 const lastSaved = ref('')
 const editNoteId = ref<string | null>(props.existingNote?.id ?? null)
 const activePopover = ref<string | null>(null)
+/** 标记当前是否正在执行自身发起的保存，防止 watcher 回写编辑器内容导致光标跳转 */
+let selfSaving = false
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 
 // ── 响应外部笔记变更（MCP 等外部修改后自动刷新编辑器内容）──
 watch(() => props.existingNote, (newNote) => {
   if (!newNote) return
+  // 自身保存触发的引用变化，不需要回写（内容已在编辑器中）
+  if (selfSaving) return
   // 仅在内容确实不同时更新（避免覆盖用户正在编辑的内容）
   if (newNote.title !== title.value) {
     title.value = newNote.title
@@ -311,12 +315,8 @@ const editor = useEditor({
       class: 'jc9-tiptap-editor',
     },
     clipboardTextSerializer: (slice) => {
-      // 只序列化选中的部分，而非整篇文档
-      try {
-        const json = slice.toJSON()
-        const md = editor.value?.markdown?.serialize(json) ?? ''
-        return md
-      } catch { return '' }
+      // 用单 \n 作为块分隔符，避免粘贴时出现大量空行
+      return slice.content.textBetween(0, slice.content.size, '\n')
     },
   },
   onUpdate: () => {
@@ -382,39 +382,44 @@ function scheduleSave() {
   saveTimer = setTimeout(doSave, 500)
 }
 
-async function doSave() {
+async function doSave(createVersion = false) {
   const md = editor.value?.getMarkdown() ?? ''
   if (!title.value.trim() && !md.trim()) return
   saving.value = true
   syncTags()
-  mergeAllInlineTags()  // 自动将 #内联标签 合并到 tags
+  mergeAllInlineTags()
 
-  if (editNoteId.value) {
-    const existing = store.notes.find(n => n.id === editNoteId.value)
-    if (!existing) { saving.value = false; return }
-    const note: Note = {
-      ...existing,
-      title: title.value,
-      content: md,
-      format: 'markdown',
-      tags: tags.value,
-      updatedAt: new Date().toISOString(),
-    }
-    await store.saveNote(note)
-    emit('saved', note)
-  } else {
-    const note = await store.createNote({
-      title: title.value,
-      content: md,
-      format: 'markdown',
-      tags: tags.value,
-      groupId: store.selectedGroupId,
-      visibility: 'PRIVATE',
-    })
-    if (note) {
-      editNoteId.value = note.id
+  selfSaving = true
+  try {
+    if (editNoteId.value) {
+      const existing = store.notes.find(n => n.id === editNoteId.value)
+      if (!existing) { selfSaving = false; saving.value = false; return }
+      const note: Note = {
+        ...existing,
+        title: title.value,
+        content: md,
+        format: 'markdown',
+        tags: tags.value,
+        updatedAt: new Date().toISOString(),
+      }
+      await store.saveNote(note, createVersion)
       emit('saved', note)
+    } else {
+      const note = await store.createNote({
+        title: title.value,
+        content: md,
+        format: 'markdown',
+        tags: tags.value,
+        groupId: store.selectedGroupId,
+        visibility: 'PRIVATE',
+      })
+      if (note) {
+        editNoteId.value = note.id
+        emit('saved', note)
+      }
     }
+  } finally {
+    selfSaving = false
   }
   lastSaved.value = new Date().toLocaleTimeString()
   saving.value = false
@@ -423,7 +428,7 @@ async function doSave() {
 function handleKeydown(e: KeyboardEvent) {
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
     e.preventDefault()
-    doSave()
+    doSave(true) // 手动保存 → 创建版本快照
   }
 }
 
@@ -455,7 +460,6 @@ onBeforeUnmount(() => {
       <div class="editor-actions">
         <span v-if="lastSaved" class="saved-hint">已保存 {{ lastSaved }}</span>
         <span v-if="saving" class="saving-hint">保存中...</span>
-        <button v-if="existingNote" class="cancel-btn" @click="emit('cancel')">✕</button>
       </div>
     </div>
 
@@ -503,8 +507,18 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="toolbar-group" style="margin-left:auto">
-        <button class="tb-btn" @click="execCmd('undo')" title="撤销">↩</button>
-        <button class="tb-btn" @click="execCmd('redo')" title="重做">↪</button>
+        <button class="tb-btn" @click="execCmd('undo')" title="撤销 Ctrl+Z">↩</button>
+        <button class="tb-btn" @click="execCmd('redo')" title="重做 Ctrl+Shift+Z">↪</button>
+      </div>
+      <div class="toolbar-group">
+        <button class="tb-btn pri" @click="doSave(true)" title="保存并创建版本 Ctrl+Enter" style="font-weight:600">版本保存</button>
+        <button class="tb-btn" @click="store.openVersionHistory()" title="版本历史">
+          <svg t="1783910028647" viewBox="0 0 1024 1024" width="16" height="16" style="vertical-align:middle">
+            <path d="M256 298.666667a85.333333 85.333333 0 1 0 0-170.666667 85.333333 85.333333 0 0 0 0 170.666667z m0 85.333333a170.666667 170.666667 0 1 1 0-341.333333 170.666667 170.666667 0 0 1 0 341.333333z" fill="currentColor"></path>
+            <path d="M298.666667 489.173333V725.333333a85.333333 85.333333 0 0 0 85.333333 85.333334h256v85.333333H384a170.666667 170.666667 0 0 1-170.666667-170.666667V298.666667h85.333334v42.666666a85.333333 85.333333 0 0 0 85.333333 85.333334h256v85.333333H384a169.898667 169.898667 0 0 1-85.333333-22.826667z" fill="currentColor" opacity=".3"></path>
+            <path d="M768 938.666667a85.333333 85.333333 0 1 0 0-170.666667 85.333333 85.333333 0 0 0 0 170.666667z m0 85.333333a170.666667 170.666667 0 1 1 0-341.333333 170.666667 170.666667 0 0 1 0 341.333333zM768 554.666667a85.333333 85.333333 0 1 0 0-170.666667 85.333333 85.333333 0 0 0 0 170.666667z m0 85.333333a170.666667 170.666667 0 1 1 0-341.333333 170.666667 170.666667 0 0 1 0 341.333333z" fill="currentColor"></path>
+          </svg>
+        </button>
       </div>
     </div>
 
@@ -551,7 +565,7 @@ onBeforeUnmount(() => {
         <div class="ctx-item" @click="execCmd('redo')" title="重做"><span class="ctx-icon">↪</span> 重做</div>
         <div class="ctx-divider"></div>
         <div class="ctx-item" @click="doCut"><span class="ctx-icon">✂</span> 剪切</div>
-        <div class="ctx-item" @click="doCopy"><span class="ctx-icon">📋</span> 复制</div>
+        <div class="ctx-item" @click="doCopy"><span class="ctx-icon"><svg viewBox="0 0 1024 1024" width="14" height="14" fill="currentColor"><path d="M281.6 32h374.464a70.4 70.4 0 0 1 49.792 20.608l201.536 201.536a70.4 70.4 0 0 1 20.608 49.792V806.4a57.6 57.6 0 0 1-57.6 57.6H281.6a57.6 57.6 0 0 1-57.6-57.6V89.6a57.6 57.6 0 0 1 57.6-57.6z m19.2 768h550.4a12.8 12.8 0 0 0 12.8-12.8V303.936a6.4 6.4 0 0 0-0.512-2.496l-1.344-2.048-201.536-201.536a6.4 6.4 0 0 0-4.48-1.856H300.8a12.8 12.8 0 0 0-12.8 12.8v678.4c0 7.04 5.76 12.8 12.8 12.8z"/><path d="M256 160v64H172.8a12.8 12.8 0 0 0-12.8 12.8v678.4c0 7.04 5.76 12.8 12.8 12.8h550.4a12.8 12.8 0 0 0 12.8-12.8V832h64v102.4a57.6 57.6 0 0 1-57.6 57.6H153.6a57.6 57.6 0 0 1-57.6-57.6V217.6a57.6 57.6 0 0 1 57.6-57.6H256zM672 64v211.2c0 7.04 5.76 12.8 12.8 12.8H896v64h-243.2a44.8 44.8 0 0 1-44.8-44.8V64h64z"/></svg></span> 复制</div>
         <div class="ctx-item" @click="doPaste"><span class="ctx-icon">📌</span> 粘贴</div>
         <div class="ctx-divider"></div>
         <div class="ctx-title">发送到终端</div>

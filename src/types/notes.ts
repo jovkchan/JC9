@@ -28,6 +28,19 @@ export interface Note {
   updatedAt: string
 }
 
+// ── Note version history ──
+
+export interface NoteVersion {
+  id: string
+  noteId: string
+  title: string
+  content: string
+  format: string
+  tags: string[]
+  version: number
+  createdAt: string
+}
+
 // ── Editor state ──
 
 export interface EditorState {

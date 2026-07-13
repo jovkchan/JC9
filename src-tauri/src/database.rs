@@ -98,6 +98,20 @@ pub struct Note {
 
 fn default_visibility() -> String { "PRIVATE".into() }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteVersion {
+    pub id: String,
+    pub note_id: String,
+    pub title: String,
+    pub content: String,
+    pub format: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    pub version: i32,
+    pub created_at: String,
+}
+
 #[derive(Clone)]
 pub struct Database {
     pub conn: Arc<Mutex<Connection>>,
@@ -168,6 +182,18 @@ impl Database {
             CREATE TABLE IF NOT EXISTS tags (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, color TEXT NOT NULL DEFAULT '', FOREIGN KEY (user_id) REFERENCES users(id));
             CREATE TABLE IF NOT EXISTS resources (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, note_id TEXT, filename TEXT NOT NULL, file_path TEXT NOT NULL, size INTEGER NOT NULL DEFAULT 0, mime_type TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, FOREIGN KEY (user_id) REFERENCES users(id), FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE SET NULL);
             CREATE TABLE IF NOT EXISTS sync_log (id TEXT PRIMARY KEY, table_name TEXT NOT NULL, record_id TEXT NOT NULL, action TEXT NOT NULL, version INTEGER NOT NULL, synced INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS note_versions (
+                id TEXT PRIMARY KEY,
+                note_id TEXT NOT NULL,
+                title TEXT NOT NULL DEFAULT '',
+                content TEXT NOT NULL DEFAULT '',
+                format TEXT NOT NULL DEFAULT 'markdown',
+                tags TEXT NOT NULL DEFAULT '[]',
+                version INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (note_id) REFERENCES notes(id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_note_versions_note_id ON note_versions(note_id);
             CREATE TABLE IF NOT EXISTS knowledge (
                 id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,
@@ -479,6 +505,155 @@ impl Database {
         Ok(())
     }
 
+    // ══════════════════════════════════════════════════════════════
+    // 版本历史管理
+    // ══════════════════════════════════════════════════════════════
+
+    /// 保存笔记版本快照
+    pub fn save_note_version(&self, note: &Note) -> Result<Option<String>, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+
+        // 计算下一个版本号
+        let next_version: i32 = conn.query_row(
+            "SELECT COALESCE(MAX(version), 0) + 1 FROM note_versions WHERE note_id = ?1",
+            params![note.id],
+            |row| row.get(0),
+        ).unwrap_or(1);
+
+        let version_id = uuid::Uuid::new_v4().to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+        let tags_json = serde_json::to_string(&note.tags).unwrap_or_else(|_| "[]".into());
+
+        conn.execute(
+            "INSERT INTO note_versions (id, note_id, title, content, format, tags, version, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![version_id, note.id, note.title, note.content, note.format, tags_json, next_version, now],
+        ).map_err(|e| format!("保存版本快照失败: {}", e))?;
+
+        // 裁剪超出上限（默认 50 条）的旧版本
+        const MAX_VERSIONS: i32 = 50;
+        let count: i32 = conn.query_row(
+            "SELECT COUNT(*) FROM note_versions WHERE note_id = ?1",
+            params![note.id],
+            |row| row.get(0),
+        ).unwrap_or(0);
+        if count > MAX_VERSIONS {
+            conn.execute(
+                "DELETE FROM note_versions WHERE note_id = ?1 AND id NOT IN (SELECT id FROM note_versions WHERE note_id = ?1 ORDER BY version DESC LIMIT ?2)",
+                params![note.id, MAX_VERSIONS],
+            ).ok();
+        }
+
+        Ok(Some(version_id))
+    }
+
+    /// 获取笔记的所有版本（按版本号倒序）
+    pub fn get_note_versions(&self, note_id: &str, limit: usize) -> Result<Vec<NoteVersion>, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn.prepare(
+            "SELECT id, note_id, title, content, format, tags, version, created_at FROM note_versions WHERE note_id = ?1 ORDER BY version DESC LIMIT ?2"
+        ).map_err(|e| e.to_string())?;
+        let rows = stmt.query_map(params![note_id, limit as i64], |row| {
+            let tags_str: String = row.get(5)?;
+            let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
+            Ok(NoteVersion {
+                id: row.get(0)?,
+                note_id: row.get(1)?,
+                title: row.get(2)?,
+                content: row.get(3)?,
+                format: row.get(4)?,
+                tags,
+                version: row.get(6)?,
+                created_at: row.get(7)?,
+            })
+        }).map_err(|e| e.to_string())?;
+        let versions: Vec<NoteVersion> = rows.filter_map(|r| r.ok()).collect();
+        Ok(versions)
+    }
+
+    /// 获取单个版本详情
+    pub fn get_note_version_by_id(&self, version_id: &str) -> Result<Option<NoteVersion>, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn.prepare(
+            "SELECT id, note_id, title, content, format, tags, version, created_at FROM note_versions WHERE id = ?1"
+        ).map_err(|e| e.to_string())?;
+        let mut rows = stmt.query_map(params![version_id], |row| {
+            let tags_str: String = row.get(5)?;
+            let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
+            Ok(NoteVersion {
+                id: row.get(0)?,
+                note_id: row.get(1)?,
+                title: row.get(2)?,
+                content: row.get(3)?,
+                format: row.get(4)?,
+                tags,
+                version: row.get(6)?,
+                created_at: row.get(7)?,
+            })
+        }).map_err(|e| e.to_string())?;
+        Ok(rows.next().and_then(|r| r.ok()))
+    }
+
+    /// 恢复笔记到指定版本：将版本快照内容写回 notes 表
+    pub fn restore_note_version(&self, note_id: &str, version_id: &str) -> Result<Note, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+
+        // 查找版本快照
+        let version = conn.query_row(
+            "SELECT id, note_id, title, content, format, tags, version, created_at FROM note_versions WHERE id = ?1 AND note_id = ?2",
+            params![version_id, note_id],
+            |row| {
+                let tags_str: String = row.get(5)?;
+                let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
+                Ok(NoteVersion {
+                    id: row.get(0)?,
+                    note_id: row.get(1)?,
+                    title: row.get(2)?,
+                    content: row.get(3)?,
+                    format: row.get(4)?,
+                    tags,
+                    version: row.get(6)?,
+                    created_at: row.get(7)?,
+                })
+            }
+        ).map_err(|_| format!("版本不存在: {}", version_id))?;
+
+        // 恢复前，为当前内容创建一个自动保存版本（保险）
+        let current: Option<Note> = conn.query_row(
+            "SELECT id, group_id, title, content, format, is_pinned, tags, visibility, sort_order, version, is_deleted, is_archived, created_at, updated_at FROM notes WHERE id = ?1 AND user_id = 'local'",
+            params![note_id],
+            map_note,
+        ).ok();
+        if let Some(ref cur) = current {
+            let tags_json = serde_json::to_string(&cur.tags).unwrap_or_else(|_| "[]".into());
+            let next_ver: i32 = conn.query_row(
+                "SELECT COALESCE(MAX(version), 0) + 1 FROM note_versions WHERE note_id = ?1",
+                params![note_id],
+                |row| row.get(0),
+            ).unwrap_or(1);
+            let _ = conn.execute(
+                "INSERT INTO note_versions (id, note_id, title, content, format, tags, version, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![uuid::Uuid::new_v4().to_string(), note_id, cur.title, cur.content, cur.format, tags_json, next_ver, chrono::Utc::now().to_rfc3339()],
+            );
+        }
+
+        // 用版本快照内容覆盖笔记
+        let now = chrono::Utc::now().to_rfc3339();
+        let tags_json = serde_json::to_string(&version.tags).unwrap_or_else(|_| "[]".into());
+        conn.execute(
+            "UPDATE notes SET title=?1, content=?2, format=?3, tags=?4, updated_at=?5 WHERE id=?6 AND user_id='local'",
+            params![version.title, version.content, version.format, tags_json, now, note_id],
+        ).map_err(|e| format!("恢复版本失败: {}", e))?;
+
+        // 读取恢复后的笔记返回
+        let restored = conn.query_row(
+            "SELECT id, group_id, title, content, format, is_pinned, tags, visibility, sort_order, version, is_deleted, is_archived, created_at, updated_at FROM notes WHERE id = ?1 AND user_id = 'local'",
+            params![note_id],
+            map_note,
+        ).map_err(|e| format!("恢复后读取失败: {}", e))?;
+
+        Ok(restored)
+    }
+
     /// 确保"未分组"固定分组存在（启动时调用）
     fn ensure_uncategorized_group(&self) -> Result<(), String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
@@ -577,52 +752,68 @@ impl Database {
         Ok(())
     }
 
-    pub fn get_memories(&self, search: &str, page: i64, page_size: i64) -> Result<MemoryPage, String> {
+    pub fn get_memories(&self, search: &str, page: i64, page_size: i64, scope_filter: &str) -> Result<MemoryPage, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let search_pattern = format!("%{}%", search);
+        let has_scope = !scope_filter.is_empty();
 
-        let total: i64 = if search.is_empty() {
-            conn.query_row("SELECT COUNT(*) FROM memories WHERE user_id='local'", [], |r| r.get(0))
-                .map_err(|e| e.to_string())?
-        } else {
-            conn.query_row(
-                "SELECT COUNT(*) FROM memories WHERE user_id='local' AND (title LIKE ?1 OR content LIKE ?1)",
-                params![search_pattern],
-                |r| r.get(0),
-            ).map_err(|e| e.to_string())?
+        let total: i64 = match (search.is_empty(), has_scope) {
+            (true, false) => conn.query_row("SELECT COUNT(*) FROM memories WHERE user_id='local'", [], |r| r.get(0)).map_err(|e| e.to_string())?,
+            (true, true) => conn.query_row("SELECT COUNT(*) FROM memories WHERE user_id='local' AND scope=?1", params![scope_filter], |r| r.get(0)).map_err(|e| e.to_string())?,
+            (false, false) => conn.query_row("SELECT COUNT(*) FROM memories WHERE user_id='local' AND (title LIKE ?1 OR content LIKE ?1)", params![search_pattern], |r| r.get(0)).map_err(|e| e.to_string())?,
+            (false, true) => conn.query_row("SELECT COUNT(*) FROM memories WHERE user_id='local' AND scope=?1 AND (title LIKE ?2 OR content LIKE ?2)", params![scope_filter, search_pattern], |r| r.get(0)).map_err(|e| e.to_string())?,
         };
 
         let offset = (page - 1).max(0) * page_size;
 
-        let items: Vec<Memory> = if search.is_empty() {
+        let items: Vec<Memory> = if search.is_empty() && !has_scope {
             let mut stmt = conn.prepare(
                 "SELECT id, scope, topic_key, title, content, memory_type, tags, created_at, updated_at FROM memories WHERE user_id='local' ORDER BY updated_at DESC LIMIT ?1 OFFSET ?2"
             ).map_err(|e| e.to_string())?;
-            let rows = stmt.query_map(params![page_size, offset], |row| {
-                Ok(Memory {
-                    id: row.get(0)?, scope: row.get(1)?, topic_key: row.get(2)?, title: row.get(3)?, content: row.get(4)?,
-                    memory_type: row.get(5)?,
-                    tags: serde_json::from_str(&row.get::<_,String>(6).unwrap_or_default()).unwrap_or_default(),
-                    created_at: row.get(7)?, updated_at: row.get(8)?,
-                })
-            }).map_err(|e| e.to_string())?;
-            rows.filter_map(|r| r.ok()).collect()
-        } else {
+            let result: Vec<Memory> = stmt.query_map(params![page_size, offset], Self::map_memory_row)
+                .map_err(|e| e.to_string())?
+                .filter_map(|r| r.ok())
+                .collect();
+            result
+        } else if !search.is_empty() && !has_scope {
             let mut stmt = conn.prepare(
                 "SELECT id, scope, topic_key, title, content, memory_type, tags, created_at, updated_at FROM memories WHERE user_id='local' AND (title LIKE ?1 OR content LIKE ?1) ORDER BY updated_at DESC LIMIT ?2 OFFSET ?3"
             ).map_err(|e| e.to_string())?;
-            let rows = stmt.query_map(params![search_pattern, page_size, offset], |row| {
-                Ok(Memory {
-                    id: row.get(0)?, scope: row.get(1)?, topic_key: row.get(2)?, title: row.get(3)?, content: row.get(4)?,
-                    memory_type: row.get(5)?,
-                    tags: serde_json::from_str(&row.get::<_,String>(6).unwrap_or_default()).unwrap_or_default(),
-                    created_at: row.get(7)?, updated_at: row.get(8)?,
-                })
-            }).map_err(|e| e.to_string())?;
-            rows.filter_map(|r| r.ok()).collect()
+            let result: Vec<Memory> = stmt.query_map(params![search_pattern, page_size, offset], Self::map_memory_row)
+                .map_err(|e| e.to_string())?
+                .filter_map(|r| r.ok())
+                .collect();
+            result
+        } else if search.is_empty() && has_scope {
+            let mut stmt = conn.prepare(
+                "SELECT id, scope, topic_key, title, content, memory_type, tags, created_at, updated_at FROM memories WHERE user_id='local' AND scope=?1 ORDER BY updated_at DESC LIMIT ?2 OFFSET ?3"
+            ).map_err(|e| e.to_string())?;
+            let result: Vec<Memory> = stmt.query_map(params![scope_filter, page_size, offset], Self::map_memory_row)
+                .map_err(|e| e.to_string())?
+                .filter_map(|r| r.ok())
+                .collect();
+            result
+        } else {
+            let mut stmt = conn.prepare(
+                "SELECT id, scope, topic_key, title, content, memory_type, tags, created_at, updated_at FROM memories WHERE user_id='local' AND scope=?1 AND (title LIKE ?2 OR content LIKE ?2) ORDER BY updated_at DESC LIMIT ?3 OFFSET ?4"
+            ).map_err(|e| e.to_string())?;
+            let result: Vec<Memory> = stmt.query_map(params![scope_filter, search_pattern, page_size, offset], Self::map_memory_row)
+                .map_err(|e| e.to_string())?
+                .filter_map(|r| r.ok())
+                .collect();
+            result
         };
 
         Ok(MemoryPage { items, total })
+    }
+
+    fn map_memory_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Memory> {
+        Ok(Memory {
+            id: row.get(0)?, scope: row.get(1)?, topic_key: row.get(2)?, title: row.get(3)?, content: row.get(4)?,
+            memory_type: row.get(5)?,
+            tags: serde_json::from_str(&row.get::<_,String>(6).unwrap_or_default()).unwrap_or_default(),
+            created_at: row.get(7)?, updated_at: row.get(8)?,
+        })
     }
 
     #[allow(dead_code)]

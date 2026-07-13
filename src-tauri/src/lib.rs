@@ -568,16 +568,23 @@ fn get_notes(state: State<'_, Mutex<AppState>>, group_id: Option<String>) -> Res
 }
 
 #[tauri::command]
-async fn save_note(state: State<'_, Mutex<AppState>>, note: Note, app_handle: tauri::AppHandle) -> Result<(), String> {
-    let ai_manager = {
+async fn save_note(state: State<'_, Mutex<AppState>>, note: Note, app_handle: tauri::AppHandle, create_version: Option<bool>) -> Result<(), String> {
+    let (ai_manager, version_id) = {
         let app_state = state.lock().map_err(|e| e.to_string())?;
+        // 仅在手动保存时创建版本快照（自动保存不生成版本避免泛滥）
+        let vid = if create_version.unwrap_or(false) {
+            app_state.db.save_note_version(&note).ok().flatten()
+        } else {
+            None
+        };
         app_state.db.save_note(&note)?;
-        app_state.ai_manager.clone()
+        (app_state.ai_manager.clone(), vid)
     };
-    // 通知前端笔记已变更
+    // 通知前端笔记已变更（附带版本信息）
     let _ = app_handle.emit("notes:changed", serde_json::json!({
         "action": "saved",
         "id": note.id,
+        "versionId": version_id,
     }));
     // 归档 → 从知识库移除；未归档 → 同步到知识库
     let kb_id = format!("note_{}", note.id);
@@ -631,6 +638,35 @@ fn get_note_by_id(state: State<'_, Mutex<AppState>>, id: String) -> Result<Optio
 #[allow(non_snake_case)]
 fn move_note(state: State<'_, Mutex<AppState>>, noteId: String, groupId: Option<String>) -> Result<(), String> {
     state.lock().map_err(|e| e.to_string())?.db.move_note_to_group(&noteId, groupId.as_deref())
+}
+
+// ══════════════════════════════════════════════════════════════
+// 笔记版本管理命令
+// ══════════════════════════════════════════════════════════════
+
+#[tauri::command]
+fn get_note_versions(state: State<'_, Mutex<AppState>>, note_id: String) -> Result<Vec<database::NoteVersion>, String> {
+    state.lock().map_err(|e| e.to_string())?.db.get_note_versions(&note_id, 50)
+}
+
+#[tauri::command]
+fn get_note_version_by_id(state: State<'_, Mutex<AppState>>, version_id: String) -> Result<Option<database::NoteVersion>, String> {
+    state.lock().map_err(|e| e.to_string())?.db.get_note_version_by_id(&version_id)
+}
+
+#[tauri::command]
+async fn restore_note_version(state: State<'_, Mutex<AppState>>, note_id: String, version_id: String, app_handle: tauri::AppHandle) -> Result<database::Note, String> {
+    let restored = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.db.restore_note_version(&note_id, &version_id)?
+    };
+    // 通知前端
+    let _ = app_handle.emit("notes:changed", serde_json::json!({
+        "action": "restored",
+        "id": note_id,
+        "versionId": version_id,
+    }));
+    Ok(restored)
 }
 
 #[tauri::command]
@@ -1453,8 +1489,8 @@ fn mcp_delete_api_key(state: State<'_, Mutex<AppState>>, id: String) -> Result<(
 // ── 记忆管理 ──
 
 #[tauri::command]
-fn get_memories(state: State<'_, Mutex<AppState>>, search: String, page: i64, page_size: i64) -> Result<database::MemoryPage, String> {
-    state.lock().map_err(|e| e.to_string())?.db.get_memories(&search, page, page_size)
+fn get_memories(state: State<'_, Mutex<AppState>>, search: String, page: i64, page_size: i64, scope: String) -> Result<database::MemoryPage, String> {
+    state.lock().map_err(|e| e.to_string())?.db.get_memories(&search, page, page_size, &scope)
 }
 
 #[tauri::command]
@@ -2222,6 +2258,10 @@ pub fn run() {
             get_note_count,
             get_note_by_id,
             move_note,
+            // Note version commands
+            get_note_versions,
+            get_note_version_by_id,
+            restore_note_version,
             // Memory commands
             get_memories,
             save_memory,

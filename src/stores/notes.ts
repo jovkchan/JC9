@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useStatusStore } from '@/stores/status'
-import type { NoteGroup, Note, EditorState } from '@/types/notes'
+import type { NoteGroup, Note, EditorState, NoteVersion } from '@/types/notes'
 
 function genId(): string {
   return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
@@ -257,7 +257,7 @@ export const useNotesStore = defineStore('notes', () => {
     return Array.from(new Set(matches.map(m => m.slice(1).trim()).filter(Boolean)))
   }
 
-  async function saveNote(note: Note) {
+  async function saveNote(note: Note, createVersion = false) {
     // 自动提取正文中的行内标签并进行合并与去重
     const inlineTags = extractTagsFromContent(note.content)
     const allTags = Array.from(new Set([...note.tags, ...inlineTags]))
@@ -265,15 +265,15 @@ export const useNotesStore = defineStore('notes', () => {
 
     note.updatedAt = new Date().toISOString()
     try {
-      await invoke('save_note', { note })
+      await invoke('save_note', { note, createVersion })
       const existing = notes.value.findIndex(n => n.id === note.id)
       if (existing >= 0) {
-        notes.value[existing] = { ...note }
+        // 原地修改保持对象引用不变，避免触发父组件 watcher 导致光标跳转
+        Object.assign(notes.value[existing], note)
       } else {
         notes.value.unshift({ ...note })
       }
       status.setNoteCount(notes.value.filter(n => !n.isDeleted).length)
-      status.pushMessage('笔记已保存', 'success')
     } catch (e) {
       status.pushMessage(`保存笔记失败: ${e}`, 'error')
     }
@@ -414,6 +414,61 @@ export const useNotesStore = defineStore('notes', () => {
     }
   }
 
+  // ── 版本历史 ──
+
+  const noteVersions = ref<NoteVersion[]>([])
+  const showVersionHistory = ref(false)
+  const previewVersionId = ref<string | null>(null)
+  const previewVersionData = ref<NoteVersion | null>(null)
+
+  async function loadNoteVersions(noteId: string) {
+    try {
+      noteVersions.value = await invoke<NoteVersion[]>('get_note_versions', { noteId })
+    } catch (e) {
+      console.error('加载版本历史失败:', e)
+    }
+  }
+
+  function openVersionHistory() {
+    if (!activeNoteTabId.value) return
+    showVersionHistory.value = true
+    loadNoteVersions(activeNoteTabId.value)
+  }
+
+  function closeVersionHistory() {
+    showVersionHistory.value = false
+    previewVersionId.value = null
+    previewVersionData.value = null
+  }
+
+  async function previewNoteVersion(versionId: string) {
+    previewVersionId.value = versionId
+    try {
+      previewVersionData.value = await invoke<NoteVersion>('get_note_version_by_id', { versionId })
+    } catch (e) {
+      status.pushMessage(`加载版本失败: ${e}`, 'error')
+    }
+  }
+
+  async function restoreNoteVersion(noteId: string, versionId: string) {
+    try {
+      const restored = await invoke<Note>('restore_note_version', { noteId, versionId })
+      // 更新本地 notes 列表
+      const idx = notes.value.findIndex(n => n.id === noteId)
+      if (idx >= 0) {
+        notes.value[idx] = restored
+      }
+      // 更新标签页标题
+      const tab = noteTabs.value.find(t => t.id === noteId)
+      if (tab) tab.title = restored.title || '无标题'
+      // 关闭版本面板
+      closeVersionHistory()
+      status.pushMessage(`已恢复到 v${restored.version}`, 'success')
+    } catch (e) {
+      status.pushMessage(`恢复失败: ${e}`, 'error')
+    }
+  }
+
   // ── 后端变更监听（MCP / 其他窗口修改数据时自动刷新）──
   let listenersInitialized = false
 
@@ -469,5 +524,9 @@ export const useNotesStore = defineStore('notes', () => {
     searchNotes, togglePin, toggleArchive, copyContent,
     // Editor tabs
     noteTabs, activeNoteTabId, openNoteTab, closeNoteTab,
+    // Version history
+    noteVersions, showVersionHistory, previewVersionId, previewVersionData,
+    loadNoteVersions, openVersionHistory, closeVersionHistory,
+    previewNoteVersion, restoreNoteVersion,
   }
 })

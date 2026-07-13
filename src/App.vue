@@ -11,6 +11,7 @@ import TitleBar from '@/components/TitleBar.vue'
 import StatusBar from '@/components/StatusBar.vue'
 import AiAgentPanel from '@/components/ai-agent/AiAgentPanel.vue'
 import SettingsPanel from '@/components/settings/SettingsPanel.vue'
+import VersionDiffWindow from '@/components/notes/VersionDiffWindow.vue'
 import AiHelper from '@/components/tools/AiHelper.vue'
 import QuickNote from '@/components/tools/QuickNote.vue'
 import NotificationPanel from '@/components/NotificationPanel.vue'
@@ -147,6 +148,9 @@ onUnmounted(() => {
 
   <!-- Settings 独立窗口 -->
   <SettingsPanel v-else-if="windowLabel === 'settings'" />
+
+  <!-- Version Diff 独立窗口 -->
+  <VersionDiffWindow v-else-if="windowLabel === 'version-diff'" />
 
   <!-- Main window -->
   <div v-else class="app">

@@ -510,11 +510,11 @@ async fn handle_tools_list() -> Result<Value, String> {
             },
             {
                 "name": "jc9_memory_list",
-                "description": "列出Agent记忆。可按scope过滤（不传=全局），不传scope则返回全部。",
+                "description": "列出Agent记忆。不传scope则按scope分组显示全部，传scope则只显示该scope下的记忆。",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "scope": {"type":"string","description":"可选：按项目标识过滤，不传返回全部"}
+                        "scope": {"type":"string","description":"可选：按项目标识过滤，只显示该scope下的记忆"}
                     },
                     "required": []
                 }
@@ -935,6 +935,23 @@ async fn cmd_note_update_title(state: &Arc<AppState>, args: &Value) -> Result<Va
     ).map_err(|e| format!("更新标题失败: {}", e))?;
     drop(conn);
 
+    // 保存版本快照
+    if let Ok(db) = get_db(state) {
+        let version_id = uuid::Uuid::new_v4().to_string();
+        let now = Utc::now().to_rfc3339();
+        if let Ok(conn) = db.lock() {
+            let next_ver: i32 = conn.query_row(
+                "SELECT COALESCE(MAX(version), 0) + 1 FROM note_versions WHERE note_id = ?1",
+                params![note_id],
+                |row| row.get(0),
+            ).unwrap_or(1);
+            let _ = conn.execute(
+                "INSERT INTO note_versions (id, note_id, title, content, format, tags, version, created_at) VALUES (?1, ?2, ?3, ?4, ?5, '[]', ?6, ?7)",
+                params![version_id, note_id, new_title, content.clone().unwrap_or_default(), "markdown", next_ver, now],
+            );
+        }
+    }
+
     // 通知前端笔记已更新
     emit_notes_changed(state, "updated", &full_id);
 
@@ -1099,6 +1116,24 @@ async fn cmd_note_update(state: &Arc<AppState>, args: &Value) -> Result<Value, S
     ).map_err(|e| format!("更新笔记失败: {}", e))?;
     drop(conn);
 
+    // 保存版本快照
+    if let Ok(db) = get_db(state) {
+        let version_id = uuid::Uuid::new_v4().to_string();
+        let now = Utc::now().to_rfc3339();
+        let tags_json = serde_json::to_string(&tags).unwrap_or_default();
+        if let Ok(conn) = db.lock() {
+            let next_ver: i32 = conn.query_row(
+                "SELECT COALESCE(MAX(version), 0) + 1 FROM note_versions WHERE note_id = ?1",
+                params![note_id],
+                |row| row.get(0),
+            ).unwrap_or(1);
+            let _ = conn.execute(
+                "INSERT INTO note_versions (id, note_id, title, content, format, tags, version, created_at) VALUES (?1, ?2, ?3, ?4, 'markdown', ?5, ?6, ?7)",
+                params![version_id, note_id, title, content, tags_json, next_ver, now],
+            );
+        }
+    }
+
     // 通知前端笔记已更新
     emit_notes_changed(state, "updated", &full_id);
 
@@ -1242,7 +1277,7 @@ async fn cmd_memory_list(_state: &Arc<AppState>, ctx: &RequestContext, args: &Va
     let (sql, params): (&str, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(ref s) = scope {
         ("SELECT id, scope, topic_key, title, content, memory_type, tags, created_at, updated_at FROM memories WHERE user_id='local' AND scope=?1 ORDER BY updated_at DESC", vec![Box::new(s.clone())])
     } else {
-        ("SELECT id, scope, topic_key, title, content, memory_type, tags, created_at, updated_at FROM memories WHERE user_id='local' ORDER BY updated_at DESC", vec![])
+        ("SELECT id, scope, topic_key, title, content, memory_type, tags, created_at, updated_at FROM memories WHERE user_id='local' ORDER BY scope, updated_at DESC", vec![])
     };
     let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
     let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
@@ -1250,16 +1285,38 @@ async fn cmd_memory_list(_state: &Arc<AppState>, ctx: &RequestContext, args: &Va
         Ok((row.get::<_,String>(0)?, row.get::<_,String>(1)?, row.get::<_,String>(2)?, row.get::<_,String>(3)?, row.get::<_,String>(4)?, row.get::<_,String>(5)?, row.get::<_,String>(6)?, row.get::<_,String>(7)?, row.get::<_,String>(8)?))
     }).map_err(|e| e.to_string())?;
     let mut results = Vec::new();
-    let mut lines = Vec::new();
+    let mut grouped: std::collections::BTreeMap<String, Vec<(String, String, String, String)>> = std::collections::BTreeMap::new();
     for r in rows {
-        if let Ok((id, sc, tk, title, content, mt, _tags_str, ca, ua)) = r {
-            results.push(json!({"id":id,"scope":sc,"topicKey":tk,"title":title,"contentPreview":content.chars().take(200).collect::<String>(),"type":mt,"createdAt":ca,"updatedAt":ua}));
-            lines.push(format!("  [{}] {} ({})", id, title, mt));
+        if let Ok((id, sc, tk, title, _content, mt, _tags_str, ca, ua)) = r {
+            let preview = _content.chars().take(200).collect::<String>();
+            results.push(json!({"id":id,"scope":sc,"topicKey":tk,"title":title,"contentPreview":preview,"type":mt,"createdAt":ca,"updatedAt":ua}));
+            let sc_key = if sc.is_empty() { "(无分组)" } else { &sc };
+            grouped.entry(sc_key.to_string()).or_default().push((id, title, mt, preview));
         }
     }
     drop(stmt);
     drop(conn);
-    Ok(json!({"content":[{"type":"text","text":format!("共 {} 条记忆:\n{}", results.len(), lines.join("\n"))}],"memories":results,"total":results.len()}))
+
+    // 构建分组文本输出
+    let mut lines = Vec::new();
+    if scope.is_some() {
+        // 有过滤 → 平铺显示
+        lines.push(format!("共 {} 条记忆:", results.len()));
+        for m in &results {
+            lines.push(format!("  [{}] {} ({})", m["id"].as_str().unwrap_or(""), m["title"].as_str().unwrap_or(""), m["type"].as_str().unwrap_or("")));
+        }
+    } else {
+        // 无过滤 → 按 scope 分组显示
+        let total = results.len();
+        for (sc_key, mems) in &grouped {
+            lines.push(format!("\n## {} ({}条)", sc_key, mems.len()));
+            for (id, title, mt, _preview) in mems {
+                lines.push(format!("  [{}] {} ({})", id, title, mt));
+            }
+        }
+        lines.insert(0, format!("共 {} 条记忆，{} 个分组:", total, grouped.len()));
+    }
+    Ok(json!({"content":[{"type":"text","text":lines.join("\n")}],"memories":results,"total":results.len(),"groups":grouped.len()}))
 }
 
 async fn cmd_memory_read(state: &Arc<AppState>, args: &Value) -> Result<Value, String> {

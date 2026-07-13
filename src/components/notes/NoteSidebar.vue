@@ -436,7 +436,7 @@ onMounted(() => document.addEventListener('click', closeGroupCtx))
         <button class="ns-restore-btn" @click.stop="store.restoreNote(n.id)" title="恢复">恢复</button>
         <button class="ns-del" style="display:inline"
           @click.stop="deleteNoteId = n.id; deleteNoteTitle = n.title || '无标题'; deletePermanent = true; deleteConfirmShow = true"
-          title="永久删除">✕</button>
+          title="永久删除"><svg viewBox="0 0 1024 1024" width="14" height="14" fill="currentColor" style="vertical-align:-2px"><path d="M301.382 184.46h46.545v1.722h-46.545v-1.722z m186.135 0h46.546v1.722h-46.546v-1.722zM208.244 1024h605.091l93.091-837.818H720.105l-46.406 744.727h-46.546l46.406-744.727H534.063v744.727h-46.546V186.182H347.974l46.452 744.727h-46.545l-46.453-744.727H115.153z m465.408-839.54h46.546v1.722h-46.546v-1.722z m280.53-91.37c0-46.545-23.32-46.545-23.32-46.545H627.154S627.153 0 580.608 0H440.972c-46.546 0-46.546 46.545-46.546 46.545H93.137s-23.319 0-23.319 46.546c0 46.545 23.32 46.545 23.32 46.545h837.725s23.319 0 23.319-46.545z"/></svg></button>
       </div>
     </div>
 
@@ -456,7 +456,7 @@ onMounted(() => document.addEventListener('click', closeGroupCtx))
             <span class="ns-arrow" @click="toggleGroup(item.group.id)">{{ expandedGroups.has(item.group.id) ? '▾' : '▸' }}</span>
             <span class="ns-label" @click="toggleGroup(item.group.id)">{{ item.group.name }}</span>
             <span class="ns-count">{{ getAllGroupNotes(item.group.id).length }}</span>
-            <button class="ns-del" @click.stop="store.removeGroup(item.group.id)" title="删除组">✕</button>
+            <button class="ns-del" @click.stop="store.removeGroup(item.group.id)" title="删除组"><svg viewBox="0 0 1024 1024" width="14" height="14" fill="currentColor" style="vertical-align:-2px"><path d="M301.382 184.46h46.545v1.722h-46.545v-1.722z m186.135 0h46.546v1.722h-46.546v-1.722zM208.244 1024h605.091l93.091-837.818H720.105l-46.406 744.727h-46.546l46.406-744.727H534.063v744.727h-46.546V186.182H347.974l46.452 744.727h-46.545l-46.453-744.727H115.153z m465.408-839.54h46.546v1.722h-46.546v-1.722z m280.53-91.37c0-46.545-23.32-46.545-23.32-46.545H627.154S627.153 0 580.608 0H440.972c-46.546 0-46.546 46.545-46.546 46.545H93.137s-23.319 0-23.319 46.546c0 46.545 23.32 46.545 23.32 46.545h837.725s23.319 0 23.319-46.545z"/></svg></button>
           </template>
         </div>
         <!-- 笔记行 -->
@@ -519,7 +519,7 @@ onMounted(() => document.addEventListener('click', closeGroupCtx))
         @click.stop>
         <div class="ci" @click="ctxEdit">编辑</div>
         <div class="ci" @click="ctxCopy">复制内容</div>
-        <div class="ci" @click="ctxTogglePin">{{ ctxNote?.isPinned ? '★ 取消星标' : '☆ 设为星标' }}</div>
+        <div class="ci" @click="ctxTogglePin"><svg viewBox="0 0 1024 1024" width="14" height="14" fill="currentColor" style="vertical-align:-2px;margin-right:4px"><path d="M855.872 106.432a42.464 42.464 0 0 1-42.464 42.464H203.44a42.464 42.464 0 0 1 0-84.928h609.968a42.464 42.464 0 0 1 42.464 42.464z m-344.048 157.92a42.464 42.464 0 0 0-42.464 42.464v609.968a42.464 42.464 0 0 0 84.928 0V306.816a42.464 42.464 0 0 0-42.464-42.464z m30.144-31.328c-16.592-16.576-42.528-17.536-57.92-2.128L171.232 543.68c-15.408 15.408-14.448 41.344 2.128 57.92 16.592 16.592 42.512 17.536 57.92 2.128l312.8-312.784c15.392-15.408 14.448-41.344-2.128-57.92z m-60.272 0c-16.576 16.576-17.536 42.512-2.128 57.92l312.8 312.8c15.392 15.392 41.328 14.448 57.92-2.144 16.576-16.576 17.52-42.512 2.112-57.92L539.616 230.896c-15.408-15.408-41.344-14.448-57.92 2.128z"/></svg> {{ ctxNote?.isPinned ? '取消星标' : '设为星标' }}</div>
         <div class="ci" @click="ctxToggleArchive">{{ ctxNote?.isArchived ? '取消归档' : '归档' }}</div>
         <div class="ci" @click="ctxRename">重命名</div>
         <div class="ci" style="display:flex;align-items:center;justify-content:space-between" @mouseenter="ctxShowMove = true">
