@@ -264,8 +264,17 @@ onUnmounted(() => {
 
 <template>
   <div class="panel">
-    <!-- Tab Bar: terminals + docs + tools + notes -->
-    <div class="tabs" v-if="store.runningTabs.length>0||store.docTabs.length>0||store.toolTabs.length>0||notesStore.noteTabs.length>0" role="tablist">
+    <!-- Tab Bar: home + terminals + docs + tools + notes -->
+    <div class="tabs" v-if="store.homeTabs.length>0||store.runningTabs.length>0||store.docTabs.length>0||store.toolTabs.length>0||notesStore.noteTabs.length>0" role="tablist">
+      <!-- 首页 Tab -->
+      <div v-for="(h, i) in store.homeTabs" :key="'h'+h.sidebarTab"
+        :class="['tab','home-tab',{on:store.activeTabType==='home'&&i===store.activeHomeIndex}]"
+        role="tab" :aria-selected="store.activeTabType==='home'&&i===store.activeHomeIndex" tabindex="0"
+        @click="store.activeTabType='home';store.activeHomeIndex=i"
+        @keyup.enter="store.activeTabType='home';store.activeHomeIndex=i">
+        <span class="tl">{{ h.icon }} {{ h.label }}</span>
+        <button class="tx" @click.stop="store.closeHomeTab(i)" aria-label="关闭标签">✕</button>
+      </div>
       <div v-for="(t,i) in store.runningTabs" :key="'t'+t.projectId+t.commandId"
         :class="['tab',{on:store.activeTabType==='term'&&i===store.activeTabIndex}]"
         role="tab" :aria-selected="store.activeTabType==='term'&&i===store.activeTabIndex" tabindex="0"
@@ -298,7 +307,7 @@ onUnmounted(() => {
         @keyup.enter="store.activeTabType='note'; notesStore.activeNoteTabId = t.id"
         @contextmenu="openNoteCtx($event, t.id)">
         <span class="tl">{{ t.title || '新笔记' }}</span>
-        <button class="tx" @click.stop="notesStore.closeNoteTab(t.id); if(!notesStore.activeNoteTabId)store.activeTabType='term'" aria-label="关闭标签">✕</button>
+        <button class="tx" @click.stop="notesStore.closeNoteTab(t.id); if(!notesStore.activeNoteTabId)store.openHomeTab('notes')" aria-label="关闭标签">✕</button>
       </div>
     </div>
 
@@ -386,13 +395,25 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <div v-if="store.runningTabs.length===0&&store.docTabs.length===0&&store.toolTabs.length===0&&notesStore.noteTabs.length===0" class="empty-or-feed" :style="store.sidebarTab === 'notes' ? 'flex: 1; display: flex; flex-direction: column; overflow: hidden;' : ''">
-      <template v-if="store.sidebarTab==='projects'"><div class="empty">从左侧项目列表点击命令启动</div></template>
-      <template v-else-if="store.sidebarTab==='workflows'"><div class="empty">点击工作流以执行</div></template>
-      <template v-else-if="store.sidebarTab==='tools'"><div class="empty">选择工具开始使用</div></template>
-      <template v-else-if="store.sidebarTab==='notes'">
+    <!-- Home content -->
+    <div v-for="(h, i) in store.homeTabs" :key="'hc'+h.sidebarTab" class="content" v-show="store.activeTabType==='home'&&i===store.activeHomeIndex">
+      <div class="bar"><code class="cmdtext">{{ h.icon }} {{ h.label }}</code></div>
+      <template v-if="h.sidebarTab === 'notes'">
         <NoteFeedView />
       </template>
+      <template v-else-if="h.sidebarTab === 'projects'">
+        <div class="empty">从左侧项目列表点击命令启动</div>
+      </template>
+      <template v-else-if="h.sidebarTab === 'workflows'">
+        <div class="empty">点击工作流以执行</div>
+      </template>
+      <template v-else-if="h.sidebarTab === 'tools'">
+        <div class="empty">选择工具开始使用</div>
+      </template>
+    </div>
+
+    <div v-if="store.runningTabs.length===0&&store.docTabs.length===0&&store.toolTabs.length===0&&notesStore.noteTabs.length===0" class="empty-or-feed">
+      <div class="empty">{{ store.homeTabs.length === 0 ? '从左侧面板选择功能开始使用' : '' }}</div>
     </div>
 
     <Teleport to="body">
