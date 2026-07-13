@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, nextTick, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { useProjectStore } from '@/stores/project'
 import { useStatusStore } from '@/stores/status'
 import { invoke } from '@tauri-apps/api/core'
@@ -8,8 +8,16 @@ import CommandDialog from '@/components/CommandDialog.vue'
 import NoteSidebar from '@/components/notes/NoteSidebar.vue'
 import type { Command } from '@/types'
 
+const props = withDefaults(defineProps<{
+  /** 如果设置，强制只显示该面板，隐藏 tab 栏 */
+  forcedTab?: 'projects' | 'workflows' | 'tools' | 'notes'
+}>(), { forcedTab: undefined })
+
 const store = useProjectStore()
 const activeTab = ref<'projects' | 'workflows' | 'tools' | 'notes'>('projects')
+
+/** 实际生效的 tab：forcedTab 优先级最高，否则用内部 activeTab */
+const effectiveTab = computed(() => props.forcedTab ?? activeTab.value)
 const showAdd = ref(false)
 const newName = ref('')
 const newDir = ref('')
@@ -673,9 +681,9 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <aside class="side">
+  <aside class="side" :class="{ 'no-tabs': !!forcedTab }">
     <div class="side-head"></div>
-    <div class="tabs" role="tablist">
+    <div v-if="!forcedTab" class="tabs" role="tablist">
       <div :class="['tab',{on:activeTab==='projects'}]" role="tab" :aria-selected="activeTab==='projects'" tabindex="0" @click="switchTab('projects')" @keyup.enter="switchTab('projects')">项目</div>
       <div :class="['tab',{on:activeTab==='workflows'}]" role="tab" :aria-selected="activeTab==='workflows'" tabindex="0" @click="switchTab('workflows')" @keyup.enter="switchTab('workflows')">快捷</div>
       <div :class="['tab',{on:activeTab==='tools'}]" role="tab" :aria-selected="activeTab==='tools'" tabindex="0" @click="switchTab('tools')" @keyup.enter="switchTab('tools')">工具</div>
@@ -683,7 +691,7 @@ onUnmounted(() => {
     </div>
 
     <!-- Projects -->
-    <div v-show="activeTab==='projects'" class="panel">
+    <div v-show="effectiveTab==='projects'" class="panel">
       <div class="bar"><button class="btn" @click="showAdd=!showAdd">{{ showAdd?'收起':'+ 添加项目' }}</button></div>
       <div v-if="showAdd" class="add-panel">
         <input v-model="newName" placeholder="项目名称" @keyup.enter="handleAdd" />
@@ -723,7 +731,7 @@ onUnmounted(() => {
     </div>
 
     <!-- Workflows (多命令顺序执行) -->
-    <div v-show="activeTab==='workflows'" class="panel" style="display:flex;flex-direction:column">
+    <div v-show="effectiveTab==='workflows'" class="panel" style="display:flex;flex-direction:column">
       <div class="bar">
         <button class="btn" @click="openWfDlg()">+ 新建工作流</button>
         <span v-if="store.workflowRunning" class="wf-badge">运行中...</span>
@@ -765,7 +773,7 @@ onUnmounted(() => {
     </div>
 
     <!-- Tools -->
-    <div v-show="activeTab==='tools'" class="panel" style="display:flex;flex-direction:column">
+    <div v-show="effectiveTab==='tools'" class="panel" style="display:flex;flex-direction:column">
       <!-- 搜索过滤 -->
       <div class="search-bar">
         <input v-model="toolSearchQuery" placeholder="搜索实用工具..." class="tool-search-input" />
@@ -873,7 +881,7 @@ onUnmounted(() => {
     </div>
 
     <!-- Notes -->
-    <div v-show="activeTab==='notes'" class="panel">
+    <div v-show="effectiveTab==='notes'" class="panel">
       <NoteSidebar />
     </div>
 
@@ -975,6 +983,8 @@ onUnmounted(() => {
 <style scoped lang="scss">
 @use "@/styles/mixins.scss" as *;
 .side { width:210px; min-width:210px; height:100%; background:var(--jc-bg-panel); display:flex; flex-direction:column; overflow:hidden; user-select:none; }
+/* panel-only 模式：宽度自适应，无 tab 栏间距 */
+.side.no-tabs { width:100%; min-width:0; }
 .side-head { height:2px; background:var(--jc-color-accent); }
 .tabs { display:flex; }
 .tab { @include tab-base; }

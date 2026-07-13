@@ -361,7 +361,12 @@ const tagCloud = computed(() => {
   return Object.entries(map).sort((a, b) => b[1] - a[1])
 })
 
-function selectTag(tag: string) { selectedTag.value = selectedTag.value === tag ? null : tag }
+function selectTag(tag: string) {
+  selectedTag.value = selectedTag.value === tag ? null : tag
+  listTab.value = 'tags'
+  // 在右侧内容栏打开 NoteFeedView
+  store.showNoteFeed = true
+}
 
 onMounted(() => document.addEventListener('click', closeCtx))
 onMounted(() => document.addEventListener('click', closeGroupCtx))
@@ -408,8 +413,8 @@ onMounted(() => document.addEventListener('click', closeGroupCtx))
     <div class="ns-tabs">
       <div :class="['ns-tab', { on: listTab === 'notes' }]" @click="listTab = 'notes'">笔记</div>
       <div :class="['ns-tab', { on: listTab === 'tags' }]" @click="listTab = 'tags'">标签</div>
-      <div :class="['ns-tab', { on: listTab === 'starred' }]" @click="listTab = 'starred'">星标</div>
-      <div :class="['ns-tab', { on: listTab === 'archived' }]" @click="listTab = 'archived'">归档</div>
+      <div :class="['ns-tab', { on: listTab === 'starred' }]" @click="listTab = 'starred'; store.showNoteFeed = true">星标</div>
+      <div :class="['ns-tab', { on: listTab === 'archived' }]" @click="listTab = 'archived'; store.showNoteFeed = true">归档</div>
     </div>
 
     <div v-if="filterDate" class="ns-filter-hint">日期: {{ filterDate }} <button class="ns-filter-clr"

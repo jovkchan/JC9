@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 import { useProjectStore } from '@/stores/project'
 import { useNotesStore } from '@/stores/notes'
+import { useStatusStore } from '@/stores/status'
 import TerminalView from '@/components/TerminalView.vue'
 import LogPanel from '@/components/LogPanel.vue'
 import NoteEditor from '@/components/notes/NoteEditor.vue'
@@ -37,11 +39,9 @@ import CssUnits from '@/components/tools/CssUnits.vue'
 import SvgHelper from '@/components/tools/SvgHelper.vue'
 import IconGenerator from '@/components/tools/IconGenerator.vue'
 
-
-
-import NoteFeedView from '@/components/notes/NoteFeedView.vue'
 import NoteSettings from '@/components/notes/NoteSettings.vue'
 import VersionHistory from '@/components/notes/VersionHistory.vue'
+import NoteFeedView from '@/components/notes/NoteFeedView.vue'
 import AiHelper from '@/components/tools/AiHelper.vue'
 import FloatingSearch from '@/components/notes/FloatingSearch.vue'
 
@@ -68,11 +68,34 @@ function getEditingNote(noteId: string | null) {
 }
 
 function onNoteSaved(note: any) {
-  // If this was a new note (tab id empty), update the tab
   const idx = notesStore.noteTabs.findIndex(t => t.id === '' || t.id === note.id)
   if (idx >= 0 && note.id) {
     notesStore.noteTabs[idx] = { id: note.id, title: note.title || '无标题' }
     notesStore.activeNoteTabId = note.id
+  }
+}
+
+async function saveMemoryTab(index: number) {
+  const tab = store.memoryTabs[index]
+  if (!tab || !tab.title.trim() || !tab.content.trim()) return
+  try {
+    await invoke('save_memory', {
+      memory: {
+        id: tab.id,
+        scope: tab.scope,
+        topicKey: tab.topicKey,
+        title: tab.title,
+        content: tab.content,
+        memoryType: tab.type || 'discovery',
+        tags: ['memory'],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    })
+    store.toggleMemoryEdit(index)
+    useStatusStore().pushMessage('记忆已保存', 'success')
+  } catch (e: any) {
+    useStatusStore().pushMessage('保存失败: ' + e, 'error')
   }
 }
 const ctxShow = ref(false)
@@ -264,17 +287,8 @@ onUnmounted(() => {
 
 <template>
   <div class="panel">
-    <!-- Tab Bar: home + terminals + docs + tools + notes -->
-    <div class="tabs" v-if="store.homeTabs.length>0||store.runningTabs.length>0||store.docTabs.length>0||store.toolTabs.length>0||notesStore.noteTabs.length>0" role="tablist">
-      <!-- 首页 Tab -->
-      <div v-for="(h, i) in store.homeTabs" :key="'h'+h.sidebarTab"
-        :class="['tab','home-tab',{on:store.activeTabType==='home'&&i===store.activeHomeIndex}]"
-        role="tab" :aria-selected="store.activeTabType==='home'&&i===store.activeHomeIndex" tabindex="0"
-        @click="store.activeTabType='home';store.activeHomeIndex=i"
-        @keyup.enter="store.activeTabType='home';store.activeHomeIndex=i">
-        <span class="tl">{{ h.icon }} {{ h.label }}</span>
-        <button class="tx" @click.stop="store.closeHomeTab(i)" aria-label="关闭标签">✕</button>
-      </div>
+    <!-- Tab Bar: terminals + docs + tools + notes -->
+    <div class="tabs" v-if="store.runningTabs.length>0||store.docTabs.length>0||store.toolTabs.length>0||store.memoryTabs.length>0||notesStore.noteTabs.length>0" role="tablist">
       <div v-for="(t,i) in store.runningTabs" :key="'t'+t.projectId+t.commandId"
         :class="['tab',{on:store.activeTabType==='term'&&i===store.activeTabIndex}]"
         role="tab" :aria-selected="store.activeTabType==='term'&&i===store.activeTabIndex" tabindex="0"
@@ -300,6 +314,14 @@ onUnmounted(() => {
         <span class="tl">{{ t.title }}</span>
         <button class="tx" @click.stop="store.closeToolTab(i)" aria-label="关闭标签">✕</button>
       </div>
+      <div v-for="(t,i) in store.memoryTabs" :key="'mem'+t.id"
+        :class="['tab',{on:store.activeTabType==='memory'&&i===store.activeMemoryIndex}]"
+        role="tab" :aria-selected="store.activeTabType==='memory'&&i===store.activeMemoryIndex" tabindex="0"
+        @click="store.activeTabType='memory';store.activeMemoryIndex=i"
+        @keyup.enter="store.activeTabType='memory';store.activeMemoryIndex=i">
+        <span class="tl">🧠 {{ t.title }}</span>
+        <button class="tx" @click.stop="store.closeMemoryTab(i)" aria-label="关闭标签">✕</button>
+      </div>
       <div v-for="t in notesStore.noteTabs" :key="'n'+t.id"
         :class="['tab',{on:store.activeTabType==='note'&&activeNoteId===t.id}]"
         role="tab" :aria-selected="store.activeTabType==='note'&&activeNoteId===t.id" tabindex="0"
@@ -307,7 +329,7 @@ onUnmounted(() => {
         @keyup.enter="store.activeTabType='note'; notesStore.activeNoteTabId = t.id"
         @contextmenu="openNoteCtx($event, t.id)">
         <span class="tl">{{ t.title || '新笔记' }}</span>
-        <button class="tx" @click.stop="notesStore.closeNoteTab(t.id); if(!notesStore.activeNoteTabId)store.openHomeTab('notes')" aria-label="关闭标签">✕</button>
+        <button class="tx" @click.stop="notesStore.closeNoteTab(t.id); if(!notesStore.activeNoteTabId)store.activeTabType='term'" aria-label="关闭标签">✕</button>
       </div>
     </div>
 
@@ -395,25 +417,68 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- Home content -->
-    <div v-for="(h, i) in store.homeTabs" :key="'hc'+h.sidebarTab" class="content" v-show="store.activeTabType==='home'&&i===store.activeHomeIndex">
-      <div class="bar"><code class="cmdtext">{{ h.icon }} {{ h.label }}</code></div>
-      <template v-if="h.sidebarTab === 'notes'">
-        <NoteFeedView />
-      </template>
-      <template v-else-if="h.sidebarTab === 'projects'">
-        <div class="empty">从左侧项目列表点击命令启动</div>
-      </template>
-      <template v-else-if="h.sidebarTab === 'workflows'">
-        <div class="empty">点击工作流以执行</div>
-      </template>
-      <template v-else-if="h.sidebarTab === 'tools'">
-        <div class="empty">选择工具开始使用</div>
-      </template>
+    <!-- Note feed view（标签/星标/归档点击时打开） -->
+    <div v-if="notesStore.showNoteFeed" class="content" v-show="notesStore.showNoteFeed">
+      <div class="bar"><code class="cmdtext">{{ notesStore.selectedTag ? '# ' + notesStore.selectedTag : notesStore.listTab === 'starred' ? '⭐ 星标' : '📁 归档' }}</code></div>
+      <NoteFeedView />
     </div>
 
-    <div v-if="store.runningTabs.length===0&&store.docTabs.length===0&&store.toolTabs.length===0&&notesStore.noteTabs.length===0" class="empty-or-feed">
-      <div class="empty">{{ store.homeTabs.length === 0 ? '从左侧面板选择功能开始使用' : '' }}</div>
+    <!-- Memory detail content -->
+    <div v-for="(t,i) in store.memoryTabs" :key="'memc'+t.id" class="content" v-show="store.activeTabType==='memory'&&i===store.activeMemoryIndex">
+      <div class="bar">
+        <code class="cmdtext">🧠 {{ t.title }}</code>
+        <div class="acts">
+          <!-- 编辑模式：取消/保存放标题栏 -->
+          <template v-if="t.editing">
+            <button class="btn" @click="store.toggleMemoryEdit(i)">取消</button>
+            <button class="btn pri" @click="saveMemoryTab(i)">保存</button>
+          </template>
+          <!-- 查看模式：编辑按钮 -->
+          <button v-else class="btn" @click="store.toggleMemoryEdit(i)">✏️ 编辑</button>
+        </div>
+      </div>
+      <!-- 查看模式 -->
+      <div v-if="!t.editing" class="memory-detail-view">
+        <div class="mem-meta">
+          <span class="mem-badge type">{{ t.type }}</span>
+          <span v-if="t.scope" class="mem-badge scope">{{ t.scope }}</span>
+        </div>
+        <pre class="mem-content">{{ t.content }}</pre>
+      </div>
+      <!-- 编辑模式 -->
+      <div v-else class="memory-edit-view">
+        <div class="mem-edit-field">
+          <label>标题</label>
+          <input v-model="t.title" class="mem-edit-input" />
+        </div>
+        <div class="mem-edit-field">
+          <label>类型</label>
+          <select v-model="t.type" class="mem-edit-input">
+            <option value="decision">decision</option>
+            <option value="bugfix">bugfix</option>
+            <option value="architecture">architecture</option>
+            <option value="pattern">pattern</option>
+            <option value="config">config</option>
+            <option value="discovery">discovery</option>
+          </select>
+        </div>
+        <div class="mem-edit-field">
+          <label>Scope</label>
+          <input v-model="t.scope" class="mem-edit-input" placeholder="项目标识" />
+        </div>
+        <div class="mem-edit-field">
+          <label>Topic Key</label>
+          <input v-model="t.topicKey" class="mem-edit-input" placeholder="去重键" />
+        </div>
+        <div class="mem-edit-field content-field">
+          <label>内容</label>
+          <textarea v-model="t.content" class="mem-edit-textarea"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="store.runningTabs.length===0&&store.docTabs.length===0&&store.toolTabs.length===0&&store.memoryTabs.length===0&&notesStore.noteTabs.length===0&&!notesStore.showNoteFeed" class="empty-or-feed" style="flex:1;display:flex">
+      <div class="empty">从左侧面板选择功能开始使用</div>
     </div>
 
     <Teleport to="body">
@@ -489,6 +554,20 @@ onUnmounted(() => {
 .doc-body { flex:1; overflow-y:auto; padding:12px; font-family:'Cascadia Code',Consolas,monospace; font-size:12px; color:var(--jc-text-primary); white-space:pre-wrap; background:var(--jc-bg-app); }
 .note-body { flex:1; display:flex; overflow:hidden; flex-direction:column; }
 .note-body.with-history { flex-direction:row; }
+.memory-detail-view { flex:1; overflow-y:auto; padding:16px; background:var(--jc-bg-app); }
+.memory-edit-view { flex:1; overflow:hidden; padding:16px; background:var(--jc-bg-app); display:flex; flex-direction:column; gap:10px; }
+.mem-edit-field { display:flex; flex-direction:column; gap:3px; flex-shrink:0; }
+.mem-edit-field.content-field { flex:1; min-height:0; display:flex; flex-direction:column; }
+.mem-edit-field.content-field textarea { flex:1; resize:none; }
+.mem-edit-field label { font-size:11px; color:var(--jc-text-secondary); }
+.mem-edit-input { padding:6px 8px; font-size:12px; border:1px solid var(--jc-border-default); border-radius:4px; background:var(--jc-bg-app); color:var(--jc-text-primary); }
+.mem-edit-textarea { padding:6px 8px; font-size:12px; border:1px solid var(--jc-border-default); border-radius:4px; background:var(--jc-bg-app); color:var(--jc-text-primary); resize:none; font-family:inherit; }
+.mem-edit-actions { display:flex; gap:6px; justify-content:flex-end; }
+.mem-meta { display:flex; gap:6px; margin-bottom:12px; }
+.mem-badge { font-size:10px; padding:2px 8px; border-radius:4px; }
+.mem-badge.type { background:var(--jc-color-accent); color:var(--jc-color-white); }
+.mem-badge.scope { background:rgba(88,166,255,0.15); color:#58a6ff; }
+.mem-content { font-size:12px; line-height:1.6; white-space:pre-wrap; color:var(--jc-text-primary); }
 .note-editor-wrapper { flex:1; display:flex; flex-direction:column; min-height:0; min-width:0; }
 .ctx { @include ctx-menu; min-width:130px; }
 .ci { @include ctx-item; }

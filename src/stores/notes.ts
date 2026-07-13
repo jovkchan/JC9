@@ -19,6 +19,8 @@ export const useNotesStore = defineStore('notes', () => {
   const selectedTag = ref<string | null>(null)
   const showSettings = ref(false)
   const showSearchPanel = ref(false)
+  /** 在右侧内容栏显示 NoteFeedView（标签/星标点击时打开） */
+  const showNoteFeed = ref(false)
 
   // ── Groups ──
   const groups = ref<NoteGroup[]>([])
@@ -513,7 +515,7 @@ export const useNotesStore = defineStore('notes', () => {
 
   return {
     // Filter States
-    listTab, searchQuery, filterDate, selectedTag, showSettings, showSearchPanel,
+    listTab, searchQuery, filterDate, selectedTag, showSettings, showSearchPanel, showNoteFeed,
     // Groups
     groups, selectedGroupId, groupTree,
     loadGroups, addGroup, updateGroup, removeGroup, getGroupPath,

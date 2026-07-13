@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed, watch } from 'vue'
+import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useStatusStore } from '@/stores/status'
@@ -23,51 +23,17 @@ export const useProjectStore = defineStore('project', () => {
   const runningTabs = ref<RunningTab[]>([])
   const docTabs = ref<DocTab[]>([])
   const toolTabs = ref<ToolTab[]>([])
+  const memoryTabs = ref<{ id: string; title: string; content: string; type: string; scope: string; topicKey: string; editing: boolean }[]>([])
   const activeTabIndex = ref(0)
   const activeDocIndex = ref(-1)
   const activeToolIndex = ref(-1)
-  const activeTabType = ref<'term'|'doc'|'tool'|'note'|'home'>('term')
-
-  // ── 首页 Tab ──
-  interface HomeTab { sidebarTab: 'projects'|'workflows'|'tools'|'notes'; label: string; icon: string }
-  const HOME_TAB_DEFS: HomeTab[] = [
-    { sidebarTab: 'projects', label: '项目首页', icon: '📁' },
-    { sidebarTab: 'workflows', label: '快捷首页', icon: '⚡' },
-    { sidebarTab: 'tools',     label: '工具首页', icon: '🔧' },
-    { sidebarTab: 'notes',     label: '笔记首页', icon: '📋' },
-  ]
-  const homeTabs = ref<HomeTab[]>(HOME_TAB_DEFS.map(t => ({ ...t })))
-  const activeHomeIndex = ref(0)
-
-  function openHomeTab(sidebar: string) {
-    const idx = homeTabs.value.findIndex(h => h.sidebarTab === sidebar)
-    if (idx >= 0) {
-      activeHomeIndex.value = idx
-      activeTabType.value = 'home'
-    }
-  }
-
-  function closeHomeTab(index: number) {
-    homeTabs.value.splice(index, 1)
-    if (activeHomeIndex.value >= homeTabs.value.length) {
-      activeHomeIndex.value = Math.max(0, homeTabs.value.length - 1)
-    }
-    // 如果所有首页 Tab 都关闭了，切到 term（如果有）或保持 home 空状态
-    if (homeTabs.value.length === 0) {
-      if (runningTabs.value.length > 0) { activeTabType.value = 'term'; activeTabIndex.value = 0 }
-      else { activeTabType.value = 'home'; activeHomeIndex.value = -1 }
-    }
-  }
+  const activeMemoryIndex = ref(-1)
+  const activeTabType = ref<'term'|'doc'|'tool'|'note'|'memory'>('term')
 
   const workflows = ref<Workflow[]>([])
   const pendingInput = ref('')
   const recentTools = ref<string[]>(JSON.parse(localStorage.getItem('jc9-recent-tools') || '[]'))
-  const sidebarTab = ref<'projects'|'workflows'|'tools'|'notes'>('projects')
-
-  // sidebarTab 变更时自动打开对应的首页
-  watch(sidebarTab, (tab) => {
-    openHomeTab(tab)
-  })
+  const sidebarTab = ref<'projects'|'workflows'|'tools'|'notes'|'memories'>('projects')
   const mainMode = ref<'main' | 'ai'>('main')
   const workflowRunning = ref(false)
   const workflowProgress = ref<{ step: number; total: number; name: string; status: string; stdout: string; stderr: string } | null>(null)
@@ -300,6 +266,31 @@ export const useProjectStore = defineStore('project', () => {
     }
   }
 
+  function openMemoryTab(memory: { id: string; title: string; content: string; type: string; scope: string; topicKey?: string }, editing = false) {
+    const existing = memoryTabs.value.findIndex(t => t.id === memory.id)
+    if (existing >= 0) {
+      activeMemoryIndex.value = existing
+      activeTabType.value = 'memory'
+    } else {
+      memoryTabs.value.push({ ...memory, topicKey: memory.topicKey || '', editing })
+      activeMemoryIndex.value = memoryTabs.value.length - 1
+      activeTabType.value = 'memory'
+    }
+  }
+
+  function closeMemoryTab(index: number) {
+    memoryTabs.value.splice(index, 1)
+    if (activeMemoryIndex.value >= memoryTabs.value.length) {
+      activeMemoryIndex.value = Math.max(-1, memoryTabs.value.length - 1)
+    }
+  }
+
+  function toggleMemoryEdit(index: number) {
+    if (memoryTabs.value[index]) {
+      memoryTabs.value[index].editing = !memoryTabs.value[index].editing
+    }
+  }
+
   async function openDoc(command: string, title: string) {
     const id = genId()
     const tab: DocTab = { id, title, command, content: '', loading: true }
@@ -439,5 +430,5 @@ export const useProjectStore = defineStore('project', () => {
     }
   }
 
-  return { projects, selectedProjectId, runningMap, outputMap, logStatsMap, runningTabs, docTabs, toolTabs, activeTabIndex, activeDocIndex, activeToolIndex, activeTabType, homeTabs, activeHomeIndex, openHomeTab, closeHomeTab, workflows, pendingInput, frequentWorkflows, favWorkflows, recentTools, clearTermSignal, sidebarTab, mainMode, workflowRunning, workflowProgress, loadProjects, saveProjects, addProject, removeProject, updateProjectName, addCommand, removeCommand, updateCommand, startCommand, stopCommand, restartCommand, closeTab, closeDocTab, openDoc, openDocFromText, clearOutput, clearLogStats, getOutput, initListeners, destroyListeners, cmdKey, detectProject, bufferPtyOutput, loadWorkflows, addWorkflow, removeWorkflow, updateWorkflow, toggleWfFav, runWorkflow, startDefaultTerminal, openTool, closeToolTab, sendToTerminal, getRunningTerminals, startQuickTerminal }
+  return { projects, selectedProjectId, runningMap, outputMap, logStatsMap, runningTabs, docTabs, toolTabs, memoryTabs, activeTabIndex, activeDocIndex, activeToolIndex, activeMemoryIndex, activeTabType, workflows, pendingInput, frequentWorkflows, favWorkflows, recentTools, clearTermSignal, sidebarTab, mainMode, workflowRunning, workflowProgress, loadProjects, saveProjects, addProject, removeProject, updateProjectName, addCommand, removeCommand, updateCommand, startCommand, stopCommand, restartCommand, closeTab, closeDocTab, openDoc, openDocFromText, clearOutput, clearLogStats, getOutput, initListeners, destroyListeners, cmdKey, detectProject, bufferPtyOutput, loadWorkflows, addWorkflow, removeWorkflow, updateWorkflow, toggleWfFav, runWorkflow, startDefaultTerminal, openTool, closeToolTab, openMemoryTab, closeMemoryTab, toggleMemoryEdit, sendToTerminal, getRunningTerminals, startQuickTerminal }
 })

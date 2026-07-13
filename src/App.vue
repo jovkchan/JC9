@@ -5,10 +5,11 @@ import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { invoke } from '@tauri-apps/api/core'
 import { useProjectStore } from '@/stores/project'
 import { useStatusStore } from '@/stores/status'
-import ProjectSidebar from '@/components/ProjectSidebar.vue'
 import MainPanel from '@/components/MainPanel.vue'
 import TitleBar from '@/components/TitleBar.vue'
 import StatusBar from '@/components/StatusBar.vue'
+import IconNav from '@/components/nav/IconNav.vue'
+import SectionPanel from '@/components/sections/SectionPanel.vue'
 import AiAgentPanel from '@/components/ai-agent/AiAgentPanel.vue'
 import SettingsPanel from '@/components/settings/SettingsPanel.vue'
 import VersionDiffWindow from '@/components/notes/VersionDiffWindow.vue'
@@ -18,7 +19,6 @@ import NotificationPanel from '@/components/NotificationPanel.vue'
 
 const store = useProjectStore()
 const status = useStatusStore()
-const sidebarCollapsed = ref(false)
 const isSplash = ref(false)
 const isAiAgent = ref(false)
 const windowLabel = ref('')
@@ -162,12 +162,8 @@ onUnmounted(() => {
     <!-- 主程序模式：正常显示 -->
     <template v-else>
       <div class="app-body">
-        <div class="sidebar-wrap" :class="{fold:sidebarCollapsed}">
-          <ProjectSidebar v-show="!sidebarCollapsed" />
-        </div>
-        <div class="splitter" @click="sidebarCollapsed=!sidebarCollapsed" :title="sidebarCollapsed?'展开侧栏':'折叠侧栏'">
-          <span class="splitter-arrow">{{ sidebarCollapsed?'▶':'◀' }}</span>
-        </div>
+        <IconNav />
+        <SectionPanel />
         <MainPanel />
       </div>
       <StatusBar />
@@ -183,12 +179,6 @@ onUnmounted(() => {
 <style scoped lang="scss">
 .app { display:flex; flex-direction:column; height:100vh; background:var(--jc-bg-app); }
 .app-body { display:flex; flex:1; overflow:hidden; }
-.sidebar-wrap { width:210px; min-width:210px; transition:width .15s; overflow:hidden; &.fold { width:0; min-width:0; } }
-.splitter { width:8px; min-width:8px; background:var(--jc-bg-elevated); cursor:pointer; display:flex; align-items:center; justify-content:center; border-left:1px solid var(--jc-border-default); border-right:1px solid var(--jc-border-default);
-  &:hover { background:var(--jc-color-accent); }
-  &-arrow { font-size:8px; color:var(--jc-text-secondary); }
-  &:hover &-arrow { color:var(--jc-color-white); }
-}
 .ai-mode-body { flex: 1; display: flex; overflow: hidden; }
 .splash {
   position: fixed;
