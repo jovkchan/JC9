@@ -2,7 +2,7 @@
 	"servers": {
 		"jc9": {
 			"type": "http",
-			"url": "http://127.0.0.1:19799/sse?api_key=812dc6b1-84e4-4bea-a247-941fae061b05"
+			"url": "http://127.0.0.1:19799/sse?api_key=d67be810cc68ee7db15be823ba7dbbf8"
 		}
 	}
 }

@@ -25,6 +25,16 @@ const showQuickNote = ref(false)
 
 // 键盘快捷键：Ctrl+Shift+N 打开快速笔记
 function onGlobalKeydown(e: KeyboardEvent) {
+  // 屏蔽 F5 刷新（防止丢失终端等运行状态）
+  if (e.key === 'F5') {
+    e.preventDefault()
+    return
+  }
+  // 屏蔽 Ctrl+R / Cmd+R 刷新
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r') {
+    e.preventDefault()
+    return
+  }
   if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'N') {
     e.preventDefault()
     showQuickNote.value = !showQuickNote.value

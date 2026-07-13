@@ -568,12 +568,17 @@ fn get_notes(state: State<'_, Mutex<AppState>>, group_id: Option<String>) -> Res
 }
 
 #[tauri::command]
-async fn save_note(state: State<'_, Mutex<AppState>>, note: Note) -> Result<(), String> {
+async fn save_note(state: State<'_, Mutex<AppState>>, note: Note, app_handle: tauri::AppHandle) -> Result<(), String> {
     let ai_manager = {
         let app_state = state.lock().map_err(|e| e.to_string())?;
         app_state.db.save_note(&note)?;
         app_state.ai_manager.clone()
     };
+    // 通知前端笔记已变更
+    let _ = app_handle.emit("notes:changed", serde_json::json!({
+        "action": "saved",
+        "id": note.id,
+    }));
     // 归档 → 从知识库移除；未归档 → 同步到知识库
     let kb_id = format!("note_{}", note.id);
     let kb = ai_manager.knowledge_base().clone();
@@ -587,7 +592,7 @@ async fn save_note(state: State<'_, Mutex<AppState>>, note: Note) -> Result<(), 
 }
 
 #[tauri::command]
-async fn delete_note(state: State<'_, Mutex<AppState>>, id: String, permanent: Option<bool>) -> Result<(), String> {
+async fn delete_note(state: State<'_, Mutex<AppState>>, id: String, permanent: Option<bool>, app_handle: tauri::AppHandle) -> Result<(), String> {
     let ai_manager = {
         let app_state = state.lock().map_err(|e| e.to_string())?;
         if permanent.unwrap_or(false) {
@@ -598,6 +603,11 @@ async fn delete_note(state: State<'_, Mutex<AppState>>, id: String, permanent: O
         // 软删除和硬删除都清理知识库向量
         app_state.ai_manager.clone()
     };
+    // 通知前端笔记已变更
+    let _ = app_handle.emit("notes:changed", serde_json::json!({
+        "action": if permanent.unwrap_or(false) { "deleted" } else { "soft-deleted" },
+        "id": id,
+    }));
     ai_manager.knowledge_base().remove_entry(&format!("note_{}", id)).await;
     Ok(())
 }
@@ -1378,18 +1388,16 @@ async fn ai_get_mcp_server_config(state: State<'_, Mutex<AppState>>) -> Result<a
         app_state.mcp_server.clone()
     };
     let server = mcp_server.lock().await;
-    let config = server.get_config().await;
-    println!("📤 ai_get_mcp_server_config: group_ids={:?}", config.group_ids);
-    Ok(config)
+    Ok(server.get_config().await)
 }
 
-/// 更新并应用 MCP Server 配置
+/// 更新并应用 MCP Server 配置（仅 enabled/port/host）
 #[tauri::command]
 async fn ai_set_mcp_server_config(
     state: State<'_, Mutex<AppState>>,
     config: ai::mcp_server::McpServerConfig,
 ) -> Result<String, String> {
-    println!("🔧 ai_set_mcp_server_config: group_ids={:?}, enabled={}", config.group_ids, config.enabled);
+    println!("🔧 ai_set_mcp_server_config: enabled={}, port={}", config.enabled, config.port);
     let mcp_server = {
         let app_state = state.lock().map_err(|e| e.to_string())?;
         (app_state.mcp_server.clone(), app_state.db.conn.clone())
@@ -1418,26 +1426,51 @@ async fn ai_set_mcp_server_config(
     }
 }
 
-/// 仅保存白名单（不重启服务器）
+// ── MCP API Key 管理 ──
+
 #[tauri::command]
-async fn ai_save_mcp_whitelist(
-    state: State<'_, Mutex<AppState>>,
-    group_ids: Vec<String>,
-) -> Result<(), String> {
-    let (mcp_server, db_conn) = {
-        let app_state = state.lock().map_err(|e| e.to_string())?;
-        (app_state.mcp_server.clone(), app_state.db.conn.clone())
-    };
-    let server = mcp_server.lock().await;
-    let mut config = server.get_config().await;
-    config.group_ids = group_ids.clone();
-    server.update_config(config.clone()).await;
-    ai::mcp_config::save_mcp_config(&db_conn, &config)?;
-    // 同步更新运行中 AppState 的 group_ids（实时生效）
-    if let Some(ref lock) = server.group_ids_lock {
-        *lock.write().await = group_ids;
-    }
-    Ok(())
+fn mcp_list_api_keys(state: State<'_, Mutex<AppState>>) -> Result<Vec<ai::mcp_api_keys::ApiKeyRecord>, String> {
+    ai::mcp_api_keys::list_keys(&state.lock().map_err(|e| e.to_string())?.db.conn)
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+fn mcp_add_api_key(state: State<'_, Mutex<AppState>>, key: String, label: String, scope: String, groupIds: Vec<String>) -> Result<ai::mcp_api_keys::ApiKeyRecord, String> {
+    ai::mcp_api_keys::add_key(&state.lock().map_err(|e| e.to_string())?.db.conn, &key, &label, &scope, &groupIds)
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+fn mcp_update_api_key(state: State<'_, Mutex<AppState>>, id: String, label: String, scope: String, groupIds: Vec<String>) -> Result<(), String> {
+    ai::mcp_api_keys::update_key(&state.lock().map_err(|e| e.to_string())?.db.conn, &id, &label, &scope, &groupIds)
+}
+
+#[tauri::command]
+fn mcp_delete_api_key(state: State<'_, Mutex<AppState>>, id: String) -> Result<(), String> {
+    ai::mcp_api_keys::delete_key(&state.lock().map_err(|e| e.to_string())?.db.conn, &id)
+}
+
+// ── 记忆管理 ──
+
+#[tauri::command]
+fn get_memories(state: State<'_, Mutex<AppState>>, search: String, page: i64, page_size: i64) -> Result<database::MemoryPage, String> {
+    state.lock().map_err(|e| e.to_string())?.db.get_memories(&search, page, page_size)
+}
+
+#[tauri::command]
+fn save_memory(state: State<'_, Mutex<AppState>>, memory: database::Memory) -> Result<(), String> {
+    state.lock().map_err(|e| e.to_string())?.db.add_memory(&memory)
+}
+
+#[tauri::command]
+fn delete_memory(state: State<'_, Mutex<AppState>>, id: String) -> Result<(), String> {
+    state.lock().map_err(|e| e.to_string())?.db.delete_memory(&id)
+}
+
+#[tauri::command]
+fn compress_memories(state: State<'_, Mutex<AppState>>, ids: Vec<String>) -> Result<String, String> {
+    let new_id = uuid::Uuid::new_v4().to_string();
+    state.lock().map_err(|e| e.to_string())?.db.compress_memories(&ids, &new_id)
 }
 
 /// 启动 MCP Server
@@ -1873,10 +1906,12 @@ pub fn run() {
                 let db_clone = guard.db.conn.clone();
                 drop(guard);
 
+                let app_handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     let mut server = server_clone.lock().await;
                     server.set_knowledge_base(kb);
                     server.set_db_conn(db_clone.clone());
+                    server.set_app_handle(app_handle);
 
                     // 从数据库读取配置
                     let saved_config = ai::mcp_config::load_mcp_config(&db_clone);
@@ -2187,6 +2222,11 @@ pub fn run() {
             get_note_count,
             get_note_by_id,
             move_note,
+            // Memory commands
+            get_memories,
+            save_memory,
+            delete_memory,
+            compress_memories,
             // AI commands
             ai_list_sessions,
             ai_create_session,
@@ -2234,7 +2274,10 @@ pub fn run() {
             ai_stop_mcp_server,
             ai_get_mcp_server_status,
             ai_reindex_knowledge,
-            ai_save_mcp_whitelist,
+            mcp_list_api_keys,
+            mcp_add_api_key,
+            mcp_update_api_key,
+            mcp_delete_api_key,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

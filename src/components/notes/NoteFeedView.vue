@@ -8,6 +8,56 @@ const store = useNotesStore()
 
 // 右键菜单状态
 const ctxMenu = ref({ show: false, x: 0, y: 0, noteId: '' })
+const moveSubShow = ref(false)
+const moveHoverGroupId = ref<string | null>(null)
+const moveHoverChildId = ref<string | null>(null)
+let moveCloseTimer: ReturnType<typeof setTimeout> | null = null
+
+// 级联分组
+const moveRootGroups = computed(() => store.groups.filter(g => !g.parentId).sort((a, b) => a.sortOrder - b.sortOrder))
+function getMoveChildren(parentId: string) { return store.groups.filter(g => g.parentId === parentId).sort((a, b) => a.sortOrder - b.sortOrder) }
+const moveChildren = computed(() => moveHoverGroupId.value ? getMoveChildren(moveHoverGroupId.value) : [])
+const moveGrandchildren = computed(() => moveHoverChildId.value ? getMoveChildren(moveHoverChildId.value) : [])
+
+function scheduleCloseMove() {
+  moveCloseTimer = setTimeout(() => {
+    moveSubShow.value = false; moveHoverGroupId.value = null; moveHoverChildId.value = null
+  }, 200)
+}
+function cancelCloseMove() { if (moveCloseTimer) { clearTimeout(moveCloseTimer); moveCloseTimer = null } }
+
+// 级联菜单定位
+function calcMovePos(parentLeft: number, parentTop: number, parentWidth: number, hoverIdx: number, itemCount: number) {
+  const vw = window.innerWidth; const vh = window.innerHeight; const itemH = 25; const padTop = 4; const gap = 2
+  const menuW = 140; const menuH = Math.min(itemCount * itemH + padTop * 2, 280)
+  const rightSpace = vw - parentLeft - parentWidth
+  const left = rightSpace >= menuW ? parentLeft + parentWidth + gap : parentLeft - menuW - gap
+  const itemTop = parentTop + padTop + hoverIdx * itemH
+  const below = vh - itemTop - menuH
+  const top = below < 0 ? Math.max(4, itemTop - menuH + itemH) : itemTop
+  return { left: `${Math.max(4, left)}px`, top: `${top}px` }
+}
+
+const moveSubStyle = computed(() => {
+  const x = ctxMenu.value.x + 140; const y = ctxMenu.value.y
+  const vw = window.innerWidth; const vh = window.innerHeight; const menuW = 140
+  const count = moveRootGroups.value.length; const menuH = Math.min(count * 25 + 8, 280)
+  const rightSpace = vw - x
+  const left = rightSpace < menuW ? (ctxMenu.value.x - menuW - 2) : x
+  const below = vh - y
+  const top = below < menuH && y > menuH ? Math.max(4, y - menuH + 4) : Math.min(y, vh - menuH - 4)
+  return { left: `${Math.max(4, left)}px`, top: `${top}px` }
+})
+
+const moveSub2Style = computed(() => {
+  const idx = moveRootGroups.value.findIndex(g => g.id === moveHoverGroupId.value)
+  return calcMovePos(parseInt(moveSubStyle.value.left) || 0, parseInt(moveSubStyle.value.top) || 0, 130, idx >= 0 ? idx : 0, moveChildren.value.length)
+})
+
+const moveSub3Style = computed(() => {
+  const idx = moveChildren.value.findIndex(g => g.id === moveHoverChildId.value)
+  return calcMovePos(parseInt(moveSub2Style.value.left) || 0, parseInt(moveSub2Style.value.top) || 0, 130, idx >= 0 ? idx : 0, moveGrandchildren.value.length)
+})
 
 // 快速发布
 const newContent = ref('')
@@ -240,23 +290,54 @@ const activeFilterSummary = computed(() => {
     </div>
   </div>
 
-  <!-- 右键菜单：移动笔记到分组 -->
+  <!-- 右键菜单：移动笔记到分组（级联 3 级） -->
   <Teleport to="body">
     <div v-if="ctxMenu.show" class="ctx-overlay" @click="hideCtxMenu" @contextmenu.prevent="hideCtxMenu">
-      <div
-        class="ctx-menu"
-        :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
-        @click.stop
-      >
-        <div class="ctx-menu-title">移动到分组</div>
-        <button
-          v-for="g in store.groups"
-          :key="g.id"
-          class="ctx-menu-item"
-          @click="moveNoteToGroup(g.id)"
-        >
-          📁 {{ g.name }}
-        </button>
+      <div class="ctx-menu" :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }" @click.stop>
+        <div class="ctx-menu-item" @click="moveNoteToGroup(null)">📁 根目录</div>
+        <div class="ctx-menu-item" style="display:flex;justify-content:space-between" @mouseenter="moveSubShow = true">
+          移动到分组 <span style="font-size:10px">▸</span>
+        </div>
+      </div>
+    </div>
+  </Teleport>
+
+  <!-- 一级子菜单 -->
+  <Teleport to="body">
+    <div v-if="ctxMenu.show && moveSubShow" class="ctx-menu" :style="moveSubStyle"
+      @mouseleave="scheduleCloseMove" @mouseenter="cancelCloseMove">
+      <div v-for="g in moveRootGroups" :key="g.id" class="ctx-menu-item"
+        style="display:flex;justify-content:space-between"
+        @click="moveNoteToGroup(g.id)"
+        @mouseenter="cancelCloseMove(); moveHoverGroupId = getMoveChildren(g.id).length > 0 ? g.id : null; moveHoverChildId = null">
+        📁 {{ g.name }}
+        <span v-if="getMoveChildren(g.id).length > 0" style="font-size:10px">▸</span>
+      </div>
+    </div>
+  </Teleport>
+
+  <!-- 二级子菜单 -->
+  <Teleport to="body">
+    <div v-if="ctxMenu.show && moveSubShow && moveHoverGroupId && moveChildren.length > 0"
+      class="ctx-menu" :style="moveSub2Style"
+      @mouseleave="moveHoverChildId = null; moveHoverGroupId = null"
+      @mouseenter="cancelCloseMove">
+      <div v-for="child in moveChildren" :key="child.id" class="ctx-menu-item"
+        style="display:flex;justify-content:space-between"
+        @click="moveNoteToGroup(child.id)"
+        @mouseenter="cancelCloseMove(); moveHoverChildId = getMoveChildren(child.id).length > 0 ? child.id : null">
+        📁 {{ child.name }}
+        <span v-if="getMoveChildren(child.id).length > 0" style="font-size:10px">▸</span>
+      </div>
+    </div>
+  </Teleport>
+
+  <!-- 三级子菜单 -->
+  <Teleport to="body">
+    <div v-if="ctxMenu.show && moveSubShow && moveHoverChildId && moveGrandchildren.length > 0"
+      class="ctx-menu" :style="moveSub3Style" @mouseenter="cancelCloseMove">
+      <div v-for="gc in moveGrandchildren" :key="gc.id" class="ctx-menu-item" @click="moveNoteToGroup(gc.id)">
+        📁 {{ gc.name }}
       </div>
     </div>
   </Teleport>

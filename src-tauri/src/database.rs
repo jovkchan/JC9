@@ -40,6 +40,27 @@ pub struct Shortcut {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct Memory {
+    pub id: String,
+    pub scope: String,
+    pub topic_key: String,
+    pub title: String,
+    pub content: String,
+    pub memory_type: String,
+    pub tags: Vec<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryPage {
+    pub items: Vec<Memory>,
+    pub total: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct NoteGroup {
     pub id: String,
     pub name: String,
@@ -124,6 +145,26 @@ impl Database {
             CREATE TABLE IF NOT EXISTS shortcuts (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, command TEXT NOT NULL, category TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', is_favorite INTEGER NOT NULL DEFAULT 0, use_count INTEGER NOT NULL DEFAULT 0, is_builtin INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (user_id) REFERENCES users(id));
             CREATE TABLE IF NOT EXISTS note_groups (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, parent_id TEXT, sort_order INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, FOREIGN KEY (user_id) REFERENCES users(id));
             CREATE TABLE IF NOT EXISTS notes (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, group_id TEXT, title TEXT NOT NULL DEFAULT '', content TEXT NOT NULL DEFAULT '', format TEXT NOT NULL DEFAULT 'plain', is_pinned INTEGER NOT NULL DEFAULT 0, tags TEXT NOT NULL DEFAULT '[]', visibility TEXT NOT NULL DEFAULT 'PRIVATE', sort_order INTEGER NOT NULL DEFAULT 0, version INTEGER NOT NULL DEFAULT 1, is_deleted INTEGER NOT NULL DEFAULT 0, is_archived INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, FOREIGN KEY (user_id) REFERENCES users(id), FOREIGN KEY (group_id) REFERENCES note_groups(id) ON DELETE SET NULL);
+            CREATE TABLE IF NOT EXISTS memories (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL DEFAULT 'local',
+                scope TEXT NOT NULL DEFAULT '',
+                topic_key TEXT NOT NULL DEFAULT '',
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                memory_type TEXT NOT NULL DEFAULT 'discovery',
+                tags TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS mcp_api_keys (
+                id TEXT PRIMARY KEY,
+                key TEXT NOT NULL UNIQUE,
+                label TEXT NOT NULL DEFAULT '',
+                scope TEXT NOT NULL DEFAULT '',
+                group_ids TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
             CREATE TABLE IF NOT EXISTS tags (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, color TEXT NOT NULL DEFAULT '', FOREIGN KEY (user_id) REFERENCES users(id));
             CREATE TABLE IF NOT EXISTS resources (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, note_id TEXT, filename TEXT NOT NULL, file_path TEXT NOT NULL, size INTEGER NOT NULL DEFAULT 0, mime_type TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, FOREIGN KEY (user_id) REFERENCES users(id), FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE SET NULL);
             CREATE TABLE IF NOT EXISTS sync_log (id TEXT PRIMARY KEY, table_name TEXT NOT NULL, record_id TEXT NOT NULL, action TEXT NOT NULL, version INTEGER NOT NULL, synced INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
@@ -505,6 +546,118 @@ impl Database {
         let mut stmt = conn.prepare("SELECT id, group_id, title, content, format, is_pinned, tags, visibility, sort_order, version, is_deleted, is_archived, created_at, updated_at FROM notes WHERE user_id = 'local' AND is_deleted = 0 AND (title LIKE ?1 ESCAPE '\\' OR content LIKE ?1 ESCAPE '\\') ORDER BY updated_at DESC LIMIT 50").map_err(|e| e.to_string())?;
         let notes = stmt.query_map(params![pattern], map_note).map_err(|e| e.to_string())?.filter_map(|r| r.ok()).collect();
         Ok(notes)
+    }
+
+    // ── Memories ──
+
+    pub fn add_memory(&self, memory: &Memory) -> Result<(), String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let tags_json = serde_json::to_string(&memory.tags).unwrap_or_else(|_| "[]".into());
+        conn.execute(
+            "INSERT OR REPLACE INTO memories (id, user_id, scope, topic_key, title, content, memory_type, tags, created_at, updated_at) VALUES (?1, 'local', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![memory.id, memory.scope, memory.topic_key, memory.title, memory.content, memory.memory_type, tags_json, memory.created_at, memory.updated_at],
+        ).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub fn update_memory(&self, id: &str, title: Option<&str>, content: Option<&str>, memory_type: Option<&str>, topic_key: Option<&str>) -> Result<(), String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let now = chrono::Utc::now().to_rfc3339();
+        if let Some(t) = title { conn.execute("UPDATE memories SET title=?1, updated_at=?2 WHERE id=?3", params![t, now, id]).map_err(|e| e.to_string())?; }
+        if let Some(c) = content { conn.execute("UPDATE memories SET content=?1, updated_at=?2 WHERE id=?3", params![c, now, id]).map_err(|e| e.to_string())?; }
+        if let Some(mt) = memory_type { conn.execute("UPDATE memories SET memory_type=?1, updated_at=?2 WHERE id=?3", params![mt, now, id]).map_err(|e| e.to_string())?; }
+        if let Some(tk) = topic_key { conn.execute("UPDATE memories SET topic_key=?1, updated_at=?2 WHERE id=?3", params![tk, now, id]).map_err(|e| e.to_string())?; }
+        Ok(())
+    }
+
+    pub fn delete_memory(&self, id: &str) -> Result<(), String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        conn.execute("DELETE FROM memories WHERE id=?1", params![id]).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn get_memories(&self, search: &str, page: i64, page_size: i64) -> Result<MemoryPage, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let search_pattern = format!("%{}%", search);
+
+        let total: i64 = if search.is_empty() {
+            conn.query_row("SELECT COUNT(*) FROM memories WHERE user_id='local'", [], |r| r.get(0))
+                .map_err(|e| e.to_string())?
+        } else {
+            conn.query_row(
+                "SELECT COUNT(*) FROM memories WHERE user_id='local' AND (title LIKE ?1 OR content LIKE ?1)",
+                params![search_pattern],
+                |r| r.get(0),
+            ).map_err(|e| e.to_string())?
+        };
+
+        let offset = (page - 1).max(0) * page_size;
+
+        let items: Vec<Memory> = if search.is_empty() {
+            let mut stmt = conn.prepare(
+                "SELECT id, scope, topic_key, title, content, memory_type, tags, created_at, updated_at FROM memories WHERE user_id='local' ORDER BY updated_at DESC LIMIT ?1 OFFSET ?2"
+            ).map_err(|e| e.to_string())?;
+            let rows = stmt.query_map(params![page_size, offset], |row| {
+                Ok(Memory {
+                    id: row.get(0)?, scope: row.get(1)?, topic_key: row.get(2)?, title: row.get(3)?, content: row.get(4)?,
+                    memory_type: row.get(5)?,
+                    tags: serde_json::from_str(&row.get::<_,String>(6).unwrap_or_default()).unwrap_or_default(),
+                    created_at: row.get(7)?, updated_at: row.get(8)?,
+                })
+            }).map_err(|e| e.to_string())?;
+            rows.filter_map(|r| r.ok()).collect()
+        } else {
+            let mut stmt = conn.prepare(
+                "SELECT id, scope, topic_key, title, content, memory_type, tags, created_at, updated_at FROM memories WHERE user_id='local' AND (title LIKE ?1 OR content LIKE ?1) ORDER BY updated_at DESC LIMIT ?2 OFFSET ?3"
+            ).map_err(|e| e.to_string())?;
+            let rows = stmt.query_map(params![search_pattern, page_size, offset], |row| {
+                Ok(Memory {
+                    id: row.get(0)?, scope: row.get(1)?, topic_key: row.get(2)?, title: row.get(3)?, content: row.get(4)?,
+                    memory_type: row.get(5)?,
+                    tags: serde_json::from_str(&row.get::<_,String>(6).unwrap_or_default()).unwrap_or_default(),
+                    created_at: row.get(7)?, updated_at: row.get(8)?,
+                })
+            }).map_err(|e| e.to_string())?;
+            rows.filter_map(|r| r.ok()).collect()
+        };
+
+        Ok(MemoryPage { items, total })
+    }
+
+    #[allow(dead_code)]
+    pub fn get_memory_by_topic(&self, topic_key: &str) -> Result<Option<Memory>, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn.prepare("SELECT id, topic_key, title, content, memory_type, tags, created_at, updated_at FROM memories WHERE user_id='local' AND topic_key=?1 LIMIT 1").map_err(|e| e.to_string())?;
+        let mut rows = stmt.query_map(params![topic_key], |row| {
+            let tags_str: String = row.get::<_,String>(5).unwrap_or_default();
+            Ok(Memory {
+                id: row.get(0)?, scope: String::new(), topic_key: row.get(1)?, title: row.get(2)?, content: row.get(3)?,
+                memory_type: row.get(4)?, tags: serde_json::from_str(&tags_str).unwrap_or_default(),
+                created_at: row.get(6)?, updated_at: row.get(7)?,
+            })
+        }).map_err(|e| e.to_string())?;
+        Ok(rows.next().and_then(|r| r.ok()))
+    }
+
+    pub fn compress_memories(&self, ids: &[String], new_id: &str) -> Result<String, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let placeholders: Vec<String> = ids.iter().enumerate().map(|(i, _)| format!("?{}", i+1)).collect();
+        let sql = format!("SELECT title, content FROM memories WHERE id IN ({}) ORDER BY updated_at DESC", placeholders.join(","));
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        let params: Vec<&dyn rusqlite::types::ToSql> = ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+        let rows = stmt.query_map(params.as_slice(), |row| {
+            Ok((row.get::<_,String>(0)?, row.get::<_,String>(1)?))
+        }).map_err(|e| e.to_string())?;
+        let mut parts = vec![];
+        for r in rows { if let Ok((t, c)) = r { parts.push(format!("- **{}**: {}", t, c.chars().take(200).collect::<String>())); } }
+        let compressed = format!("# 记忆压缩\n\n> {} 条记忆合并\n\n{}\n\n---\n压缩时间: {}", ids.len(), parts.join("\n"), chrono::Utc::now().to_rfc3339());
+        // 删除原记忆
+        for id in ids { conn.execute("DELETE FROM memories WHERE id=?1", params![id]).map_err(|e| e.to_string())?; }
+        // 插入压缩结果
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute("INSERT INTO memories (id, user_id, topic_key, title, content, memory_type, tags, created_at, updated_at) VALUES (?1,'local','compressed','记忆压缩',?2,'summary','[\"compressed\"]',?3,?3)", params![new_id, compressed, now]).map_err(|e| e.to_string())?;
+        Ok(new_id.to_string())
     }
 
     pub fn get_note_count(&self) -> Result<i32, String> {

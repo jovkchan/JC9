@@ -194,6 +194,33 @@ const activePopover = ref<string | null>(null)
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 
+// ── 响应外部笔记变更（MCP 等外部修改后自动刷新编辑器内容）──
+watch(() => props.existingNote, (newNote) => {
+  if (!newNote) return
+  // 仅在内容确实不同时更新（避免覆盖用户正在编辑的内容）
+  if (newNote.title !== title.value) {
+    title.value = newNote.title
+  }
+  if (editNoteId.value !== newNote.id) {
+    editNoteId.value = newNote.id
+  }
+  // 同步标签
+  const newTagsStr = newNote.tags.join(', ')
+  if (newTagsStr !== tagInput.value) {
+    tagInput.value = newTagsStr
+    syncTags()
+  }
+  // 同步编辑器内容（仅在当前编辑器内容与传入内容不同时更新）
+  if (editor.value) {
+    const currentMd = editor.value.getMarkdown()
+    if (newNote.content !== currentMd) {
+      // 必须指定 contentType: 'markdown'，否则 setContent 默认按 HTML 解析
+      editor.value.commands.setContent(newNote.content, { contentType: 'markdown' })
+      lastSaved.value = ''
+    }
+  }
+}, { deep: true })
+
 const tags = ref<string[]>([])
 function syncTags() {
   tags.value = tagInput.value

@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import { useStatusStore } from '@/stores/status'
 import type { NoteGroup, Note, EditorState } from '@/types/notes'
 
@@ -412,6 +413,48 @@ export const useNotesStore = defineStore('notes', () => {
       activeNoteTabId.value = noteTabs.value.length > 0 ? noteTabs.value[noteTabs.value.length - 1].id : null
     }
   }
+
+  // ── 后端变更监听（MCP / 其他窗口修改数据时自动刷新）──
+  let listenersInitialized = false
+
+  function setupChangeListeners() {
+    if (listenersInitialized) return
+    listenersInitialized = true
+
+    listen<{ action: string; id: string }>('notes:changed', async (event) => {
+      const { action, id } = event.payload
+
+      // 重新加载笔记列表和分组
+      await Promise.all([loadAllNotes(), loadGroups()])
+
+      // 更新已打开标签页的标题
+      for (const tab of noteTabs.value) {
+        const note = notes.value.find(n => n.id === tab.id)
+        if (note) {
+          tab.title = note.title || '无标题'
+        }
+      }
+
+      // 如果笔记被删除且当前在打开的标签中，给出提示
+      if ((action === 'deleted' || action === 'soft-deleted') && id) {
+        const openTab = noteTabs.value.find(t => t.id === id)
+        if (openTab) {
+          status.pushMessage(`笔记"${openTab.title}"已被外部删除`, 'warn')
+        }
+      }
+
+      // 笔记被更新时给出轻提示
+      if (action === 'updated' && id) {
+        const note = notes.value.find(n => n.id === id)
+        if (note) {
+          status.pushMessage(`笔记"${note.title}"已更新`, 'info')
+        }
+      }
+    })
+  }
+
+  // 初始化监听
+  setupChangeListeners()
 
   return {
     // Filter States

@@ -158,7 +158,7 @@ function openCtx(e: MouseEvent, note: Note) {
   ctxPos.value = { x: e.clientX, y }; ctxBottom.value = bottom
   ctxNote.value = note; ctxUpward.value = upward; ctxShow.value = true
 }
-function closeCtx() { ctxShow.value = false; ctxShowMove.value = false }
+function closeCtx() { ctxShow.value = false; ctxShowMove.value = false; cancelCloseMove() }
 
 
 
@@ -243,40 +243,100 @@ function getAllGroupNotes(groupId: string): Note[] {
   return [...direct, ...childNotes]
 }
 
-// 移动分组菜单用：递归展平全部分组（始终展开），含 depth 用于缩进
-const groupTreeForMove = computed(() => {
-  const result: { group: NoteGroup; depth: number }[] = []
-  function walk(parentId: string | null, depth: number) {
-    const children = store.groups.filter(g => g.parentId === parentId).sort((a, b) => a.sortOrder - b.sortOrder)
-    for (const g of children) {
-      result.push({ group: g, depth })
-      walk(g.id, depth + 1)
-    }
-  }
-  walk(null, 0)
-  return result
-})
+// 移动分组菜单用：仅根分组（无 parentId）
+const moveRootGroups = computed(() =>
+  store.groups.filter(g => !g.parentId).sort((a, b) => a.sortOrder - b.sortOrder)
+)
 
-// 二级菜单（移动到分组）智能定位：响应主菜单位置和翻转方向
+// 获取某分组的所有子分组
+function getMoveChildren(parentId: string) {
+  return store.groups.filter(g => g.parentId === parentId).sort((a, b) => a.sortOrder - b.sortOrder)
+}
+
+// 二级菜单（移动到分组）智能定位
 const subMenuStyle = computed(() => {
   const x = ctxPos.value.x
   const y = ctxPos.value.y
-  const vw = window.innerWidth
-  const vh = window.innerHeight
-  const menuW = 150
-  const menuH = Math.min(groupTreeForMove.value.length * 24 + 8, 320)
+  const vw = window.innerWidth; const vh = window.innerHeight
+  const menuW = 150; const itemH = 25; const padTop = 4; const gap = 2; const parentW = 135
+  const count = moveRootGroups.value.length
+  const menuH = Math.min(count * itemH + padTop * 2, 320)
 
-  // 水平：右侧空间不够则翻到左侧
-  const rightSpace = vw - x - 135
-  const left = rightSpace < menuW ? (x - menuW - 4) : (x + 135)
+  const rightSpace = vw - x - parentW
+  const left = rightSpace >= menuW ? x + parentW + gap : x - menuW - gap
+  const below = vh - y
+  const top = below < menuH && y > menuH ? Math.max(4, y - menuH + 4) : Math.min(y, vh - menuH - 4)
 
-  // 垂直：主菜单向上时子菜单也向上；否则下方空间不够也向上
-  const below = ctxUpward.value ? -1 : (vh - y)
-  const above = ctxUpward.value ? (y - 4) : y
-  const flipUp = below < menuH && above > menuH
-  const top = flipUp ? Math.max(4, y - menuH + 4) : Math.min(y, vh - menuH - 4)
+  return { left: `${Math.max(4, left)}px`, top: `${top}px` }
+})
 
-  return { left: `${left}px`, top: `${top}px` }
+// 分组子菜单状态（级联，最多 3 级）
+const hoverMoveGroupId = ref<string | null>(null)
+const hoverMoveChildId = ref<string | null>(null)
+let moveCloseTimer: ReturnType<typeof setTimeout> | null = null
+
+function scheduleCloseMove() {
+  moveCloseTimer = setTimeout(() => {
+    ctxShowMove.value = false
+    hoverMoveGroupId.value = null
+    hoverMoveChildId.value = null
+  }, 200)
+}
+
+function cancelCloseMove() {
+  if (moveCloseTimer) { clearTimeout(moveCloseTimer); moveCloseTimer = null }
+}
+
+const hoverMoveChildren = computed(() => {
+  if (!hoverMoveGroupId.value) return []
+  return getMoveChildren(hoverMoveGroupId.value)
+})
+const hoverMoveGrandchildren = computed(() => {
+  if (!hoverMoveChildId.value) return []
+  return getMoveChildren(hoverMoveChildId.value)
+})
+
+// 通用：计算子菜单的定位（贴父菜单，2px 间距）
+function calcSubMenuPos(parentLeft: number, parentTop: number, parentWidth: number, hoverIdx: number, itemCount: number) {
+  const vw = window.innerWidth; const vh = window.innerHeight
+  const menuW = Math.min(180, parentWidth + 20)
+  const itemH = 25; const padTop = 4; const gap = 2
+  const menuH = Math.min(itemCount * itemH + padTop * 2, 300)
+
+  // 水平：贴父菜单右侧（2px 间距），不够翻左侧
+  const rightSpace = vw - parentLeft - parentWidth
+  const left = rightSpace >= menuW ? parentLeft + parentWidth + gap : parentLeft - menuW - gap
+
+  // 垂直：对齐 hover 项顶部
+  const itemTop = parentTop + padTop + hoverIdx * itemH
+  const below = vh - itemTop - menuH
+  const top = below < 0 ? Math.max(4, itemTop - menuH + itemH) : itemTop
+
+  return { left: `${Math.max(4, left)}px`, top: `${top}px` }
+}
+
+// 子菜单的二级菜单定位（紧贴一级菜单，2px 间距）
+const subSubMenuStyle = computed(() => {
+  const idx = moveRootGroups.value.findIndex(g => g.id === hoverMoveGroupId.value)
+  return calcSubMenuPos(
+    parseInt(subMenuStyle.value.left) || 0,
+    parseInt(subMenuStyle.value.top) || 0,
+    130,
+    idx >= 0 ? idx : 0,
+    hoverMoveChildren.value.length
+  )
+})
+
+// 子菜单的三级菜单定位（紧贴二级菜单）
+const subSubSubMenuStyle = computed(() => {
+  const idx = hoverMoveChildren.value.findIndex(g => g.id === hoverMoveChildId.value)
+  return calcSubMenuPos(
+    parseInt(subSubMenuStyle.value.left) || 0,
+    parseInt(subSubMenuStyle.value.top) || 0,
+    130,
+    idx >= 0 ? idx : 0,
+    hoverMoveGrandchildren.value.length
+  )
 })
 
 // Apply search/filter to store notes for display in groups
@@ -469,19 +529,65 @@ onMounted(() => document.addEventListener('click', closeGroupCtx))
       </div>
     </Teleport>
 
-    <!-- 移动分组子菜单（递归树结构，智能翻转） -->
+    <!-- 移动分组子菜单（级联：根 → 二级 → 三级） -->
     <Teleport to="body">
       <div
         v-if="ctxShow && ctxShowMove"
         class="ctx ctx-sub"
         :style="subMenuStyle"
-        @mouseleave="ctxShowMove = false"
+        @mouseleave="scheduleCloseMove"
+        @mouseenter="cancelCloseMove"
       >
-        <template v-for="item in groupTreeForMove" :key="item.group.id">
-          <div class="ci" :style="{ paddingLeft: (8 + item.depth * 14) + 'px' }" @click="moveNoteToGroup(item.group.id)">
-            {{ item.depth > 0 ? '└ ' : '' }}📁 {{ item.group.name }}
-          </div>
-        </template>
+        <div
+          v-for="g in moveRootGroups" :key="g.id"
+          class="ci move-ci"
+          style="display:flex;align-items:center;justify-content:space-between"
+          @click="moveNoteToGroup(g.id)"
+          @mouseenter="cancelCloseMove(); hoverMoveGroupId = getMoveChildren(g.id).length > 0 ? g.id : null; hoverMoveChildId = null"
+        >
+          📁 {{ g.name }}
+          <span v-if="getMoveChildren(g.id).length > 0" style="font-size:10px;margin-left:8px">▸</span>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- 二级分组子菜单 -->
+    <Teleport to="body">
+      <div
+        v-if="ctxShow && ctxShowMove && hoverMoveGroupId && hoverMoveChildren.length > 0"
+        class="ctx ctx-sub"
+        :style="subSubMenuStyle"
+        @mouseleave="hoverMoveChildId = null; hoverMoveGroupId = null"
+        @mouseenter="cancelCloseMove()"
+      >
+        <div
+          v-for="child in hoverMoveChildren" :key="child.id"
+          class="ci move-ci"
+          style="display:flex;align-items:center;justify-content:space-between"
+          @click="moveNoteToGroup(child.id)"
+          @mouseenter="cancelCloseMove(); hoverMoveChildId = getMoveChildren(child.id).length > 0 ? child.id : null"
+        >
+          📁 {{ child.name }}
+          <span v-if="getMoveChildren(child.id).length > 0" style="font-size:10px;margin-left:8px">▸</span>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- 三级分组子菜单 -->
+    <Teleport to="body">
+      <div
+        v-if="ctxShow && ctxShowMove && hoverMoveChildId && hoverMoveGrandchildren.length > 0"
+        class="ctx ctx-sub"
+        :style="subSubSubMenuStyle"
+        @mouseenter="cancelCloseMove()"
+      >
+        <div
+          v-for="gc in hoverMoveGrandchildren" :key="gc.id"
+          class="ci move-ci"
+          @click="moveNoteToGroup(gc.id)"
+        >
+          📁 {{ gc.name }}
+        </div>
       </div>
     </Teleport>
 

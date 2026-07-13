@@ -18,10 +18,12 @@ use chrono::Utc;
 use futures_util::stream::Stream;
 use rusqlite::{params, Connection};
 use tower_http::cors::CorsLayer;
+use tauri::{AppHandle, Emitter};
 
 use super::mcp_types::*;
 use super::knowledge_base::KnowledgeBase;
 use super::types::*;
+use super::mcp_api_keys::{ApiKeyRecord, list_keys as db_list_keys};
 
 // ══════════════════════════════════════════════════════════════
 // MCP Server 配置
@@ -31,12 +33,7 @@ use super::types::*;
 pub struct McpServerConfig {
     pub enabled: bool,
     pub port: u16,
-    #[serde(alias = "apiKey")]
-    pub api_key: String,
     pub host: String,
-    #[serde(default)]
-    #[serde(alias = "groupIds")]
-    pub group_ids: Vec<String>,
 }
 
 impl Default for McpServerConfig {
@@ -44,9 +41,7 @@ impl Default for McpServerConfig {
         Self {
             enabled: true,
             port: 19799,
-            api_key: uuid::Uuid::new_v4().to_string(),
             host: "127.0.0.1".into(),
-            group_ids: vec![],
         }
     }
 }
@@ -62,7 +57,7 @@ pub struct McpServer {
     running: Arc<AtomicBool>,
     shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
     sse_clients: Arc<RwLock<HashMap<String, mpsc::Sender<Result<Event, String>>>>>,
-    pub group_ids_lock: Option<Arc<RwLock<Vec<String>>>>,
+    app_handle: Option<AppHandle>,
 }
 
 impl McpServer {
@@ -74,8 +69,12 @@ impl McpServer {
             running: Arc::new(AtomicBool::new(false)),
             shutdown_tx: None,
             sse_clients: Arc::new(RwLock::new(HashMap::new())),
-            group_ids_lock: None,
+            app_handle: None,
         }
+    }
+
+    pub fn set_app_handle(&mut self, handle: AppHandle) {
+        self.app_handle = Some(handle);
     }
 
     pub fn set_knowledge_base(&mut self, kb: Arc<KnowledgeBase>) {
@@ -109,8 +108,17 @@ impl McpServer {
 
         let host = config.host.clone();
         let start_port = config.port;
-        let api_key = config.api_key.clone();
-        let group_ids = config.group_ids.clone();
+
+        // 从数据库加载 API Keys
+        let api_keys = if let Some(ref db) = self.db_conn {
+            db_list_keys(db).unwrap_or_else(|e| {
+                println!("⚠️  加载 API Keys 失败: {}", e);
+                vec![]
+            })
+        } else {
+            vec![]
+        };
+        println!("🔑 加载了 {} 个 API Key", api_keys.len());
 
         // 尝试绑定端口：从配置端口开始，失败则 +1 重试，最多试 10 个
         let max_attempts = 10;
@@ -150,15 +158,14 @@ impl McpServer {
         let db = self.db_conn.clone();
         let sse_clients = self.sse_clients.clone();
         let running = self.running.clone();
+        let app_handle = self.app_handle.clone();
 
-        let gids = Arc::new(RwLock::new(group_ids));
-        self.group_ids_lock = Some(gids.clone());
         let shared_state = Arc::new(AppState {
             knowledge_base: kb,
             db_conn: db,
             sse_clients,
-            api_key: Arc::new(api_key),
-            group_ids: gids,
+            api_keys: Arc::new(RwLock::new(api_keys)),
+            app_handle,
         });
 
         let app = Router::new()
@@ -207,24 +214,50 @@ struct AppState {
     knowledge_base: Option<Arc<KnowledgeBase>>,
     db_conn: Option<Arc<std::sync::Mutex<Connection>>>,
     sse_clients: Arc<RwLock<HashMap<String, mpsc::Sender<Result<Event, String>>>>>,
-    api_key: Arc<String>,
-    group_ids: Arc<RwLock<Vec<String>>>,
+    api_keys: Arc<RwLock<Vec<ApiKeyRecord>>>,
+    app_handle: Option<AppHandle>,
+}
+
+/// 请求级上下文：由认证时匹配到的 Key 决定
+struct RequestContext {
+    group_ids: Vec<String>,  // 此请求的隔离分组（空=不过滤，用全局）
+    scope: String,           // 此请求的 scope（用于记忆隔离）
 }
 
 // ══════════════════════════════════════════════════════════════
 // 认证辅助
 // ══════════════════════════════════════════════════════════════
 
-/// 校验 API Key：Header 需 `Bearer <key>`，查询参数需裸 key
-fn check_auth(headers: &HeaderMap, params: &HashMap<String, String>, api_key: &str) -> bool {
-    let expected = format!("Bearer {}", api_key);
-    if let Some(v) = headers.get("authorization").and_then(|v| v.to_str().ok()) {
-        return v == expected;
+/// 发射笔记变更事件通知前端
+fn emit_notes_changed(state: &AppState, action: &str, note_id: &str) {
+    if let Some(ref handle) = state.app_handle {
+        let _ = handle.emit("notes:changed", json!({
+            "action": action,
+            "id": note_id,
+        }));
     }
-    if let Some(key) = params.get("api_key") {
-        return key == api_key;
+}
+
+/// 动态校验 API Key：从 api_keys 列表中匹配请求的 key
+/// 返回匹配到的 ApiKeyRecord（含其 group_ids 和 scope），用于请求级隔离
+fn check_auth(headers: &HeaderMap, params: &HashMap<String, String>, api_keys: &[ApiKeyRecord]) -> Option<ApiKeyRecord> {
+    let req_key = if let Some(v) = headers.get("authorization").and_then(|v| v.to_str().ok()) {
+        v.strip_prefix("Bearer ").map(String::from)
+    } else {
+        params.get("api_key").cloned()
+    };
+
+    let req_key = match req_key {
+        Some(k) if !k.is_empty() => k,
+        _ => return None,
+    };
+
+    for ak in api_keys {
+        if ak.key == req_key {
+            return Some(ak.clone());
+        }
     }
-    false
+    None
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -236,7 +269,7 @@ async fn handle_sse(
     headers: HeaderMap,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, String>>>, StatusCode> {
-    if !check_auth(&headers, &params, &state.api_key) {
+    if check_auth(&headers, &params, &state.api_keys.read().await).is_none() {
         return Err(StatusCode::UNAUTHORIZED);
     }
     let client_id = uuid::Uuid::new_v4().to_string();
@@ -271,10 +304,19 @@ async fn handle_message(
     Query(params): Query<HashMap<String, String>>,
     Json(body): Json<serde_json::Value>,
 ) -> (StatusCode, Json<Value>) {
-    // 认证校验：/message 端点也必须验证 API Key
-    if !check_auth(&headers, &params, &state.api_key) {
+    // 动态认证：匹配请求 key → 获取其 group_ids + scope
+    let auth = {
+        let keys = state.api_keys.read().await;
+        check_auth(&headers, &params, &keys)
+    };
+    if auth.is_none() {
         return (StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"})));
     }
+    let ak = auth.unwrap();
+    let ctx = RequestContext {
+        group_ids: ak.group_ids,
+        scope: ak.scope,
+    };
     let msg: McpMessage = match serde_json::from_value(body) {
         Ok(m) => m,
         Err(e) => return (StatusCode::OK, Json(json!({"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":format!("JSON 解析错误: {}", e)}}))),
@@ -287,7 +329,7 @@ async fn handle_message(
         "initialize" => Ok(json!({"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"jc9-mcp-server","version":"1.0.0"}})),
         "ping" => Ok(json!({})),
         "tools/list" => handle_tools_list().await,
-        "tools/call" => handle_tools_call(&state, &msg).await,
+        "tools/call" => handle_tools_call(&state, &ctx, &msg).await,
         "notifications/initialized" => return (StatusCode::OK, Json(json!({"jsonrpc":"2.0"}))),
         _ => {
             if let Some(id) = msg_id {
@@ -423,6 +465,81 @@ async fn handle_tools_list() -> Result<Value, String> {
                     },
                     "required": ["id"]
                 }
+            },
+            {
+                "name": "jc9_memory_add",
+                "description": "添加Agent记忆。topic_key用于去重（同key覆盖旧记忆），type可选decision/bugfix/architecture/pattern/config/discovery。scope为项目标识（如工作区路径），用于多项目隔离。不传则为全局记忆。添加后自动向量化。",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type":"string","description":"记忆标题"},
+                        "content": {"type":"string","description":"记忆内容（建议 What/Why/Where/Learned 结构）"},
+                        "type": {"type":"string","description":"记忆类型: decision/bugfix/architecture/pattern/config/discovery"},
+                        "topicKey": {"type":"string","description":"去重键，同key覆盖旧记忆"},
+                        "scope": {"type":"string","description":"项目标识(如工作区路径)，不传=全局记忆"}
+                    },
+                    "required": ["title","content"]
+                }
+            },
+            {
+                "name": "jc9_memory_update",
+                "description": "更新已有记忆。需要记忆ID，title/content/type/topicKey/scope 至少提供一个。",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type":"string","description":"记忆ID，从jc9_memory_list获取"},
+                        "title": {"type":"string","description":"可选：新标题"},
+                        "content": {"type":"string","description":"可选：新内容"},
+                        "type": {"type":"string","description":"可选：新类型"},
+                        "topicKey": {"type":"string","description":"可选：新去重键"},
+                        "scope": {"type":"string","description":"可选：新项目标识"}
+                    },
+                    "required": ["id"]
+                }
+            },
+            {
+                "name": "jc9_memory_delete",
+                "description": "删除记忆（物理删除）。需要记忆ID。",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type":"string","description":"记忆ID，从jc9_memory_list获取"}
+                    },
+                    "required": ["id"]
+                }
+            },
+            {
+                "name": "jc9_memory_list",
+                "description": "列出Agent记忆。可按scope过滤（不传=全局），不传scope则返回全部。",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "scope": {"type":"string","description":"可选：按项目标识过滤，不传返回全部"}
+                    },
+                    "required": []
+                }
+            },
+            {
+                "name": "jc9_memory_read",
+                "description": "读取指定记忆的完整内容。先用jc9_memory_list获取记忆ID，再用此工具读取全文。",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type":"string","description":"记忆ID，从jc9_memory_list获取"}
+                    },
+                    "required": ["id"]
+                }
+            },
+            {
+                "name": "jc9_memory_compress",
+                "description": "压缩多条记忆为一条摘要。需要记忆ID列表。原记忆被删除，生成一条压缩摘要。",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "ids": {"type":"array","items":{"type":"string"},"description":"要压缩的记忆ID列表"}
+                    },
+                    "required": ["ids"]
+                }
             }
         ]
     }))
@@ -432,23 +549,29 @@ async fn handle_tools_list() -> Result<Value, String> {
 // 工具调用路由
 // ══════════════════════════════════════════════════════════════
 
-async fn handle_tools_call(state: &Arc<AppState>, msg: &McpMessage) -> Result<Value, String> {
+async fn handle_tools_call(state: &Arc<AppState>, ctx: &RequestContext, msg: &McpMessage) -> Result<Value, String> {
     let params = msg.params.as_ref().ok_or("缺少参数")?;
     let tool_name = params["name"].as_str().ok_or("缺少工具名称")?;
     let args = params["arguments"].clone();
     let args = if args.is_null() { json!({}) } else { args };
 
     match tool_name {
-        "jc9_note_search" => cmd_note_search(state, &args).await,
+        "jc9_note_search" => cmd_note_search(state, ctx, &args).await,
         "jc9_note_read" => cmd_note_read(state, &args).await,
-        "jc9_note_create" => cmd_note_create(state, &args).await,
+        "jc9_note_create" => cmd_note_create(state, ctx, &args).await,
         "jc9_note_update_title" => cmd_note_update_title(state, &args).await,
-        "jc9_note_list" => cmd_note_list(state, &args).await,
+        "jc9_note_list" => cmd_note_list(state, ctx, &args).await,
         "jc9_note_groups" => cmd_note_groups(state).await,
         "jc9_database_stats" => cmd_database_stats(state).await,
         "jc9_reindex" => cmd_reindex(state).await,
         "jc9_note_update" => cmd_note_update(state, &args).await,
         "jc9_note_delete" => cmd_note_delete(state, &args).await,
+        "jc9_memory_add" => cmd_memory_add(state, ctx, &args).await,
+        "jc9_memory_update" => cmd_memory_update(state, &args).await,
+        "jc9_memory_delete" => cmd_memory_delete(state, &args).await,
+        "jc9_memory_list" => cmd_memory_list(state, ctx, &args).await,
+        "jc9_memory_read" => cmd_memory_read(state, &args).await,
+        "jc9_memory_compress" => cmd_memory_compress(state, &args).await,
         _ => Err(format!("未知工具: {}", tool_name)),
     }
 }
@@ -589,7 +712,7 @@ fn list_groups_from_db(conn: &Connection) -> Result<Vec<Value>, String> {
 // cmd_note_search — 向量语义搜索 + 关键词
 // ══════════════════════════════════════════════════════════════
 
-async fn cmd_note_search(state: &Arc<AppState>, args: &Value) -> Result<Value, String> {
+async fn cmd_note_search(state: &Arc<AppState>, ctx: &RequestContext, args: &Value) -> Result<Value, String> {
     let kb = get_kb(state)?;
     let db = get_db(state)?;
     let query = args["query"].as_str().ok_or("缺少 query 参数")?;
@@ -634,8 +757,8 @@ async fn cmd_note_search(state: &Arc<AppState>, args: &Value) -> Result<Value, S
     ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     ranked.truncate(l * 3);
 
-    // 3. 先读取白名单（异步），再锁 DB
-    let whitelist = state.group_ids.read().await.clone();
+    // 3. 白名单过滤（空=不过滤）
+    let whitelist = &ctx.group_ids;
     let mut results: Vec<Value> = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
@@ -646,8 +769,8 @@ async fn cmd_note_search(state: &Arc<AppState>, args: &Value) -> Result<Value, S
             if let Some(mut note) = read_note_from_db(&conn, nid)? {
                 let note_gid = note["groupId"].as_str();
                 let in_group = group_id.as_deref().map_or_else(
-                    || group_allowed(&whitelist, note_gid, &conn),
-                    |gid| note_gid == Some(gid) && group_allowed(&whitelist, Some(gid), &conn)
+                    || group_allowed(whitelist, note_gid, &conn),
+                    |gid| note_gid == Some(gid) && group_allowed(whitelist, Some(gid), &conn)
                 );
                 if in_group && !note.get("isArchived").and_then(|v| v.as_bool()).unwrap_or(false) {
                     seen.insert(nid.clone());
@@ -735,13 +858,13 @@ async fn cmd_note_read(state: &Arc<AppState>, args: &Value) -> Result<Value, Str
 // cmd_note_create — 新建笔记（自动同步知识库+向量）
 // ══════════════════════════════════════════════════════════════
 
-async fn cmd_note_create(state: &Arc<AppState>, args: &Value) -> Result<Value, String> {
+async fn cmd_note_create(state: &Arc<AppState>, ctx: &RequestContext, args: &Value) -> Result<Value, String> {
     let db = get_db(state)?;
     let kb = get_kb(state)?;
     let title = args["title"].as_str().ok_or("缺少 title 参数")?;
     let content = args["content"].as_str().ok_or("缺少 content 参数")?;
     // 未指定 groupId 时取白名单第一个分组，白名单为空则不设分组
-    let default_gid = state.group_ids.read().await.first().cloned();
+    let default_gid = ctx.group_ids.first().cloned();
     let group_id = args["groupId"].as_str().or(default_gid.as_deref());
     let tags: Vec<String> = args["tags"].as_array()
         .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
@@ -758,6 +881,9 @@ async fn cmd_note_create(state: &Arc<AppState>, args: &Value) -> Result<Value, S
         params![note_id, group_id, title, content, tags_json, now],
     ).map_err(|e| format!("创建笔记失败: {}", e))?;
     drop(conn);
+
+    // 通知前端数据已变更
+    emit_notes_changed(state, "created", &note_id);
 
     // 异步同步知识库
     let kb = kb.clone();
@@ -809,6 +935,9 @@ async fn cmd_note_update_title(state: &Arc<AppState>, args: &Value) -> Result<Va
     ).map_err(|e| format!("更新标题失败: {}", e))?;
     drop(conn);
 
+    // 通知前端笔记已更新
+    emit_notes_changed(state, "updated", &full_id);
+
     // 异步更新知识库
     let kb = get_kb(state)?;
     let nid = full_id.clone();
@@ -834,13 +963,13 @@ async fn cmd_note_update_title(state: &Arc<AppState>, args: &Value) -> Result<Va
 // cmd_note_list — 列表
 // ══════════════════════════════════════════════════════════════
 
-async fn cmd_note_list(state: &Arc<AppState>, args: &Value) -> Result<Value, String> {
+async fn cmd_note_list(state: &Arc<AppState>, ctx: &RequestContext, args: &Value) -> Result<Value, String> {
     let db = get_db(state)?;
     let group_id = args["groupId"].as_str().map(|s| s.to_string());
     let limit = args["limit"].as_i64().unwrap_or(50) as usize;
 
-    // 先读取白名单（异步），再锁 DB（同步），避免 MutexGuard 跨 await
-    let whitelist = state.group_ids.read().await.clone();
+    // 白名单过滤（空=不过滤）
+    let whitelist = &ctx.group_ids;
     let conn = db.lock().unwrap_or_else(|e| e.into_inner());
 
     let notes = if group_id.is_some() {
@@ -849,7 +978,7 @@ async fn cmd_note_list(state: &Arc<AppState>, args: &Value) -> Result<Value, Str
         list_notes_from_db(&conn, None::<&str>, limit)?
     } else {
         let mut all = Vec::new();
-        for gid in &whitelist {
+        for gid in whitelist {
             all.append(&mut list_notes_from_db(&conn, Some(gid), limit)?);
         }
         all.sort_by(|a, b| b["updatedAt"].as_str().unwrap_or("").cmp(&a["updatedAt"].as_str().unwrap_or("")));
@@ -970,6 +1099,9 @@ async fn cmd_note_update(state: &Arc<AppState>, args: &Value) -> Result<Value, S
     ).map_err(|e| format!("更新笔记失败: {}", e))?;
     drop(conn);
 
+    // 通知前端笔记已更新
+    emit_notes_changed(state, "updated", &full_id);
+
     // 异步更新知识库向量
     let kb = get_kb(state)?;
     let nid = full_id.to_string();
@@ -1005,6 +1137,9 @@ async fn cmd_note_delete(state: &Arc<AppState>, args: &Value) -> Result<Value, S
     ).map_err(|e| format!("删除笔记失败: {}", e))?;
     drop(conn);
 
+    // 通知前端笔记已删除
+    emit_notes_changed(state, "deleted", &full_id);
+
     // 异步从知识库移除
     let kb = get_kb(state)?;
     let nid = note_id.to_string();
@@ -1013,4 +1148,165 @@ async fn cmd_note_delete(state: &Arc<AppState>, args: &Value) -> Result<Value, S
     });
 
     Ok(json!({"content":[{"type":"text","text":format!("✅ 笔记已删除（可在回收站恢复）: {}",note_id)}]}))
+}
+
+// ══════════════════════════════════════════════════════════════
+// 记忆管理 (Memory CRUD)
+// ══════════════════════════════════════════════════════════════
+
+async fn cmd_memory_add(state: &Arc<AppState>, ctx: &RequestContext, args: &Value) -> Result<Value, String> {
+    let db = get_db(state)?;
+    let title = args["title"].as_str().unwrap_or("").to_string();
+    let content = args["content"].as_str().unwrap_or("").to_string();
+    let memory_type = args["type"].as_str().unwrap_or("discovery").to_string();
+    let topic_key = args["topicKey"].as_str().unwrap_or("").to_string();
+    let scope = if !ctx.scope.is_empty() {
+        // Key 自带 scope，强制使用（不信任请求参数）
+        ctx.scope.clone()
+    } else {
+        args["scope"].as_str().unwrap_or("").to_string()
+    };
+    if title.is_empty() || content.is_empty() { return Err("title 和 content 不能为空".into()); }
+
+    let conn = db.lock().unwrap_or_else(|e| e.into_inner());
+    let now = chrono::Utc::now().to_rfc3339();
+
+    let id = if !topic_key.is_empty() && !scope.is_empty() {
+        let existing: Option<String> = conn.query_row(
+            "SELECT id FROM memories WHERE topic_key=?1 AND scope=?2 AND user_id='local' LIMIT 1",
+            params![topic_key, scope], |r| r.get(0)
+        ).ok();
+        if let Some(eid) = existing {
+            conn.execute("UPDATE memories SET title=?1,content=?2,memory_type=?3,scope=?4,updated_at=?5 WHERE id=?6",
+                params![title, content, memory_type, scope, now, eid]).map_err(|e| e.to_string())?;
+            eid
+        } else {
+            let new_id = uuid::Uuid::new_v4().to_string();
+            conn.execute("INSERT INTO memories (id,user_id,scope,topic_key,title,content,memory_type,tags,created_at,updated_at) VALUES (?1,'local',?2,?3,?4,?5,?6,'[\"memory\"]',?7,?7)",
+                params![new_id, scope, topic_key, title, content, memory_type, now]).map_err(|e| e.to_string())?;
+            new_id
+        }
+    } else {
+        let new_id = uuid::Uuid::new_v4().to_string();
+        conn.execute("INSERT INTO memories (id,user_id,scope,topic_key,title,content,memory_type,tags,created_at,updated_at) VALUES (?1,'local',?2,?3,?4,?5,'[\"memory\"]',?6,?6)",
+            params![new_id, scope, topic_key, title, content, memory_type, now]).map_err(|e| e.to_string())?;
+        new_id
+    };
+    drop(conn);
+
+    let kb = get_kb(state)?; let mid = id.clone(); let mc = content.clone();
+    tokio::spawn(async move {
+        kb.add_entry(KbEntry { id: format!("memory_{}", mid), title, content: mc, entry_type: KbEntryType::ConfigNote, tags: vec!["memory".into()], source_session: None, confidence: 1.0, is_draft: false, created_at: Utc::now(), updated_at: Utc::now(), embedding: None }).await;
+    });
+    Ok(json!({"content":[{"type":"text","text":format!("✅ 记忆已保存: {}{}", id, if scope.is_empty() { String::new() } else { format!(" (scope={})", scope) })}],"id":id}))
+}
+
+async fn cmd_memory_update(state: &Arc<AppState>, args: &Value) -> Result<Value, String> {
+    let db = get_db(state)?;
+    let id = args["id"].as_str().ok_or("缺少 id 参数")?;
+    let conn = db.lock().unwrap_or_else(|e| e.into_inner());
+    let now = chrono::Utc::now().to_rfc3339();
+    if let Some(t) = args["title"].as_str() { conn.execute("UPDATE memories SET title=?1,updated_at=?2 WHERE id=?3", params![t, now, id]).map_err(|e| e.to_string())?; }
+    if let Some(c) = args["content"].as_str() { conn.execute("UPDATE memories SET content=?1,updated_at=?2 WHERE id=?3", params![c, now, id]).map_err(|e| e.to_string())?; }
+    if let Some(mt) = args["type"].as_str() { conn.execute("UPDATE memories SET memory_type=?1,updated_at=?2 WHERE id=?3", params![mt, now, id]).map_err(|e| e.to_string())?; }
+    if let Some(tk) = args["topicKey"].as_str() { conn.execute("UPDATE memories SET topic_key=?1,updated_at=?2 WHERE id=?3", params![tk, now, id]).map_err(|e| e.to_string())?; }
+    if let Some(sc) = args["scope"].as_str() { conn.execute("UPDATE memories SET scope=?1,updated_at=?2 WHERE id=?3", params![sc, now, id]).map_err(|e| e.to_string())?; }
+    drop(conn);
+    // 向量更新
+    if let Some(c) = args["content"].as_str() {
+        let kb = get_kb(state)?; let nid = id.to_string(); let nc = c.to_string();
+        tokio::spawn(async move {
+            kb.remove_entry(&format!("memory_{}", nid)).await;
+            kb.add_entry(KbEntry { id: format!("memory_{}", nid), title: "memory".into(), content: nc, entry_type: KbEntryType::ConfigNote, tags: vec!["memory".into()], source_session: None, confidence: 1.0, is_draft: false, created_at: Utc::now(), updated_at: Utc::now(), embedding: None }).await;
+        });
+    }
+    Ok(json!({"content":[{"type":"text","text":format!("✅ 记忆已更新: {}", id)}]}))
+}
+
+async fn cmd_memory_delete(state: &Arc<AppState>, args: &Value) -> Result<Value, String> {
+    let db = get_db(state)?;
+    let id = args["id"].as_str().ok_or("缺少 id 参数")?;
+    let conn = db.lock().unwrap_or_else(|e| e.into_inner());
+    conn.execute("DELETE FROM memories WHERE id=?1", params![id]).map_err(|e| e.to_string())?;
+    drop(conn);
+    let kb = get_kb(state)?; let nid = id.to_string();
+    tokio::spawn(async move { kb.remove_entry(&format!("memory_{}", nid)).await; });
+    Ok(json!({"content":[{"type":"text","text":format!("✅ 记忆已删除: {}", id)}]}))
+}
+
+async fn cmd_memory_list(_state: &Arc<AppState>, ctx: &RequestContext, args: &Value) -> Result<Value, String> {
+    let db = get_db(_state)?;
+    // Key 自带 scope 优先，强制隔离
+    let scope = if !ctx.scope.is_empty() { Some(ctx.scope.clone()) } else { args["scope"].as_str().map(|s| s.to_string()) };
+    let conn = db.lock().unwrap_or_else(|e| e.into_inner());
+    let (sql, params): (&str, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(ref s) = scope {
+        ("SELECT id, scope, topic_key, title, content, memory_type, tags, created_at, updated_at FROM memories WHERE user_id='local' AND scope=?1 ORDER BY updated_at DESC", vec![Box::new(s.clone())])
+    } else {
+        ("SELECT id, scope, topic_key, title, content, memory_type, tags, created_at, updated_at FROM memories WHERE user_id='local' ORDER BY updated_at DESC", vec![])
+    };
+    let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    let rows = stmt.query_map(param_refs.as_slice(), |row| {
+        Ok((row.get::<_,String>(0)?, row.get::<_,String>(1)?, row.get::<_,String>(2)?, row.get::<_,String>(3)?, row.get::<_,String>(4)?, row.get::<_,String>(5)?, row.get::<_,String>(6)?, row.get::<_,String>(7)?, row.get::<_,String>(8)?))
+    }).map_err(|e| e.to_string())?;
+    let mut results = Vec::new();
+    let mut lines = Vec::new();
+    for r in rows {
+        if let Ok((id, sc, tk, title, content, mt, _tags_str, ca, ua)) = r {
+            results.push(json!({"id":id,"scope":sc,"topicKey":tk,"title":title,"contentPreview":content.chars().take(200).collect::<String>(),"type":mt,"createdAt":ca,"updatedAt":ua}));
+            lines.push(format!("  [{}] {} ({})", id, title, mt));
+        }
+    }
+    drop(stmt);
+    drop(conn);
+    Ok(json!({"content":[{"type":"text","text":format!("共 {} 条记忆:\n{}", results.len(), lines.join("\n"))}],"memories":results,"total":results.len()}))
+}
+
+async fn cmd_memory_read(state: &Arc<AppState>, args: &Value) -> Result<Value, String> {
+    let db = get_db(state)?;
+    let id = args["id"].as_str().ok_or("缺少 id 参数")?;
+    let conn = db.lock().unwrap_or_else(|e| e.into_inner());
+    let result = conn.query_row(
+        "SELECT id, scope, topic_key, title, content, memory_type, tags, created_at, updated_at FROM memories WHERE id=?1",
+        params![id],
+        |row| Ok(json!({
+            "id": row.get::<_,String>(0)?,
+            "scope": row.get::<_,String>(1)?,
+            "topicKey": row.get::<_,String>(2)?,
+            "title": row.get::<_,String>(3)?,
+            "content": row.get::<_,String>(4)?,
+            "type": row.get::<_,String>(5)?,
+            "createdAt": row.get::<_,String>(7)?,
+            "updatedAt": row.get::<_,String>(8)?,
+        })),
+    ).map_err(|_| format!("记忆不存在: {}", id))?;
+    let title = result["title"].as_str().unwrap_or("");
+    let content = result["content"].as_str().unwrap_or("");
+    Ok(json!({"content":[{"type":"text","text":format!("# {}\n\n{}", title, content)}],"memory":result}))
+}
+
+async fn cmd_memory_compress(state: &Arc<AppState>, args: &Value) -> Result<Value, String> {
+    let db = get_db(state)?;
+    let ids: Vec<String> = args["ids"].as_array().ok_or("缺少 ids 数组")?
+        .iter().filter_map(|v| v.as_str().map(String::from)).collect();
+    if ids.len() < 2 { return Err("至少需要 2 条记忆才能压缩".into()); }
+    let conn = db.lock().unwrap_or_else(|e| e.into_inner());
+    let mut parts = Vec::new();
+    for id in &ids {
+        if let Ok((t, c)) = conn.query_row("SELECT title, content FROM memories WHERE id=?1", params![id], |r| Ok((r.get::<_,String>(0)?, r.get::<_,String>(1)?))) {
+            parts.push(format!("- **{}**: {}", t, c.chars().take(200).collect::<String>()));
+        }
+    }
+    let compressed = format!("# 记忆压缩\n\n> {} 条记忆合并\n\n{}\n\n---\n压缩时间: {}", ids.len(), parts.join("\n"), chrono::Utc::now().to_rfc3339());
+    let new_id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+    for id in &ids { let _ = conn.execute("DELETE FROM memories WHERE id=?1", params![id]); }
+    conn.execute("INSERT INTO memories (id,user_id,scope,topic_key,title,content,memory_type,tags,created_at,updated_at) VALUES (?1,'local','','compressed','记忆压缩',?2,'summary','[\"compressed\"]',?3,?3)", params![new_id, compressed, now]).map_err(|e| e.to_string())?;
+    drop(conn);
+    // 向量化
+    let kb = get_kb(state)?; let mid = new_id.clone(); let mc = compressed.clone();
+    tokio::spawn(async move {
+        kb.add_entry(KbEntry { id: format!("memory_{}", mid), title: "记忆压缩".into(), content: mc, entry_type: KbEntryType::ConfigNote, tags: vec!["memory".into(),"compressed".into()], source_session: None, confidence: 1.0, is_draft: false, created_at: Utc::now(), updated_at: Utc::now(), embedding: None }).await;
+    });
+    Ok(json!({"content":[{"type":"text","text":format!("✅ 已压缩 {} 条记忆 → {}", ids.len(), new_id)}],"id":new_id}))
 }
