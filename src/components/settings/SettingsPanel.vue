@@ -25,6 +25,8 @@ onMounted(async () => {
   // 加载 MCP Server 配置
   await loadMcpServerConfig()
   await loadMcpServerStatus()
+  await loadNoteShareConfig()
+  await loadNoteShareStatus()
 })
 
 const win = getCurrentWindow()
@@ -243,9 +245,54 @@ const mcpServerRunning = ref(false)
 const mcpServerEnabled = ref(false)
 const mcpServerUrl = ref('')
 const showMcpKey = ref(false)
-const mcpPortInput = ref('19799')
+const mcpPortInput = ref('18899')
 const mcpServerMsg = ref('')
 const mcpLoading = ref(false)
+
+// ── 笔记分享服务 ──
+const noteShareRunning = ref(false)
+const noteSharePortInput = ref('8899')
+const noteShareMsg = ref('')
+const noteShareLoading = ref(false)
+
+async function loadNoteShareStatus() {
+  try {
+    const config = await invoke<{ port: number; host: string }>('get_note_share_status')
+    noteSharePortInput.value = config.port.toString()
+    noteShareRunning.value = true
+  } catch { noteShareRunning.value = false }
+}
+
+async function loadNoteShareConfig() {
+  try {
+    const config = await invoke<{ port: number; host: string }>('get_note_share_config')
+    noteSharePortInput.value = config.port.toString()
+  } catch { /* 使用默认值 */ }
+}
+
+async function noteShareAction(action: 'start' | 'stop') {
+  noteShareLoading.value = true; noteShareMsg.value = ''
+  try {
+    const msg = await invoke<string>(action === 'start' ? 'note_share_start' : 'note_share_stop')
+    noteShareMsg.value = msg
+    await loadNoteShareStatus()
+  } catch (e) { noteShareMsg.value = `❌ ${e}` }
+  finally { noteShareLoading.value = false }
+}
+
+async function saveNoteShareConfig() {
+  noteShareLoading.value = true; noteShareMsg.value = ''
+  try {
+    const msg = await invoke<string>('save_note_share_config', {
+      config: {
+        port: parseInt(noteSharePortInput.value) || 8899,
+        host: '0.0.0.0',
+      }
+    })
+    noteShareMsg.value = msg
+  } catch (e) { noteShareMsg.value = `❌ ${e}` }
+  finally { noteShareLoading.value = false }
+}
 
 
 
@@ -352,8 +399,8 @@ async function loadMcpApiKeys() {
 async function loadMcpServerConfig() {
   try {
     const config = await invoke<McpServerConfigType>('ai_get_mcp_server_config')
-    mcpPortInput.value = (config.port ?? 19799).toString()
-    mcpServerUrl.value = `http://${config.host ?? '127.0.0.1'}:${config.port ?? 19799}`
+    mcpPortInput.value = (config.port ?? 18899).toString()
+    mcpServerUrl.value = `http://${config.host ?? '127.0.0.1'}:${config.port ?? 18899}`
     mcpServerEnabled.value = config.enabled ?? false
   } catch { /* ignore */ }
   await loadMcpApiKeys()
@@ -368,7 +415,7 @@ async function startMcpServer() {
     const resultMsg = await invoke<string>('ai_set_mcp_server_config', {
       config: {
         enabled: true,
-        port: parseInt(mcpPortInput.value) || 19799,
+        port: parseInt(mcpPortInput.value) || 18899,
         host: '127.0.0.1',
       }
     })
@@ -915,7 +962,7 @@ async function compressMemories() {
                 <button class="mcp-copy-btn" @click="copyMcpUrl">复制</button>
                 <span class="mcp-compact-sep">|</span>
                 <span class="mcp-compact-label">端口</span>
-                <input v-model="mcpPortInput" class="mcp-port-input" type="number" min="1024" max="65535" @change="mcpPortInput = Math.max(1024, Math.min(65535, Number(mcpPortInput) || 19799)).toString()" />
+                <input v-model="mcpPortInput" class="mcp-port-input" type="number" min="1024" max="65535" @change="mcpPortInput = Math.max(1024, Math.min(65535, Number(mcpPortInput) || 18899)).toString()" />
               </div>
 
               <!-- 第3行：配置模板 -->
@@ -997,6 +1044,27 @@ async function compressMemories() {
                 </div>
               </div>
             </div>
+          </div>
+
+          <!-- 笔记分享服务器（独立端口配置） -->
+          <div class="builtin-mcp-section" style="margin-top:8px">
+            <h4 style="font-size:12px;font-weight:600;color:var(--jc-text-highlight);margin:0 0 8px">📝 笔记分享服务</h4>
+            <div class="mcp-compact-row">
+              <span class="mcp-compact-label">状态</span>
+              <span :class="['mcp-status-badge', { running: noteShareRunning }]">
+                {{ noteShareRunning ? '🟢 运行中' : '🔴 已停止' }}
+              </span>
+              <span style="flex:1"></span>
+              <button v-if="!noteShareRunning" class="mcp-start-btn" @click="noteShareAction('start')" :disabled="noteShareLoading">启动</button>
+              <button v-if="noteShareRunning" class="mcp-stop-btn" @click="noteShareAction('stop')" :disabled="noteShareLoading">停止</button>
+              <span v-if="noteShareLoading" style="font-size:11px;color:var(--jc-text-secondary)">处理中...</span>
+              <span class="mcp-compact-sep">|</span>
+              <span class="mcp-compact-label">端口</span>
+              <input v-model="noteSharePortInput" class="mcp-port-input" type="number" min="1024" max="65535" @change="noteSharePortInput = Math.max(1024, Math.min(65535, Number(noteSharePortInput) || 8899)).toString()" />
+              <span style="flex:1"></span>
+              <button class="mcp-action-btn" @click="saveNoteShareConfig" :disabled="noteShareLoading">{{ noteShareLoading ? '保存中...' : '保存' }}</button>
+            </div>
+            <div v-if="noteShareMsg" :class="['mcp-server-msg', { success: noteShareMsg.startsWith('✅'), error: noteShareMsg.startsWith('❌') }]" style="margin:4px 0">{{ noteShareMsg }}</div>
           </div>
 
           <hr style="border:none;border-top:1px solid var(--jc-border-default);margin:12px 0" />

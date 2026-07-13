@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useNotesStore } from '@/stores/notes'
 import { useAiStore } from '@/stores/ai'
 import { useAiHelper } from './composables/useAiHelper'
+import { deleteChatMessages } from '@/utils/chatStorage'
 
 const notesStore = useNotesStore()
 const ai = useAiStore()
@@ -45,7 +46,6 @@ async function executeDeleteSession() {
   const { sessionId } = confirmDelete.value
   confirmDelete.value = { show: false, sessionId: '', title: '' }
   await ai.deleteSession(sessionId)
-  const { deleteChatMessages } = await import('@/utils/chatStorage')
   await deleteChatMessages(sessionId)
 }
 

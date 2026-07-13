@@ -40,7 +40,7 @@ impl Default for McpServerConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            port: 19799,
+            port: 18899,
             host: "127.0.0.1".into(),
         }
     }
@@ -210,12 +210,12 @@ impl McpServer {
 // ══════════════════════════════════════════════════════════════
 
 #[derive(Clone)]
-struct AppState {
-    knowledge_base: Option<Arc<KnowledgeBase>>,
-    db_conn: Option<Arc<std::sync::Mutex<Connection>>>,
-    sse_clients: Arc<RwLock<HashMap<String, mpsc::Sender<Result<Event, String>>>>>,
-    api_keys: Arc<RwLock<Vec<ApiKeyRecord>>>,
-    app_handle: Option<AppHandle>,
+pub struct AppState {
+    pub knowledge_base: Option<Arc<KnowledgeBase>>,
+    pub db_conn: Option<Arc<std::sync::Mutex<Connection>>>,
+    pub sse_clients: Arc<RwLock<HashMap<String, mpsc::Sender<Result<Event, String>>>>>,
+    pub api_keys: Arc<RwLock<Vec<ApiKeyRecord>>>,
+    pub app_handle: Option<AppHandle>,
 }
 
 /// 请求级上下文：由认证时匹配到的 Key 决定

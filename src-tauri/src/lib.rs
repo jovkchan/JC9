@@ -20,6 +20,7 @@ struct AppState {
     db: Database,
     ai_manager: std::sync::Arc<ai::agent_manager::AgentManager>,
     mcp_server: std::sync::Arc<tokio::sync::Mutex<ai::mcp_server::McpServer>>,
+    note_share_server: std::sync::Arc<tokio::sync::Mutex<ai::note_share::NoteShareServer>>,
     startup_logs: Mutex<Vec<serde_json::Value>>,
 }
 
@@ -46,6 +47,15 @@ async fn fetch_url_html(url: String) -> Result<String, String> {
     let resp = client.get(&url).send().await.map_err(|e| e.to_string())?;
     let html = resp.text().await.map_err(|e| e.to_string())?;
     Ok(html)
+}
+
+#[tauri::command]
+fn get_local_ip() -> Result<String, String> {
+    // 通过 UDP 连接到外部地址来获取本机局域网 IP（不实际发送数据）
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").map_err(|e| e.to_string())?;
+    socket.connect("10.0.0.1:80").map_err(|e| e.to_string())?;
+    let ip = socket.local_addr().map_err(|e| e.to_string())?;
+    Ok(ip.ip().to_string())
 }
 
 #[tauri::command]
@@ -1462,6 +1472,60 @@ async fn ai_set_mcp_server_config(
     }
 }
 
+// ── 笔记分享服务 ──
+#[tauri::command]
+async fn get_note_share_config(state: State<'_, Mutex<AppState>>) -> Result<ai::note_share::NoteShareConfig, String> {
+    let db = state.lock().map_err(|e| e.to_string())?;
+    let db_conn = db.db.conn.clone();
+    let config = ai::mcp_config::load_note_share_config(&db_conn)?
+        .unwrap_or_default();
+    Ok(config)
+}
+
+#[tauri::command]
+async fn save_note_share_config(
+    state: State<'_, Mutex<AppState>>,
+    config: ai::note_share::NoteShareConfig,
+) -> Result<String, String> {
+    let db = state.lock().map_err(|e| e.to_string())?;
+    let db_conn = db.db.conn.clone();
+    ai::mcp_config::save_note_share_config(&db_conn, &config)?;
+    Ok(format!("✅ 笔记分享配置已保存（端口 {}，重启后生效）", config.port))
+}
+
+#[tauri::command]
+async fn get_note_share_status(state: State<'_, Mutex<AppState>>) -> Result<ai::note_share::NoteShareConfig, String> {
+    let note_share_server = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.note_share_server.clone()
+    };
+    let server = note_share_server.lock().await;
+    Ok(server.get_config())
+}
+
+#[tauri::command]
+async fn note_share_start(state: State<'_, Mutex<AppState>>) -> Result<String, String> {
+    let note_share_server = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.note_share_server.clone()
+    };
+    let mut server = note_share_server.lock().await;
+    server.start().await?;
+    let cfg = server.get_config();
+    Ok(format!("✅ 笔记分享服务已启动 (端口 {})", cfg.port))
+}
+
+#[tauri::command]
+async fn note_share_stop(state: State<'_, Mutex<AppState>>) -> Result<String, String> {
+    let note_share_server = {
+        let app_state = state.lock().map_err(|e| e.to_string())?;
+        app_state.note_share_server.clone()
+    };
+    let mut server = note_share_server.lock().await;
+    server.stop().await;
+    Ok("✅ 笔记分享服务已停止".into())
+}
+
 // ── MCP API Key 管理 ──
 
 #[tauri::command]
@@ -1924,12 +1988,17 @@ pub fn run() {
             let mcp_server = std::sync::Arc::new(tokio::sync::Mutex::new(
                 ai::mcp_server::McpServer::new()
             ));
+            // ── 笔记分享服务 ──
+            let note_share_server = std::sync::Arc::new(tokio::sync::Mutex::new(
+                ai::note_share::NoteShareServer::new()
+            ));
 
             app.manage(Mutex::new(AppState {
                 manager: ProcessManager::new(),
                 db,
                 ai_manager: ai_manager.clone(),
                 mcp_server,
+                note_share_server,
                 startup_logs: Mutex::new(Vec::new()),
             }));
 
@@ -1972,6 +2041,35 @@ pub fn run() {
                         Err(e) => {
                             println!("❌ 读取 MCP Server 配置失败: {}", e);
                         }
+                    }
+                });
+            }
+
+            // ── 笔记分享服务（独立于 MCP Server，不受启停影响）──
+            {
+                let guard = app.state::<Mutex<AppState>>();
+                let server_clone = guard.lock().unwrap().note_share_server.clone();
+                let db_clone = guard.lock().unwrap().db.conn.clone();
+                drop(guard);
+                tauri::async_runtime::spawn(async move {
+                    let mut note_server = server_clone.lock().await;
+                    note_server.set_db_conn(db_clone.clone());
+                    // 从数据库加载配置
+                    match ai::mcp_config::load_note_share_config(&db_clone) {
+                        Ok(Some(config)) => {
+                            note_server.update_config(&config);
+                            println!("📂 笔记分享配置已加载: port={}", config.port);
+                        }
+                        Ok(None) => {
+                            let default_config = note_server.get_config();
+                            let _ = ai::mcp_config::save_note_share_config(&db_clone, &default_config);
+                            println!("📂 笔记分享默认配置已生成");
+                        }
+                        Err(e) => println!("⚠️  读取笔记分享配置失败: {}", e),
+                    }
+                    match note_server.start().await {
+                        Ok(()) => println!("📝 笔记分享服务已启动"),
+                        Err(e) => println!("⚠️  笔记分享服务启动失败: {}", e),
                     }
                 });
             }
@@ -2318,6 +2416,12 @@ pub fn run() {
             mcp_add_api_key,
             mcp_update_api_key,
             mcp_delete_api_key,
+            get_local_ip,
+            get_note_share_config,
+            save_note_share_config,
+            get_note_share_status,
+            note_share_start,
+            note_share_stop,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

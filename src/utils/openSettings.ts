@@ -2,9 +2,10 @@
  * 打开 JC9 系统设置独立窗口
  * 可在任何组件中调用
  */
+import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
+
 export async function openSettingsWindow() {
   try {
-    const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow')
     // 先尝试获取已有窗口
     const existing = await WebviewWindow.getByLabel('settings')
     if (existing) {

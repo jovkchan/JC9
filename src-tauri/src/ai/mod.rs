@@ -28,6 +28,7 @@ pub mod browser;
 pub mod mcp_server;
 pub mod mcp_config;
 pub mod mcp_api_keys;
+pub mod note_share;
 
 pub use types::*;
 pub use llm::{LlmProvider, LlmMessage, LlmResponse, MockLlmProvider, OpenAiProvider};

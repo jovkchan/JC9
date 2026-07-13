@@ -43,3 +43,5 @@ axum = { version = "0.7", features = ["macros"] }
 tower-http = { version = "0.5", features = ["cors"] }
 tokio-stream = "0.1"
 tokio-util = "0.7"
+# Markdown → HTML 渲染（笔记分享页面）
+pulldown-cmark = "0.13"

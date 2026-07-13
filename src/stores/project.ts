@@ -226,7 +226,6 @@ export const useProjectStore = defineStore('project', () => {
           await new Promise(r => setTimeout(r, 200 * (attempt + 1)))
         } else {
           console.error(e)
-          const { useStatusStore } = await import('@/stores/status')
           useStatusStore().pushMessage(`加载项目失败: ${e}`, 'error')
         }
       }

@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useNotesStore } from '@/stores/notes'
+import { useStatusStore } from '@/stores/status'
 import { useExecInTerminal } from '@/composables/useExecInTerminal'
+import { invoke } from '@tauri-apps/api/core'
 import type { Note } from '@/types/notes'
 import { useEditor, EditorContent } from '@tiptap/vue-3'
 import { Extension } from '@tiptap/core'
@@ -432,6 +434,61 @@ function handleKeydown(e: KeyboardEvent) {
   }
 }
 
+async function copyNoteId() {
+  const id = editNoteId.value
+  if (!id) return
+  let port = 8899
+  try {
+    const config = await invoke<{ port: number; host: string }>('get_note_share_config')
+    port = config.port
+  } catch { /* 使用默认端口 */ }
+  // 始终尝试获取实际 LAN IP（用于局域网其他设备访问）
+  const localIp = await getLanIp()
+  const host = localIp || '127.0.0.1'
+  const url = `http://${host}:${port}/api/notes/${id}/html`
+  try {
+    await navigator.clipboard.writeText(url)
+    const st = useStatusStore()
+    st.pushMessage('分享链接已复制到剪贴板', 'success')
+  } catch {
+    const st = useStatusStore()
+    st.pushMessage('❌ 复制失败', 'error')
+  }
+}
+
+/** 获取本机局域网 IP（优先 WebRTC，兜底 Tauri 命令） */
+async function getLanIp(): Promise<string | null> {
+  // 方法1：通过 RTCPeerConnection 获取
+  const fromWebRtc = await new Promise<string | null>((resolve) => {
+    try {
+      const pc = new RTCPeerConnection({ iceServers: [] })
+      pc.createDataChannel('')
+      pc.createOffer().then(offer => pc.setLocalDescription(offer))
+      pc.onicecandidate = (e) => {
+        if (!e.candidate) { pc.close(); resolve(null); return }
+        const match = e.candidate.candidate.match(/(\d+\.\d+\.\d+\.\d+)/)
+        if (match) {
+          const ip = match[1]
+          if (ip !== '127.0.0.1' && !ip.startsWith('169.254.')) {
+            pc.close()
+            resolve(ip)
+          }
+        }
+      }
+      setTimeout(() => { pc.close(); resolve(null) }, 2000)
+    } catch { resolve(null) }
+  })
+  if (fromWebRtc) return fromWebRtc
+
+  // 方法2：通过 Tauri 命令获取
+  try {
+    const ip = await invoke<string>('get_local_ip')
+    if (ip !== '127.0.0.1' && !ip.startsWith('169.254.')) return ip
+  } catch { /* ignore */ }
+
+  return null
+}
+
 // ── 右键菜单：剪切/复制/粘贴 ──
 function doCut() { closeCtx(); document.execCommand('cut') }
 function doCopy() { closeCtx(); document.execCommand('copy') }
@@ -511,6 +568,7 @@ onBeforeUnmount(() => {
         <button class="tb-btn" @click="execCmd('redo')" title="重做 Ctrl+Shift+Z">↪</button>
       </div>
       <div class="toolbar-group">
+        <button class="tb-btn" @click="copyNoteId" title="复制笔记 ID">🔗</button>
         <button class="tb-btn pri" @click="doSave(true)" title="保存并创建版本 Ctrl+Enter" style="font-weight:600">版本保存</button>
         <button class="tb-btn" @click="store.openVersionHistory()" title="版本历史">
           <svg t="1783910028647" viewBox="0 0 1024 1024" width="16" height="16" style="vertical-align:middle">

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { useProjectStore } from '@/stores/project'
 
 const store = useProjectStore()
@@ -62,7 +63,7 @@ async function openSettingsWindow() {
 
 async function openAiAgent() {
   try {
-    const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow')
+
     // 先尝试获取已有窗口
     const existing = await WebviewWindow.getByLabel('ai-agent')
     if (existing) {

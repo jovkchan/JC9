@@ -303,7 +303,6 @@ function removeStep(idx: number) {
 }
 
 async function pickWfDir(step: { workingDir: string }) {
-  const { open } = await import('@tauri-apps/plugin-dialog')
   const dir = await open({ directory: true, multiple: false, title: '选择工作目录' })
   if (dir && typeof dir === 'string') step.workingDir = dir
 }

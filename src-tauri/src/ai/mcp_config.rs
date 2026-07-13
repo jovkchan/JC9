@@ -1,6 +1,7 @@
 use rusqlite::params;
 use std::sync::{Arc, Mutex};
 use super::mcp_server::McpServerConfig;
+use super::note_share::NoteShareConfig;
 
 /// 从数据库加载 MCP Server 配置
 pub fn load_mcp_config(conn: &Arc<Mutex<rusqlite::Connection>>) -> Result<Option<McpServerConfig>, String> {
@@ -33,5 +34,35 @@ pub fn save_mcp_config(conn: &Arc<Mutex<rusqlite::Connection>>, config: &McpServ
         params![json_str],
     ).map_err(|e| e.to_string())?;
 
+    Ok(())
+}
+
+/// 从数据库加载笔记分享配置
+pub fn load_note_share_config(conn: &Arc<Mutex<rusqlite::Connection>>) -> Result<Option<NoteShareConfig>, String> {
+    let conn = conn.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare("SELECT value FROM settings WHERE key = 'note_share_config'")
+        .map_err(|e| e.to_string())?;
+    let result: Option<String> = stmt.query_row([], |row| row.get(0)).ok();
+    match result {
+        Some(json_str) => {
+            let config: NoteShareConfig = serde_json::from_str(&json_str)
+                .map_err(|e| format!("解析笔记分享配置失败: {}", e))?;
+            println!("📂 加载笔记分享配置: port={}", config.port);
+            Ok(Some(config))
+        }
+        None => Ok(None),
+    }
+}
+
+/// 保存笔记分享配置到数据库
+pub fn save_note_share_config(conn: &Arc<Mutex<rusqlite::Connection>>, config: &NoteShareConfig) -> Result<(), String> {
+    let json_str = serde_json::to_string(config)
+        .map_err(|e| format!("序列化笔记分享配置失败: {}", e))?;
+    println!("💾 保存笔记分享配置: port={}", config.port);
+    let conn = conn.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT OR REPLACE INTO settings (key, value) VALUES ('note_share_config', ?1)",
+        params![json_str],
+    ).map_err(|e| e.to_string())?;
     Ok(())
 }

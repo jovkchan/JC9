@@ -1,10 +1,10 @@
 /**
  * 打开 JC9 版本对比独立窗口
  */
+import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
+
 export async function openDiffWindow(noteId: string, versionId: string, versionLabel: string) {
   try {
-    const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow')
-
     // 通过 localStorage 传递参数（同源窗口共享）
     localStorage.setItem('jc9-diff-note-id', noteId)
     localStorage.setItem('jc9-diff-version-id', versionId)
