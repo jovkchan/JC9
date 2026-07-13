@@ -4,6 +4,7 @@ memos/
 docs/
 target/
 cline/
+flowgame/
 *.log
 .DS_Store
 Thumbs.db
