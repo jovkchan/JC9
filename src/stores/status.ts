@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { toast } from '@/utils/toast'
 
 export type ConnectionStatus = 'local' | 'online' | 'offline' | 'syncing'
 
@@ -31,7 +32,7 @@ export const useStatusStore = defineStore('status', () => {
   })
 
   let msgId = 0
-  function pushMessage(text: string, type: StatusMessage['type'] = 'info') {
+  function pushMessage(text: string, type: StatusMessage['type'] = 'info', showToast = true) {
     const msg: StatusMessage = {
       id: `${++msgId}`,
       text,
@@ -43,6 +44,7 @@ export const useStatusStore = defineStore('status', () => {
     if (messages.value.length > 50) {
       messages.value = messages.value.slice(-50)
     }
+    if (showToast) toast({ message: text, type, duration: 3000 })
   }
 
   // ── Notifications ──

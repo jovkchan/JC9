@@ -16,6 +16,8 @@ import VersionDiffWindow from '@/components/notes/VersionDiffWindow.vue'
 import AiHelper from '@/components/tools/AiHelper.vue'
 import QuickNote from '@/components/tools/QuickNote.vue'
 import NotificationPanel from '@/components/NotificationPanel.vue'
+import ToastMessage from '@/components/ToastMessage.vue'
+import { registerToastHandler } from '@/utils/toast'
 
 const store = useProjectStore()
 const status = useStatusStore()
@@ -23,6 +25,7 @@ const isSplash = ref(false)
 const isAiAgent = ref(false)
 const windowLabel = ref('')
 const showQuickNote = ref(false)
+const toastRef = ref<InstanceType<typeof ToastMessage>>()
 
 // 键盘快捷键：Ctrl+Shift+N 打开快速笔记
 function onGlobalKeydown(e: KeyboardEvent) {
@@ -54,6 +57,11 @@ function onGlobalContextMenu(e: MouseEvent) {
 watch(() => store.projects.length, (n) => status.setProjectCount(n), { immediate: true })
 
 onMounted(async () => {
+  // 注册浮动消息提示
+  if (toastRef.value) {
+    registerToastHandler((t) => toastRef.value!.addToast(t))
+  }
+
   const win = getCurrentWindow()
   windowLabel.value = win.label
 
@@ -77,42 +85,42 @@ onMounted(async () => {
   } else if (win.label === 'settings') {
     // 被动等待用户通过按钮打开，不在启动时主动弹出
   } else {
-    status.pushMessage('🚀 JC9 启动中...', 'info')
+    status.pushMessage('🚀 JC9 启动中...', 'info', false)
 
     // 后台加载主窗口数据
-    status.pushMessage('正在加载项目...', 'info')
+    status.pushMessage('正在加载项目...', 'info', false)
     await store.loadProjects()
     await store.initListeners()
 
     status.setProjectCount(store.projects.length)
-    status.pushMessage(`✅ 项目加载完成 — ${store.projects.length} 个项目`, 'success')
+    status.pushMessage(`✅ 项目加载完成 — ${store.projects.length} 个项目`, 'success', false)
 
     // 加载笔记
-    status.pushMessage('正在加载笔记...', 'info')
+    status.pushMessage('正在加载笔记...', 'info', false)
     try {
       const ns = await import('@/stores/notes')
       await ns.useNotesStore().loadGroups()
       await ns.useNotesStore().loadAllNotes()
-      status.pushMessage(`✅ 笔记加载完成 — ${ns.useNotesStore().notes.length} 条笔记`, 'success')
+      status.pushMessage(`✅ 笔记加载完成 — ${ns.useNotesStore().notes.length} 条笔记`, 'success', false)
     } catch (e) {
-      status.pushMessage(`笔记加载失败: ${e}`, 'error')
+      status.pushMessage(`笔记加载失败: ${e}`, 'error', false)
     }
 
     // 从 Rust 拉取启动诊断日志
     try {
       const logs: Array<{ step: string; message: string; level: string; count?: number; rows?: string[][] }> = await invoke('get_startup_logs')
       if (logs.length > 0) {
-        status.pushMessage(`📋 Rust 端诊断: ${logs.length} 条日志`, 'info')
+        status.pushMessage(`📋 Rust 端诊断: ${logs.length} 条日志`, 'info', false)
       }
       for (const log of logs) {
-        status.pushMessage(log.message, (log.level as any) || 'info')
+        status.pushMessage(log.message, (log.level as any) || 'info', false)
         // 如果是原始数据行，展开行详情
         if (log.rows && log.rows.length > 0) {
-          status.pushMessage(`  └─ 行数据: ${JSON.stringify(log.rows)}`, 'info')
+          status.pushMessage(`  └─ 行数据: ${JSON.stringify(log.rows)}`, 'info', false)
         }
       }
     } catch (e) {
-      status.pushMessage(`拉取启动日志失败: ${e}`, 'warn')
+      status.pushMessage(`拉取启动日志失败: ${e}`, 'warn', false)
     }
 
     // 显示并聚焦主窗口
@@ -183,6 +191,7 @@ onUnmounted(() => {
 
   <!-- 通知中心面板 -->
   <NotificationPanel />
+  <ToastMessage ref="toastRef" />
 </template>
 <style scoped lang="scss">
 .app { display:flex; flex-direction:column; height:100vh; background:var(--jc-bg-app); }
