@@ -57,9 +57,9 @@ const showNoteTabs = computed(() => store.sidebarTab === 'notes')
 const showMemoryTabs = computed(() => store.sidebarTab === 'memories')
 const showDocTabs = computed(() => store.sidebarTab === 'projects' || store.sidebarTab === 'workflows')
 
-// Auto-switch to note tab type when a note tab opens
+// Auto-switch to note tab type when a note tab opens (仅在笔记模块下)
 watch(activeNoteId, (id) => {
-  if (id !== null) store.activeTabType = 'note'
+  if (id !== null && store.sidebarTab === 'notes') store.activeTabType = 'note'
 })
 
 // 切换到笔记模块时，如果有打开的笔记编辑器则激活第一个

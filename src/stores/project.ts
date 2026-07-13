@@ -291,7 +291,7 @@ export const useProjectStore = defineStore('project', () => {
   }
   async function restartCommand(projectId: string, cmd: Command) { await stopCommand(projectId, cmd.id); await new Promise(r => setTimeout(r, 500)); await startCommand(projectId, cmd, true) }
 
-  function closeTab(index: number) { const tab = runningTabs.value[index]; if (tab) stopCommand(tab.projectId, tab.commandId); runningTabs.value.splice(index, 1); if (activeTabIndex.value >= runningTabs.value.length) activeTabIndex.value = Math.max(0, runningTabs.value.length - 1) }
+  function closeTab(index: number) { const tab = runningTabs.value[index]; if (tab) stopCommand(tab.projectId, tab.commandId); runningTabs.value.splice(index, 1); if (activeTabIndex.value >= runningTabs.value.length) activeTabIndex.value = Math.max(-1, runningTabs.value.length - 1) }
   function closeDocTab(index: number) { docTabs.value.splice(index, 1); if (activeDocIndex.value >= docTabs.value.length) activeDocIndex.value = Math.max(-1, docTabs.value.length - 1) }
 
   function recordRecentTool(toolType: string) {
@@ -318,7 +318,7 @@ export const useProjectStore = defineStore('project', () => {
   function closeToolTab(index: number) {
     toolTabs.value.splice(index, 1)
     if (activeToolIndex.value >= toolTabs.value.length) {
-      activeToolIndex.value = Math.max(0, toolTabs.value.length - 1)
+      activeToolIndex.value = Math.max(-1, toolTabs.value.length - 1)
     }
   }
 
