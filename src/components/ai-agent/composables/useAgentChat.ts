@@ -271,7 +271,7 @@ export function useAgentChat() {
       await ai.createSession(title)
       addSystemBubble('📋 新会话已创建')
     }
-    addSystemBubble('🧠 正在分析并拆解任务...')
+    addSystemBubble('正在分析并拆解任务...')
     const tasks = await ai.planTask(ai.currentSessionId!, text)
     if (tasks.length > 0) {
       addSystemBubble(`✅ 已规划 **${tasks.length}** 个子任务`)

@@ -50,9 +50,26 @@ const notesStore = useNotesStore()
 
 const activeNoteId = computed(() => notesStore.activeNoteTabId)
 
+// 当前模块的标签（按 sidebarTab 隔离）
+const showTermTabs = computed(() => store.sidebarTab === 'projects' || store.sidebarTab === 'workflows')
+const showToolTabs = computed(() => store.sidebarTab === 'tools')
+const showNoteTabs = computed(() => store.sidebarTab === 'notes')
+const showMemoryTabs = computed(() => store.sidebarTab === 'memories')
+const showDocTabs = computed(() => store.sidebarTab === 'projects' || store.sidebarTab === 'workflows')
+
 // Auto-switch to note tab type when a note tab opens
 watch(activeNoteId, (id) => {
   if (id !== null) store.activeTabType = 'note'
+})
+
+// 切换到笔记模块时，如果有打开的笔记编辑器则激活第一个
+watch(() => store.sidebarTab, (tab) => {
+  if (tab === 'notes' && notesStore.noteTabs.length > 0 && store.activeTabType !== 'note') {
+    store.activeTabType = 'note'
+    if (!notesStore.activeNoteTabId) {
+      notesStore.activeNoteTabId = notesStore.noteTabs[0].id
+    }
+  }
 })
 
 function getNoteGroupPath(noteId: string | null): string {
@@ -287,9 +304,10 @@ onUnmounted(() => {
 
 <template>
   <div class="panel">
-    <!-- Tab Bar: terminals + docs + tools + notes -->
-    <div class="tabs" v-if="store.runningTabs.length>0||store.docTabs.length>0||store.toolTabs.length>0||store.memoryTabs.length>0||notesStore.noteTabs.length>0" role="tablist">
+    <!-- Tab Bar（按 sidebarTab 模块隔离） -->
+    <div class="tabs" v-if="showTermTabs&&store.runningTabs.length>0||showDocTabs&&store.docTabs.length>0||showToolTabs&&store.toolTabs.length>0||showMemoryTabs&&store.memoryTabs.length>0||showNoteTabs&&notesStore.noteTabs.length>0" role="tablist">
       <div v-for="(t,i) in store.runningTabs" :key="'t'+t.projectId+t.commandId"
+        v-show="showTermTabs&&(store.sidebarTab==='projects'?t.projectId!=='workflow':t.projectId==='workflow')"
         :class="['tab',{on:store.activeTabType==='term'&&i===store.activeTabIndex}]"
         role="tab" :aria-selected="store.activeTabType==='term'&&i===store.activeTabIndex" tabindex="0"
         @click="store.activeTabType='term';store.activeTabIndex=i" @contextmenu="openCtx($event,i)"
@@ -299,6 +317,7 @@ onUnmounted(() => {
         <button class="tx" @click.stop="store.closeTab(i)" aria-label="关闭标签">✕</button>
       </div>
       <div v-for="(t,i) in store.docTabs" :key="'d'+t.id"
+        v-show="showDocTabs"
         :class="['tab',{on:store.activeTabType==='doc'&&i===store.activeDocIndex}]"
         role="tab" :aria-selected="store.activeTabType==='doc'&&i===store.activeDocIndex" tabindex="0"
         @click="store.activeTabType='doc';store.activeDocIndex=i"
@@ -307,6 +326,7 @@ onUnmounted(() => {
         <button class="tx" @click.stop="store.closeDocTab(i)" aria-label="关闭标签">✕</button>
       </div>
       <div v-for="(t,i) in store.toolTabs" :key="'tl'+t.id"
+        v-show="showToolTabs"
         :class="['tab',{on:store.activeTabType==='tool'&&i===store.activeToolIndex}]"
         role="tab" :aria-selected="store.activeTabType==='tool'&&i===store.activeToolIndex" tabindex="0"
         @click="store.activeTabType='tool';store.activeToolIndex=i"
@@ -315,14 +335,16 @@ onUnmounted(() => {
         <button class="tx" @click.stop="store.closeToolTab(i)" aria-label="关闭标签">✕</button>
       </div>
       <div v-for="(t,i) in store.memoryTabs" :key="'mem'+t.id"
+        v-show="showMemoryTabs"
         :class="['tab',{on:store.activeTabType==='memory'&&i===store.activeMemoryIndex}]"
         role="tab" :aria-selected="store.activeTabType==='memory'&&i===store.activeMemoryIndex" tabindex="0"
         @click="store.activeTabType='memory';store.activeMemoryIndex=i"
         @keyup.enter="store.activeTabType='memory';store.activeMemoryIndex=i">
-        <span class="tl">🧠 {{ t.title }}</span>
+        <span class="tl">{{ t.title }}</span>
         <button class="tx" @click.stop="store.closeMemoryTab(i)" aria-label="关闭标签">✕</button>
       </div>
       <div v-for="t in notesStore.noteTabs" :key="'n'+t.id"
+        v-show="showNoteTabs"
         :class="['tab',{on:store.activeTabType==='note'&&activeNoteId===t.id}]"
         role="tab" :aria-selected="store.activeTabType==='note'&&activeNoteId===t.id" tabindex="0"
         @click="store.activeTabType='note'; notesStore.activeNoteTabId = t.id"
@@ -334,7 +356,7 @@ onUnmounted(() => {
     </div>
 
     <!-- Terminal content -->
-    <div v-for="(t,i) in store.runningTabs" :key="'tc'+t.projectId+t.commandId" class="content" v-show="store.activeTabType==='term'&&i===store.activeTabIndex">
+    <div v-for="(t,i) in store.runningTabs" :key="'tc'+t.projectId+t.commandId" class="content" v-show="showTermTabs&&(store.sidebarTab==='projects'?t.projectId!=='workflow':t.projectId==='workflow')&&store.activeTabType==='term'&&i===store.activeTabIndex">
       <div class="bar">
         <code class="cmdtext">{{ t.command }}</code>
         <div class="acts">
@@ -352,14 +374,14 @@ onUnmounted(() => {
     </div>
 
     <!-- Doc content -->
-    <div v-for="(t,i) in store.docTabs" :key="'dc'+t.id" class="content" v-show="store.activeTabType==='doc'&&i===store.activeDocIndex">
+    <div v-for="(t,i) in store.docTabs" :key="'dc'+t.id" class="content" v-show="showDocTabs&&store.activeTabType==='doc'&&i===store.activeDocIndex">
       <div class="bar"><code class="cmdtext">{{ t.command }}</code></div>
       <div class="doc-body" v-if="t.loading">加载中...</div>
       <div class="doc-body" v-else>{{ t.content }}</div>
     </div>
 
     <!-- Tool content -->
-    <div v-for="(t,i) in store.toolTabs" :key="'tlc'+t.id" class="content" v-show="store.activeTabType==='tool'&&i===store.activeToolIndex">
+    <div v-for="(t,i) in store.toolTabs" :key="'tlc'+t.id" class="content" v-show="showToolTabs&&store.activeTabType==='tool'&&i===store.activeToolIndex">
       
       <div class="tool-view-body">
         <JsonFormatter v-if="t.toolType === 'json'" />
@@ -398,7 +420,7 @@ onUnmounted(() => {
     </div>
 
     <!-- Note content -->
-    <div v-for="t in notesStore.noteTabs" :key="'nc'+t.id" class="content" v-show="store.activeTabType==='note'&&activeNoteId===t.id">
+    <div v-for="t in notesStore.noteTabs" :key="'nc'+t.id" class="content" v-show="showNoteTabs&&store.activeTabType==='note'&&activeNoteId===t.id">
       <div class="bar">
         
         <code class="cmdtext">笔记{{ t.id ? ': ' + (getEditingNote(t.id)?.title || '无标题') : '' }}</code>
@@ -424,9 +446,9 @@ onUnmounted(() => {
     </div>
 
     <!-- Memory detail content -->
-    <div v-for="(t,i) in store.memoryTabs" :key="'memc'+t.id" class="content" v-show="store.activeTabType==='memory'&&i===store.activeMemoryIndex">
+    <div v-for="(t,i) in store.memoryTabs" :key="'memc'+t.id" class="content" v-show="showMemoryTabs&&store.activeTabType==='memory'&&i===store.activeMemoryIndex">
       <div class="bar">
-        <code class="cmdtext">🧠 {{ t.title }}</code>
+        <code class="cmdtext">{{ t.title }}</code>
         <div class="acts">
           <!-- 编辑模式：取消/保存放标题栏 -->
           <template v-if="t.editing">

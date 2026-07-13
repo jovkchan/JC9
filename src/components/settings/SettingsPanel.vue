@@ -889,7 +889,7 @@ async function compressMemories() {
 
           <!-- JC9 内置 MCP Server -->
           <div class="builtin-mcp-section">
-            <h4 style="font-size:12px;font-weight:600;color:var(--jc-text-highlight);margin:0 0 8px">🧠 JC9 MCP Server</h4>
+            <h4 style="font-size:12px;font-weight:600;color:var(--jc-text-highlight);margin:0 0 8px">JC9 MCP Server</h4>
 
             <!-- 三行紧凑布局 -->
             <div class="mcp-server-compact">

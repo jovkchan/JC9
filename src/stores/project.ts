@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useStatusStore } from '@/stores/status'
@@ -34,6 +34,62 @@ export const useProjectStore = defineStore('project', () => {
   const pendingInput = ref('')
   const recentTools = ref<string[]>(JSON.parse(localStorage.getItem('jc9-recent-tools') || '[]'))
   const sidebarTab = ref<'projects'|'workflows'|'tools'|'notes'|'memories'>('projects')
+
+  // ── 模块标签状态持久化（切换模块后恢复上次激活的标签）──
+  const moduleTabState = ref<Record<string, { type: string; index: number; docIndex: number; toolIndex: number; memoryIndex: number }>>({})
+
+  function saveCurrentModuleState(curTab: string) {
+    moduleTabState.value[curTab] = {
+      type: activeTabType.value,
+      index: activeTabIndex.value,
+      docIndex: activeDocIndex.value,
+      toolIndex: activeToolIndex.value,
+      memoryIndex: activeMemoryIndex.value,
+    }
+  }
+
+  function restoreModuleState(tab: string) {
+    const state = moduleTabState.value[tab]
+    if (state) {
+      // 校验保存的状态与当前模块匹配，避免之前 bug 导致的脏数据
+      const typeOk = (
+        (tab === 'projects' || tab === 'workflows') ? (state.type === 'term' || state.type === 'doc') :
+        tab === 'tools' ? state.type === 'tool' :
+        tab === 'notes' ? state.type === 'note' :
+        tab === 'memories' ? state.type === 'memory' :
+        false
+      )
+      if (typeOk) {
+        activeTabType.value = state.type as any
+        activeTabIndex.value = Math.min(state.index, Math.max(0, runningTabs.value.length - 1))
+        activeDocIndex.value = Math.min(state.docIndex, Math.max(-1, docTabs.value.length - 1))
+        activeToolIndex.value = Math.min(state.toolIndex, Math.max(-1, toolTabs.value.length - 1))
+        activeMemoryIndex.value = Math.min(state.memoryIndex, Math.max(-1, memoryTabs.value.length - 1))
+        return
+      }
+      // 脏数据 → 清除并走 fallback
+      delete moduleTabState.value[tab]
+    }
+    // 首次进入或脏数据已清除 → 激活第一个可用标签
+    if (tab === 'tools' && toolTabs.value.length > 0) {
+      activeTabType.value = 'tool'; activeToolIndex.value = 0
+    } else if (tab === 'notes') {
+      // notes 交给 MainPanel 处理
+    } else if (tab === 'memories' && memoryTabs.value.length > 0) {
+      activeTabType.value = 'memory'; activeMemoryIndex.value = 0
+    } else if ((tab === 'projects' || tab === 'workflows') && runningTabs.value.length > 0) {
+      activeTabType.value = 'term'; activeTabIndex.value = 0
+    } else {
+      activeTabType.value = 'term'
+      activeTabIndex.value = -1
+    }
+  }
+
+  // 监听 sidebarTab 切换
+  watch(sidebarTab, (newTab, oldTab) => {
+    if (oldTab) saveCurrentModuleState(oldTab)
+    restoreModuleState(newTab)
+  })
   const mainMode = ref<'main' | 'ai'>('main')
   const workflowRunning = ref(false)
   const workflowProgress = ref<{ step: number; total: number; name: string; status: string; stdout: string; stderr: string } | null>(null)

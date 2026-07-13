@@ -378,7 +378,7 @@ onMounted(() => document.addEventListener('click', closeGroupCtx))
     <div class="ns-header">
       <span class="ns-title">日历</span>
       <button class="ns-cal-btn" @click="calendarOpen = !calendarOpen" :title="calendarOpen ? '收起日历' : '展开日历'">
-        {{ calendarOpen ? '▴' : '▾' }}
+        {{ calendarOpen ? '收起' : '展开' }}
       </button>
     </div>
 

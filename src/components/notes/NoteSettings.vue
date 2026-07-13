@@ -693,7 +693,7 @@ async function importData() {
                   <span class="model-card-model">{{ cfg.model }}</span>
                 </div>
                 <!-- <div class="model-card-meta">
-                  <span v-if="cfg.reasoningEffort">🧠 {{ cfg.reasoningEffort }}</span>
+                  <span v-if="cfg.reasoningEffort">{{ cfg.reasoningEffort }}</span>
                   <span>输入 ¥{{ cfg.inputPrice }}/M</span>
                   <span>输出 ¥{{ cfg.outputPrice }}/M</span>
                   <span>限额 ¥{{ cfg.costLimit }}</span>

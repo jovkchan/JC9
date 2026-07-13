@@ -1,7 +1,18 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useProjectStore } from '@/stores/project'
+import { useNotesStore } from '@/stores/notes'
 
 const store = useProjectStore()
+const notesStore = useNotesStore()
+
+const tabCounts = computed(() => ({
+  projects:  store.runningTabs.filter(t => t.projectId !== 'workflow').length,
+  workflows: store.runningTabs.filter(t => t.projectId === 'workflow').length,
+  tools:     store.toolTabs.length,
+  notes:     notesStore.noteTabs.length,
+  memories:  store.memoryTabs.length,
+}))
 
 const projIcon = '<svg viewBox="0 0 1024 1024" width="22" height="22" fill="currentColor"><path d="M469.333333 512l-301.696 301.696-60.330666-60.330667L348.672 512 107.306667 270.634667 167.637333 210.346667 469.290667 512z m0 298.666667h426.666667v85.333333H469.333333v-85.333333z"/></svg>'
 const wfIcon = '<svg viewBox="0 0 1024 1024" width="22" height="22" fill="currentColor"><path d="M480 384h320a96.11 96.11 0 0 0 96-96V160a96.11 96.11 0 0 0-96-96H480a96.11 96.11 0 0 0-96 96v32H224a96.11 96.11 0 0 0-96 96v160a96.11 96.11 0 0 0 96 96h576a32 32 0 0 1 32 32v160a32 32 0 0 1-32 32H640v-32a96.11 96.11 0 0 0-96-96H224a96.11 96.11 0 0 0-96 96v128a96.11 96.11 0 0 0 96 96h320a96.11 96.11 0 0 0 96-96v-32h160a96.11 96.11 0 0 0 96-96V576a96.11 96.11 0 0 0-96-96H224a32 32 0 0 1-32-32V288a32 32 0 0 1 32-32h160v32a96.11 96.11 0 0 0 96 96z m96 480a32 32 0 0 1-32 32H224a32 32 0 0 1-32-32V736a32 32 0 0 1 32-32h320a32 32 0 0 1 32 32zM448 160a32 32 0 0 1 32-32h320a32 32 0 0 1 32 32v128a32 32 0 0 1-32 32H480a32 32 0 0 1-32-32z"/></svg>'
@@ -33,6 +44,7 @@ const navItems: { key: 'projects'|'workflows'|'tools'|'notes'|'memories'; icon: 
     >
       <span class="nav-icon" v-if="!item.isSvg">{{ item.icon }}</span>
       <span class="nav-icon" v-else v-html="item.icon"></span>
+      <span v-if="tabCounts[item.key] > 0" class="nav-badge">{{ tabCounts[item.key] }}</span>
     </div>
   </nav>
 </template>
@@ -53,6 +65,7 @@ const navItems: { key: 'projects'|'workflows'|'tools'|'notes'|'memories'; icon: 
 .nav-item {
   width: 40px;
   height: 40px;
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -71,5 +84,24 @@ const navItems: { key: 'projects'|'workflows'|'tools'|'notes'|'memories'; icon: 
 .nav-icon {
   font-size: 20px;
   line-height: 1;
+}
+.nav-item {
+  position: relative;
+}
+.nav-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+  text-align: center;
+  border-radius: 7px;
+  background: var(--jc-bg-hover);
+  color: var(--jc-text-secondary);
+  pointer-events: none;
 }
 </style>
