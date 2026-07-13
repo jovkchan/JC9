@@ -26,7 +26,7 @@ const showQuickNote = ref(false)
 
 // 键盘快捷键：Ctrl+Shift+N 打开快速笔记
 function onGlobalKeydown(e: KeyboardEvent) {
-  // 屏蔽 F5 刷新（防止丢失终端等运行状态）
+  // 屏蔽 F5 刷新
   if (e.key === 'F5') {
     e.preventDefault()
     return
@@ -43,6 +43,11 @@ function onGlobalKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape' && showQuickNote.value) {
     showQuickNote.value = false
   }
+}
+
+// 全局屏蔽浏览器默认右键菜单（自定义右键菜单不受影响）
+function onGlobalContextMenu(e: MouseEvent) {
+  e.preventDefault()
 }
 
 // Watch project count
@@ -116,6 +121,8 @@ onMounted(async () => {
 
     // 注册全局键盘快捷键
     document.addEventListener('keydown', onGlobalKeydown)
+    // 屏蔽浏览器默认右键菜单（自定义右键菜单不受影响，因事件先经目标元素再冒泡到 document）
+    document.addEventListener('contextmenu', onGlobalContextMenu)
 
     // 优雅地关闭 logo (splash) 窗口
     const splashWin = await WebviewWindow.getByLabel('splash')
@@ -127,6 +134,7 @@ onMounted(async () => {
 onUnmounted(() => {
   store.destroyListeners()
   document.removeEventListener('keydown', onGlobalKeydown)
+  document.removeEventListener('contextmenu', onGlobalContextMenu)
 })
 </script>
 <template>
