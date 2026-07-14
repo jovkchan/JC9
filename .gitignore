@@ -5,6 +5,7 @@ docs/
 target/
 cline/
 flowgame/
+flowgame_python/
 *.log
 .DS_Store
 Thumbs.db
