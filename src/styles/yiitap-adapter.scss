@@ -1,0 +1,33 @@
+:root {
+  --yii-color: var(--jc-text-primary, #ccc);
+  --yii-bg-color: var(--jc-bg-app, #1e1e1e);
+  --yii-color-accent: var(--jc-color-accent, #8a58ff);
+  --yii-tips-color: var(--jc-text-secondary, #858585);
+  --yii-caption-color: var(--jc-text-secondary, #858585);
+  --yii-active-bg-color: var(--jc-bg-selected, #37373d);
+  --yii-hover-bg-color: var(--jc-bg-hover, #2a2d2e);
+  --yii-tips-bg-color: var(--jc-bg-input, #3c3c3c);
+  --yii-divider-bg-color: var(--jc-border-default, #3e3e42);
+  --yii-border-color: var(--jc-border-default, #3e3e42);
+  --yii-blockquote-color: var(--jc-text-secondary, #858585);
+  --yii-blockquote-bg-color: var(--jc-bg-input, #3c3c3c);
+  --yii-blockquote-border-color: var(--jc-color-accent, #8a58ff);
+  --yii-code-bg-color: var(--jc-bg-input, #3c3c3c);
+  --yii-pre-color: var(--jc-text-primary, #ccc);
+  --yii-pre-bg-color: var(--jc-bg-input, #3c3c3c);
+  --yii-pre-tool-bg-color: var(--jc-bg-panel, #252526);
+  --yii-resize-handle-color: var(--jc-border-default, #3e3e42);
+  --yii-table-focus-bg-color: var(--jc-bg-selected, #37373d);
+  --yii-table-th-bg-color: var(--jc-bg-elevated, #2d2d30);
+  --yii-table-border-color: var(--jc-border-strong, #555);
+  --yii-table-handler-bg-color: color-mix(in srgb, var(--jc-color-accent, #8a58ff) 20%, transparent);
+  --yii-tippy-popover-bg-color: var(--jc-bg-elevated, #2d2d30);
+  --yii-tippy-tooltip-color: var(--jc-text-primary, #ccc);
+  --yii-tippy-tooltip-bg-color: var(--jc-bg-elevated, #2d2d30);
+  --yii-dropdown-shadow: 0 8px 24px rgba(0,0,0,.2);
+  --yii-link-color: var(--jc-color-accent, #8a58ff);
+  --yii-brand-red: var(--jc-color-error, #f44747);
+  --yii-brand-blue: var(--jc-color-accent, #8a58ff);
+  --yii-brand-green: var(--jc-color-success, #4ec9b0);
+  --yii-brand-orange: var(--jc-color-warning, #d7ba7d);
+}

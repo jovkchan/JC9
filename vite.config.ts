@@ -12,6 +12,12 @@ export default defineConfig(async () => ({
     },
   },
   clearScreen: false,
+  // Externalize collaboration/Yjs deps (not used, only pulled by @yiitap/vue)
+  build: {
+    rollupOptions: {
+      external: ["yjs", "y-protocols", "@tiptap/y-tiptap"],
+    },
+  },
   server: {
     port: 1420,
     strictPort: true,
