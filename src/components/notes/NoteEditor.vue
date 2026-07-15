@@ -93,7 +93,8 @@ function slashExecuteCommand(cmdId: string) {
 }
 
 // 笔记链接点击跳转
-const isDark = computed(() => document.documentElement.classList.contains('dark'))
+const isDark = ref(document.documentElement.getAttribute('data-theme') === 'dark')
+let themeObserver: MutationObserver | null = null
 
 function handleJclinkClick(e: MouseEvent) {
   const target = e.target as HTMLElement
@@ -108,8 +109,21 @@ function handleJclinkClick(e: MouseEvent) {
   }
 }
 
-onMounted(() => document.addEventListener('click', handleJclinkClick))
-onBeforeUnmount(() => document.removeEventListener('click', handleJclinkClick))
+onMounted(() => {
+  document.addEventListener('click', handleJclinkClick)
+  // 监听明暗模式属性变化
+  isDark.value = document.documentElement.getAttribute('data-theme') === 'dark'
+  themeObserver = new MutationObserver(() => {
+    isDark.value = document.documentElement.getAttribute('data-theme') === 'dark'
+  })
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('click', handleJclinkClick)
+  if (themeObserver) {
+    themeObserver.disconnect()
+  }
+})
 
 // ProseMirror plugin: detect '/' at start of line
 const slashPluginKey = new PluginKey('slash-command')
@@ -256,7 +270,7 @@ watch(() => props.existingNote, async (newNote) => {
     if (editorRef.value) {
       const currentMd = editorRef.value.getMarkdown()
       if (newNote.content !== currentMd) {
-        editorRef.value.commands.setContent(newNote.content, { contentType: 'markdown' })
+        editorRef.value.commands.setContent(convertTableTasksToHtml(newNote.content), { contentType: 'markdown' })
       }
     }
   } finally {
@@ -344,6 +358,7 @@ const editorExtensions = computed(() => [
   'OShortcut',
   'OSelectionDecoration',
   'OColorHighlighter',
+  'OColon',
   'OSlash',
   'OSlashZh',
   'Focus',
@@ -353,6 +368,32 @@ const editorExtensions = computed(() => [
   CustomLink.configure({ openOnClick: true, HTMLAttributes: { rel: 'noopener noreferrer' } }),
 ])
 
+// 将 Markdown 表格内的 [ ] 或 [x] 任务标记临时转换成 HTML 任务列表结构，使 Tiptap 在 Markdown 表格 cell 中可以渲染复选框
+function convertTableTasksToHtml(md: string): string {
+  if (!md) return ''
+  const lines = md.split('\n')
+  const newLines = lines.map(line => {
+    const trimmed = line.trim()
+    if (trimmed.startsWith('|') && trimmed.endsWith('|') && trimmed.length > 2) {
+      const cells = line.split('|')
+      const newCells = cells.map((cell, idx) => {
+        if (idx === 0 || idx === cells.length - 1) return cell
+        const match = cell.match(/^(\s*)(?:[-*+]\s+)?\[([\sxX])\]\s*(.*)$/)
+        if (match) {
+          const space = match[1]
+          const checked = match[2].toLowerCase() === 'x'
+          const content = match[3].trim()
+          return `${space}<ul data-type="taskList"><li data-checked="${checked}">${content}</li></ul>`
+        }
+        return cell
+      })
+      return newCells.join('|')
+    }
+    return line
+  })
+  return newLines.join('\n')
+}
+
 function onEditorCreate(instance: any) {
   editorRef.value = instance
   startTagScan()
@@ -361,7 +402,7 @@ function onEditorCreate(instance: any) {
   if (props.existingNote?.content) {
     isLoadingNote = true
     try {
-      instance.commands.setContent(props.existingNote.content, { contentType: 'markdown' })
+      instance.commands.setContent(convertTableTasksToHtml(props.existingNote.content), { contentType: 'markdown' })
     } finally {
       isLoadingNote = false
     }
@@ -1184,12 +1225,18 @@ onBeforeUnmount(() => {
   &.plus { color: var(--jc-color-accent, #8a58ff); }
 }
 
-/* 高亮块 (Callout) 暗黑模式配色适配，使用 :global 全局排除 scoped data 干扰 */
-:global(.dark) :deep([data-type="callout"]),
-:global(.dark) :deep(.callout),
-:global(.dark) :deep(.yii-callout) {
-  background: var(--jc-bg-elevated, #252526) !important;
-  border-color: var(--jc-border-default, #3e3e42) !important;
-  color: var(--jc-text-primary, #cccccc) !important;
+/* 强制代码块及绘图工具栏水平一行排开，使用最高特异性选择器覆盖层级 column 限制 */
+:deep(.editor-yiieditor .o-code-block-view .code-block-toolbar) {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+}
+:deep(.editor-yiieditor .o-code-block-view .code-block-toolbar .wrap) {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
 }
 </style>

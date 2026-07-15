@@ -56,7 +56,30 @@ function onGlobalContextMenu(e: MouseEvent) {
 // Watch project count
 watch(() => store.projects.length, (n) => status.setProjectCount(n), { immediate: true })
 
+let themeObserver: MutationObserver | null = null
+
 onMounted(async () => {
+  // 监听 html 的 data-theme 属性，并自动同步 class 'dark' / 'light'
+  const syncThemeClass = () => {
+    const t = document.documentElement.getAttribute('data-theme')
+    if (t === 'dark') {
+      document.documentElement.classList.add('dark')
+      document.documentElement.classList.remove('light')
+    } else {
+      document.documentElement.classList.add('light')
+      document.documentElement.classList.remove('dark')
+    }
+  }
+  syncThemeClass()
+  themeObserver = new MutationObserver((mutations) => {
+    for (const m of mutations) {
+      if (m.attributeName === 'data-theme') {
+        syncThemeClass()
+      }
+    }
+  })
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+
   // 注册浮动消息提示
   if (toastRef.value) {
     registerToastHandler((t) => toastRef.value!.addToast(t))
@@ -140,6 +163,9 @@ onMounted(async () => {
   }
 })
 onUnmounted(() => {
+  if (themeObserver) {
+    themeObserver.disconnect()
+  }
   store.destroyListeners()
   document.removeEventListener('keydown', onGlobalKeydown)
   document.removeEventListener('contextmenu', onGlobalContextMenu)

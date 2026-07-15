@@ -31,3 +31,88 @@
   --yii-brand-green: var(--jc-color-success, #4ec9b0);
   --yii-brand-orange: var(--jc-color-warning, #d7ba7d);
 }
+
+// ══════════════════════════════════════════════════════════════
+// JC9 Custom Overrides for YiiEditor
+// ══════════════════════════════════════════════════════════════
+
+// 1. 代码类型与操作图标布局在一行 ( nowrap 限制与 flex-direction: row 强制)
+.o-code-block-view .code-block-toolbar {
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+}
+.o-code-block-view .code-block-toolbar .wrap {
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  display: flex !important;
+  align-items: center !important;
+}
+
+// 2. 视频、音频、3D 模型显示的宽度优化与缩放支持 ( resize: both 结合 padding 暴露手柄)
+.o-video-view,
+.o-audio-view,
+.o-model-viewer-view {
+  display: block !important;
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+.o-video-view .video-container,
+.o-audio-view .audio-container,
+.o-model-viewer-view .model-viewer-container {
+  display: inline-block !important;
+  position: relative !important;
+  width: 480px;
+  max-width: 100% !important;
+  min-width: 200px !important;
+  min-height: 40px !important;
+  resize: both !important;
+  overflow: hidden !important;
+  border: 1px dashed var(--yii-border-color, #3e3e42) !important;
+  border-radius: 6px;
+  background: var(--jc-bg-elevated, #252526) !important;
+  padding: 0 16px 16px 0 !important; /* 在右侧和底部预留 16px 的内边距，暴露出浏览器原生的 resize 手柄，防止被视频/模型区域阻断鼠标拖拽 */
+  box-sizing: border-box !important;
+}
+
+.o-video-view .video-container video,
+.o-audio-view .audio-container audio,
+.o-model-viewer-view .model-viewer-container model-viewer {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  object-fit: contain !important;
+  display: block !important;
+}
+
+// 3. 高亮块 (Callout) 明暗模式配色适配 (重写 CSS 变量)
+.dark {
+  .o-callout-view,
+  .yii-callout,
+  .callout,
+  [data-type="callout"] {
+    --callout-back-color: var(--jc-bg-elevated, #252526) !important;
+    --callout-border-color: var(--jc-border-default, #3e3e42) !important;
+    background: var(--callout-back-color) !important;
+    border-color: var(--callout-border-color) !important;
+    color: var(--jc-text-primary, #cccccc) !important;
+  }
+}
+
+.light, :root:not(.dark) {
+  .o-callout-view,
+  .yii-callout,
+  .callout,
+  [data-type="callout"] {
+    --callout-back-color: var(--jc-bg-elevated, #ececec) !important;
+    --callout-border-color: var(--jc-border-default, #d4d4d4) !important;
+    background: var(--callout-back-color) !important;
+    border-color: var(--callout-border-color) !important;
+    color: var(--jc-text-primary, #333333) !important;
+  }
+}
+
