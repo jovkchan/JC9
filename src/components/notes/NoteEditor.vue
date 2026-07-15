@@ -1086,24 +1086,26 @@ onBeforeUnmount(() => {
 
   /* ── Details / 折叠面板样式 (tiptap 原生) ── */
   [data-type='details'].details {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.25rem;
-    border: 1px solid var(--jc-border-default, #3e3e42);
-    border-radius: 6px;
+    position: relative;
     margin: 0.8em 0;
 
+    /* 按钮绝对定位，浮在 summary 左侧 */
     & > button {
-      flex-shrink: 0;
+      position: absolute;
+      left: 2px;
+      top: 5px;
       background: transparent;
       border: none;
       border-radius: 4px;
       cursor: pointer;
       font-size: 14px;
-      padding: 6px;
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       color: var(--jc-text-secondary, #858585);
-      line-height: 1;
-      margin-top: 3px;
+      z-index: 1;
 
       &:hover {
         background: var(--jc-bg-hover, #2a2d2e);
@@ -1111,22 +1113,33 @@ onBeforeUnmount(() => {
       }
     }
 
+    /* 内容区整体右移，给按钮腾位置 */
     & > div {
-      overflow: hidden;
-      padding: 4px 8px 4px 28px;
+      padding-left: 28px;
 
       & > [data-type='detailsContent'] {
         padding-bottom: 4px;
       }
     }
 
-    /* summary 标题加粗 */
+    /* summary 标题行 */
     summary {
+      display: block;
+      list-style: none;
       font-weight: 600;
+      font-size: 14px;
+      line-height: 24px;
       color: var(--jc-text-highlight, #ffffff);
       cursor: pointer;
       outline: none;
-      padding: 6px 8px;
+      padding: 5px 8px 5px 0;
+      margin: 0;
+
+      &::marker,
+      &::-webkit-details-marker {
+        display: none;
+        content: '';
+      }
     }
   }
 
