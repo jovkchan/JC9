@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { onMounted, onUnmounted, ref, watch, defineAsyncComponent } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { invoke } from '@tauri-apps/api/core'
@@ -10,11 +10,14 @@ import TitleBar from '@/components/TitleBar.vue'
 import StatusBar from '@/components/StatusBar.vue'
 import IconNav from '@/components/nav/IconNav.vue'
 import SectionPanel from '@/components/sections/SectionPanel.vue'
-import AiAgentPanel from '@/components/ai-agent/AiAgentPanel.vue'
-import SettingsPanel from '@/components/settings/SettingsPanel.vue'
-import VersionDiffWindow from '@/components/notes/VersionDiffWindow.vue'
-import AiHelper from '@/components/tools/AiHelper.vue'
-import QuickNote from '@/components/tools/QuickNote.vue'
+
+// 动态载入次要大面板
+const AiAgentPanel = defineAsyncComponent(() => import('@/components/ai-agent/AiAgentPanel.vue'))
+const SettingsPanel = defineAsyncComponent(() => import('@/components/settings/SettingsPanel.vue'))
+const VersionDiffWindow = defineAsyncComponent(() => import('@/components/notes/VersionDiffWindow.vue'))
+const AiHelper = defineAsyncComponent(() => import('@/components/tools/AiHelper.vue'))
+const QuickNote = defineAsyncComponent(() => import('@/components/tools/QuickNote.vue'))
+
 import NotificationPanel from '@/components/NotificationPanel.vue'
 import ToastMessage from '@/components/ToastMessage.vue'
 import { registerToastHandler } from '@/utils/toast'
@@ -110,56 +113,59 @@ onMounted(async () => {
   } else {
     status.pushMessage('🚀 JC9 启动中...', 'info', false)
 
-    // 后台加载主窗口数据
-    status.pushMessage('正在加载项目...', 'info', false)
-    await store.loadProjects()
-    await store.initListeners()
-
-    status.setProjectCount(store.projects.length)
-    status.pushMessage(`✅ 项目加载完成 — ${store.projects.length} 个项目`, 'success', false)
-
-    // 加载笔记
-    status.pushMessage('正在加载笔记...', 'info', false)
     try {
-      const ns = await import('@/stores/notes')
-      await ns.useNotesStore().loadGroups()
-      await ns.useNotesStore().loadAllNotes()
-      status.pushMessage(`✅ 笔记加载完成 — ${ns.useNotesStore().notes.length} 条笔记`, 'success', false)
-    } catch (e) {
-      status.pushMessage(`笔记加载失败: ${e}`, 'error', false)
-    }
+      // 后台加载主窗口数据
+      status.pushMessage('正在加载项目...', 'info', false)
+      await store.loadProjects()
+      await store.initListeners()
 
-    // 从 Rust 拉取启动诊断日志
-    try {
-      const logs: Array<{ step: string; message: string; level: string; count?: number; rows?: string[][] }> = await invoke('get_startup_logs')
-      if (logs.length > 0) {
-        status.pushMessage(`📋 Rust 端诊断: ${logs.length} 条日志`, 'info', false)
+      status.setProjectCount(store.projects.length)
+      status.pushMessage(`✅ 项目加载完成 — ${store.projects.length} 个项目`, 'success', false)
+
+      // 加载笔记
+      status.pushMessage('正在加载笔记...', 'info', false)
+      try {
+        const ns = await import('@/stores/notes')
+        await ns.useNotesStore().loadGroups()
+        await ns.useNotesStore().loadAllNotes()
+        status.pushMessage(`✅ 笔记加载完成 — ${ns.useNotesStore().notes.length} 条笔记`, 'success', false)
+      } catch (e) {
+        status.pushMessage(`笔记加载失败: ${e}`, 'error', false)
       }
-      for (const log of logs) {
-        status.pushMessage(log.message, (log.level as any) || 'info', false)
-        // 如果是原始数据行，展开行详情
-        if (log.rows && log.rows.length > 0) {
-          status.pushMessage(`  └─ 行数据: ${JSON.stringify(log.rows)}`, 'info', false)
+
+      // 从 Rust 拉取启动诊断日志
+      try {
+        const logs: Array<{ step: string; message: string; level: string; count?: number; rows?: string[][] }> = await invoke('get_startup_logs')
+        if (logs.length > 0) {
+          status.pushMessage(`📋 Rust 端诊断: ${logs.length} 条日志`, 'info', false)
         }
+        for (const log of logs) {
+          status.pushMessage(log.message, (log.level as any) || 'info', false)
+          // 如果是原始数据行，展开行详情
+          if (log.rows && log.rows.length > 0) {
+            status.pushMessage(`  └─ 行数据: ${JSON.stringify(log.rows)}`, 'info', false)
+          }
+        }
+      } catch (e) {
+        status.pushMessage(`拉取启动日志失败: ${e}`, 'warn', false)
       }
-    } catch (e) {
-      status.pushMessage(`拉取启动日志失败: ${e}`, 'warn', false)
+    } finally {
+      // 确保 splash 至少显示 3 秒后再关闭（与加载时长取较大值）
+      await new Promise(resolve => setTimeout(resolve, 3000))
+      await win.show()
+      await win.setFocus()
+      try {
+        const splashWin = await WebviewWindow.getByLabel('splash')
+        if (splashWin) {
+          await splashWin.close()
+        }
+      } catch { /* splash 不存在时忽略 */ }
     }
-
-    // 显示并聚焦主窗口
-    await win.show()
-    await win.setFocus()
 
     // 注册全局键盘快捷键
     document.addEventListener('keydown', onGlobalKeydown)
-    // 屏蔽浏览器默认右键菜单（自定义右键菜单不受影响，因事件先经目标元素再冒泡到 document）
+    // 屏蔽浏览器默认右键菜单
     document.addEventListener('contextmenu', onGlobalContextMenu)
-
-    // 优雅地关闭 logo (splash) 窗口
-    const splashWin = await WebviewWindow.getByLabel('splash')
-    if (splashWin) {
-      await splashWin.close()
-    }
   }
 })
 onUnmounted(() => {

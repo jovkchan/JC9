@@ -14,8 +14,36 @@ export default defineConfig(async () => ({
   clearScreen: false,
   // Externalize collaboration/Yjs deps (not used, only pulled by @yiitap/vue)
   build: {
+    chunkSizeWarningLimit: 1000,
     rollupOptions: {
-      external: ["yjs", "y-protocols", "@tiptap/y-tiptap"],
+      output: {
+        manualChunks(id) {
+          if (id.includes("node_modules")) {
+            if (id.includes("@tiptap") || id.includes("@yiitap") || id.includes("prosemirror")) {
+              return "vendor-editor";
+            }
+            if (id.includes("katex")) {
+              return "vendor-katex";
+            }
+            if (id.includes("xterm") || id.includes("@xterm")) {
+              return "vendor-xterm";
+            }
+            if (id.includes("mermaid")) {
+              return "vendor-mermaid";
+            }
+            if (id.includes("diff") || id.includes("jsdiff")) {
+              return "vendor-diff";
+            }
+            if (id.includes("jszip")) {
+              return "vendor-zip";
+            }
+            if (id.includes("vue") || id.includes("pinia") || id.includes("@vue")) {
+              return "vendor-vue";
+            }
+            return "vendor-libs";
+          }
+        },
+      },
     },
   },
   server: {

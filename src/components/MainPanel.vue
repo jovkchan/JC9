@@ -1,49 +1,51 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch, defineAsyncComponent } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useProjectStore } from '@/stores/project'
 import { useNotesStore } from '@/stores/notes'
 import { useStatusStore } from '@/stores/status'
 import TerminalView from '@/components/TerminalView.vue'
 import LogPanel from '@/components/LogPanel.vue'
-import NoteEditor from '@/components/notes/NoteEditor.vue'
-import JsonFormatter from '@/components/tools/JsonFormatter.vue'
-import Base64Tool from '@/components/tools/Base64Tool.vue'
-import EnvViewer from '@/components/tools/EnvViewer.vue'
-import TimestampTool from '@/components/tools/TimestampTool.vue'
-import RegexTester from '@/components/tools/RegexTester.vue'
-import PortKiller from '@/components/tools/PortKiller.vue'
-import UuidGenerator from '@/components/tools/UuidGenerator.vue'
-import SshKeyGenerator from '@/components/tools/SshKeyGenerator.vue'
-import SslCertGenerator from '@/components/tools/SslCertGenerator.vue'
-import UrlTool from '@/components/tools/UrlTool.vue'
-import UnicodeTool from '@/components/tools/UnicodeTool.vue'
-import JwtDecoder from '@/components/tools/JwtDecoder.vue'
-import HashTool from '@/components/tools/HashTool.vue'
-import HtmlEscapeTool from '@/components/tools/HtmlEscapeTool.vue'
-import SqlFormatter from '@/components/tools/SqlFormatter.vue'
-import DiffViewer from '@/components/tools/DiffViewer.vue'
-import ColorConverter from '@/components/tools/ColorConverter.vue'
-import ImageBase64 from '@/components/tools/ImageBase64.vue'
-import QrTool from '@/components/tools/QrTool.vue'
-import TimeCalculator from '@/components/tools/TimeCalculator.vue'
-import RadixConverter from '@/components/tools/RadixConverter.vue'
-import DnsResolver from '@/components/tools/DnsResolver.vue'
-import CronGenerator from '@/components/tools/CronGenerator.vue'
-import CaseConverter from '@/components/tools/CaseConverter.vue'
-import LoremIpsum from '@/components/tools/LoremIpsum.vue'
-import TextLines from '@/components/tools/TextLines.vue'
-import SymmetricCrypto from '@/components/tools/SymmetricCrypto.vue'
-import RsaCrypto from '@/components/tools/RsaCrypto.vue'
-import CssUnits from '@/components/tools/CssUnits.vue'
-import SvgHelper from '@/components/tools/SvgHelper.vue'
-import IconGenerator from '@/components/tools/IconGenerator.vue'
 
-import NoteSettings from '@/components/notes/NoteSettings.vue'
-import VersionHistory from '@/components/notes/VersionHistory.vue'
-import NoteFeedView from '@/components/notes/NoteFeedView.vue'
-import AiHelper from '@/components/tools/AiHelper.vue'
-import FloatingSearch from '@/components/notes/FloatingSearch.vue'
+// 异步载入编辑器和工具组件
+const NoteEditor = defineAsyncComponent(() => import('@/components/notes/NoteEditor.vue'))
+const JsonFormatter = defineAsyncComponent(() => import('@/components/tools/JsonFormatter.vue'))
+const Base64Tool = defineAsyncComponent(() => import('@/components/tools/Base64Tool.vue'))
+const EnvViewer = defineAsyncComponent(() => import('@/components/tools/EnvViewer.vue'))
+const TimestampTool = defineAsyncComponent(() => import('@/components/tools/TimestampTool.vue'))
+const RegexTester = defineAsyncComponent(() => import('@/components/tools/RegexTester.vue'))
+const PortKiller = defineAsyncComponent(() => import('@/components/tools/PortKiller.vue'))
+const UuidGenerator = defineAsyncComponent(() => import('@/components/tools/UuidGenerator.vue'))
+const SshKeyGenerator = defineAsyncComponent(() => import('@/components/tools/SshKeyGenerator.vue'))
+const SslCertGenerator = defineAsyncComponent(() => import('@/components/tools/SslCertGenerator.vue'))
+const UrlTool = defineAsyncComponent(() => import('@/components/tools/UrlTool.vue'))
+const UnicodeTool = defineAsyncComponent(() => import('@/components/tools/UnicodeTool.vue'))
+const JwtDecoder = defineAsyncComponent(() => import('@/components/tools/JwtDecoder.vue'))
+const HashTool = defineAsyncComponent(() => import('@/components/tools/HashTool.vue'))
+const HtmlEscapeTool = defineAsyncComponent(() => import('@/components/tools/HtmlEscapeTool.vue'))
+const SqlFormatter = defineAsyncComponent(() => import('@/components/tools/SqlFormatter.vue'))
+const DiffViewer = defineAsyncComponent(() => import('@/components/tools/DiffViewer.vue'))
+const ColorConverter = defineAsyncComponent(() => import('@/components/tools/ColorConverter.vue'))
+const ImageBase64 = defineAsyncComponent(() => import('@/components/tools/ImageBase64.vue'))
+const QrTool = defineAsyncComponent(() => import('@/components/tools/QrTool.vue'))
+const TimeCalculator = defineAsyncComponent(() => import('@/components/tools/TimeCalculator.vue'))
+const RadixConverter = defineAsyncComponent(() => import('@/components/tools/RadixConverter.vue'))
+const DnsResolver = defineAsyncComponent(() => import('@/components/tools/DnsResolver.vue'))
+const CronGenerator = defineAsyncComponent(() => import('@/components/tools/CronGenerator.vue'))
+const CaseConverter = defineAsyncComponent(() => import('@/components/tools/CaseConverter.vue'))
+const LoremIpsum = defineAsyncComponent(() => import('@/components/tools/LoremIpsum.vue'))
+const TextLines = defineAsyncComponent(() => import('@/components/tools/TextLines.vue'))
+const SymmetricCrypto = defineAsyncComponent(() => import('@/components/tools/SymmetricCrypto.vue'))
+const RsaCrypto = defineAsyncComponent(() => import('@/components/tools/RsaCrypto.vue'))
+const CssUnits = defineAsyncComponent(() => import('@/components/tools/CssUnits.vue'))
+const SvgHelper = defineAsyncComponent(() => import('@/components/tools/SvgHelper.vue'))
+const IconGenerator = defineAsyncComponent(() => import('@/components/tools/IconGenerator.vue'))
+
+const NoteSettings = defineAsyncComponent(() => import('@/components/notes/NoteSettings.vue'))
+const VersionHistory = defineAsyncComponent(() => import('@/components/notes/VersionHistory.vue'))
+const NoteFeedView = defineAsyncComponent(() => import('@/components/notes/NoteFeedView.vue'))
+const AiHelper = defineAsyncComponent(() => import('@/components/tools/AiHelper.vue'))
+const FloatingSearch = defineAsyncComponent(() => import('@/components/notes/FloatingSearch.vue'))
 
 const store = useProjectStore()
 const notesStore = useNotesStore()
