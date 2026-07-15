@@ -576,11 +576,11 @@ onBeforeUnmount(() => {
         <!-- Editor Content Area (大滚动容器，内含标题和编辑器作为整体滚动) -->
         <section class="layout-content">
           <input v-model="title" class="editor-title-input" placeholder="请在这里输入标题" />
-          <YiiEditor ref="yiiEditor" class="editor-yiieditor" :content="''"
-            :extensions="editorExtensions" :dark-mode="isDark" :show-main-menu="false" :main-menu="defaultMenu"
-            :show-bubble-menu="true" :show-floating-menu="true" :show-side-menu="true" :bubble-menu="bubbleMenu"
-            :floating-menu="floatingMenu" page-view="full" locale="zh-CN" @contextmenu="handleEditorContextMenu"
-            @create="onEditorCreate" @update="onEditorUpdate" />
+          <YiiEditor ref="yiiEditor" class="editor-yiieditor" :content="''" :extensions="editorExtensions"
+            :dark-mode="isDark" :show-main-menu="false" :main-menu="defaultMenu" :show-bubble-menu="true"
+            :show-floating-menu="true" :show-side-menu="true" :bubble-menu="bubbleMenu" :floating-menu="floatingMenu"
+            page-view="full" locale="zh-CN" @contextmenu="handleEditorContextMenu" @create="onEditorCreate"
+            @update="onEditorUpdate" />
         </section>
       </div>
     </div>
@@ -604,17 +604,17 @@ onBeforeUnmount(() => {
         <span v-if="lastSaved" class="saved-hint">已保存 {{ lastSaved }}</span>
         <span v-if="saving" class="saving-hint">保存中...</span>
         <button class="footer-btn pri" @click="doSave(false)" title="手动保存当前修改 (Ctrl+S)">
-          💾 保存
+          保存
         </button>
         <button class="footer-btn" @click="copyNoteId" title="复制局域网分享链接">
-          🔗 分享
+          分享
         </button>
 
         <button class="footer-btn" @click="doSave(true)" title="生成一个版本历史快照 (Ctrl+Enter)">
-          📸 快照
+          快照
         </button>
         <button class="footer-btn" @click="store.openVersionHistory()" title="查看历史修改版本">
-          ⏳ 历史
+          历史
         </button>
         <span class="char-count">{{ editorRef?.getText().length ?? 0 }} 字</span>
       </div>
