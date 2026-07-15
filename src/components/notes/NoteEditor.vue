@@ -4,11 +4,13 @@ import { useNotesStore } from '@/stores/notes'
 import { useStatusStore } from '@/stores/status'
 import { useExecInTerminal } from '@/composables/useExecInTerminal'
 import { invoke } from '@tauri-apps/api/core'
+import { convertFileSrc } from '@tauri-apps/api/core'
 import type { Note } from '@/types/notes'
 import { mergeAttributes } from '@tiptap/core'
 import Link from '@tiptap/extension-link'
 import { TableRow } from '@tiptap/extension-table'
 import { Details, DetailsSummary, DetailsContent } from '@tiptap/extension-details'
+import { UploadManager } from '@yiitap/extension-upload-manager'
 
 // Yiitap: full WYSIWYG editor
 import { YiiEditor, OBlockquote, OTable, OTableCell, OTableHeader, OTableWrapper } from '@yiitap/vue'
@@ -183,10 +185,86 @@ void slashPlugin
 const store = useNotesStore()
 const { ctxShow, ctxStyle, runningTerminals, openCtx, closeCtx, execInTerminal, createAndExec } = useExecInTerminal()
 
+// ── 图片上传：Upload 目录缓存 ──
+let uploadBaseDir = ''
+
+async function ensureUploadDir() {
+  if (!uploadBaseDir) {
+    uploadBaseDir = await invoke<string>('get_upload_dir')
+  }
+  return uploadBaseDir
+}
+
+/** 相对路径 → convertFileSrc URL（加载时用） */
+function relToUrl(relPath: string): string {
+  if (!relPath || relPath.startsWith('http://') || relPath.startsWith('https://') || relPath.startsWith('asset://')) {
+    return relPath
+  }
+  if (!uploadBaseDir) return relPath
+  // relPath 格式可能为 "Upload/2026-07/xxx.png"，去掉所有前导 "Upload/" 避免和 baseDir 重复
+  const subPath = relPath.replace(/^(Upload\/)+/, '')
+  const absPath = uploadBaseDir.replace(/\\/g, '/').replace(/\/$/, '') + '/' + subPath
+  return convertFileSrc(absPath)
+}
+
+/** convertFileSrc URL 或绝对路径 → 相对路径（保存时用） */
+function urlToRel(url: string): string {
+  if (!url || !uploadBaseDir) return url
+  // convertFileSrc 生成的 URL 格式：http://asset.localhost/{encoded_path} 或 asset://localhost/{path}
+  // 提取实际文件路径
+  let path = url
+  if (url.includes('asset.localhost')) {
+    try {
+      const u = new URL(url)
+      path = decodeURIComponent(u.pathname.replace(/^\//, ''))
+    } catch { return url }
+  } else if (url.startsWith('asset://')) {
+    path = url.replace('asset://localhost/', '')
+  }
+  // Windows 路径转换
+  const base = uploadBaseDir.replace(/\\/g, '/')
+  const normalized = path.replace(/\\/g, '/')
+  if (normalized.startsWith(base)) {
+    return 'Upload/' + normalized.slice(base.length).replace(/^\//, '')
+  }
+  return url
+}
+
+/** Yiitap OUploadManager 的 onUpload 回调 */
+async function handleUpload(file: File, _type: string): Promise<string> {
+  await ensureUploadDir()
+  const buf = new Uint8Array(await file.arrayBuffer())
+  const data = Array.from(buf)
+  const relativePath = await invoke<string>('save_upload', {
+    data,
+    filename: file.name,
+    mimeType: file.type || 'image/png',
+  })
+  const absPath = uploadBaseDir.replace(/\\/g, '/') + '/' + relativePath
+  return convertFileSrc(absPath)
+}
+
+/** 加载 HTML 内容时：将相对路径 src 转为 convertFileSrc URL */
+function resolveContentUrls(html: string): string {
+  if (!uploadBaseDir) return html
+  return html.replace(/src="(Upload\/[^"]+)"/g, (_m, rel) => {
+    return `src="${relToUrl(rel)}"`
+  })
+}
+
+/** 保存 HTML 内容前：将 convertFileSrc URL 还原为相对路径 */
+function unresolveContentUrls(html: string): string {
+  if (!uploadBaseDir) return html
+  return html.replace(/src="([^"]+)"/g, (_m, url) => {
+    return `src="${urlToRel(url)}"`
+  })
+}
+
 // ── 右键菜单与代码块快捷运行集成 ──
 const hasSelection = ref(false)
 const selectedText = ref('')
 const codeBlockText = ref<string | null>(null)
+const rightClickedImageSrc = ref<string | null>(null)
 
 /** 检测光标是否处于代码块内，若是则提取其文本 */
 function checkActiveCodeBlock() {
@@ -212,6 +290,19 @@ function checkActiveCodeBlock() {
 function handleEditorContextMenu(e: MouseEvent) {
   const ed = editorRef.value
   if (!ed) return
+
+  // 检查右键目标是否为图片，如果是则提供下载选项
+  const target = e.target as HTMLElement
+  const imgEl = target.closest('img') as HTMLImageElement | null
+  if (imgEl && imgEl.src) {
+    rightClickedImageSrc.value = imgEl.src
+    hasSelection.value = false
+    selectedText.value = ''
+    codeBlockText.value = null
+    openCtx(e, '')
+    return
+  }
+  rightClickedImageSrc.value = null
 
   const sel = ed.state.selection
   if (sel && !sel.empty) {
@@ -299,11 +390,13 @@ watch(() => props.existingNote, async (newNote) => {
     if (editorRef.value) {
       // 只有在真正切换了笔记（不同 ID）时，才重新载入编辑器内容；相同笔记时不覆盖载入，防止与自动保存机制冲突形成加载死循环
       if (isNoteSwitched) {
+        await ensureUploadDir()
         const fmt = newNote.format || 'markdown'
+        const content = fmt === 'html' ? resolveContentUrls(newNote.content) : newNote.content
         if (fmt === 'html') {
-          editorRef.value.commands.setContent(newNote.content)
+          editorRef.value.commands.setContent(content)
         } else {
-          editorRef.value.commands.setContent(newNote.content, { contentType: 'markdown' })
+          editorRef.value.commands.setContent(content, { contentType: 'markdown' })
         }
       }
     }
@@ -387,6 +480,7 @@ const editorExtensions = computed(() => [
   'OCodeBlock',
   'OHorizontalRule',
   'OImage',
+  UploadManager.configure({ onUpload: handleUpload }),
   'OVideo',
   'OAudio',
   'OEmbed',
@@ -414,13 +508,68 @@ const editorExtensions = computed(() => [
   CustomLink.configure({ openOnClick: true, HTMLAttributes: { rel: 'noopener noreferrer' } }),
 ])
 
-function onEditorCreate(instance: any) {
+async function onEditorCreate(instance: any) {
   editorRef.value = instance
   startTagScan()
 
+  // ── 自定义粘贴/拖入插件：截图/图片强制走 image 节点而非 embed ──
+  const pasteImagePlugin = new Plugin({
+    key: new PluginKey('jc9-paste-image'),
+    props: {
+      handlePaste(view, event) {
+        const items = event.clipboardData?.items
+        if (!items) return false
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i]
+          if (item.type.startsWith('image/')) {
+            event.preventDefault()
+            const file = item.getAsFile()
+            if (file) {
+              handleUpload(file, 'image').then(url => {
+                const { state, dispatch } = view
+                const node = state.schema.nodes.image?.create({ src: url })
+                if (node && dispatch) {
+                  dispatch(state.tr.replaceSelectionWith(node))
+                }
+              })
+            }
+            return true
+          }
+        }
+        return false
+      },
+      handleDrop(view, event) {
+        const files = event.dataTransfer?.files
+        if (!files || files.length === 0) return false
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i]
+          if (file.type.startsWith('image/')) {
+            event.preventDefault()
+            handleUpload(file, 'image').then(url => {
+              const { state, dispatch } = view
+              const coords = view.posAtCoords({ left: event.clientX, top: event.clientY })
+              const pos = coords?.pos ?? state.selection.from
+              const node = state.schema.nodes.image?.create({ src: url })
+              if (node && dispatch) {
+                dispatch(state.tr.insert(pos, node))
+              }
+            })
+            return true
+          }
+        }
+        return false
+      },
+    },
+  })
+  instance.registerPlugin(pasteImagePlugin)
+
+  // 确保 upload 目录已缓存
+  await ensureUploadDir()
+
   // 优先从草稿恢复内容（切换标签页再返回时使用），其次从已有笔记加载
   const draft = editNoteId.value ? getDraftForNote(editNoteId.value) : null
-  const contentToLoad = draft?.content ?? props.existingNote?.content ?? ''
+  const rawContent = draft?.content ?? props.existingNote?.content ?? ''
+  const contentToLoad = resolveContentUrls(rawContent)
 
   if (contentToLoad) {
     try {
@@ -459,7 +608,8 @@ function onEditorUpdate() {
 /** 将当前编辑器内容写入 store 草稿（供关闭标签时自动保存使用） */
 function updateDraft() {
   const noteId = editNoteId.value
-  const html = editorRef.value?.getHTML() ?? ''
+  const rawHtml = editorRef.value?.getHTML() ?? ''
+  const html = unresolveContentUrls(rawHtml)
   // 新建笔记尚无 ID，用空字符串作 key
   store.updateNoteDraft(noteId || '', {
     title: title.value,
@@ -526,7 +676,8 @@ function execCmd(cmd: string, value?: string) {
 }
 
 async function doSave(createVersion = false) {
-  const html = editorRef.value?.getHTML() ?? ''
+  const rawHtml = editorRef.value?.getHTML() ?? ''
+  const html = unresolveContentUrls(rawHtml)
 
   saving.value = true
   syncTags()
@@ -630,6 +781,34 @@ function doCut() { closeCtx(); document.execCommand('cut') }
 function doCopy() { closeCtx(); document.execCommand('copy') }
 function doPaste() { closeCtx(); editorRef.value?.chain().focus().run(); document.execCommand('paste') }
 
+async function downloadRightClickedImage() {
+  const url = rightClickedImageSrc.value
+  if (!url) return
+  closeCtx()
+  try {
+    const fileName = decodeURIComponent(url.split('/').pop()?.split('?')[0] || 'image.png')
+    await invoke('download_asset_file', { url, defaultName: fileName })
+    const st = useStatusStore()
+    st.pushMessage('图片已保存', 'success')
+  } catch (e: any) {
+    const st = useStatusStore()
+    st.pushMessage(`下载失败: ${e}`, 'error')
+  }
+}
+
+async function showImageInFolder() {
+  const url = rightClickedImageSrc.value
+  if (!url) return
+  closeCtx()
+  try {
+    const filePath: string = await invoke('resolve_asset_path', { url })
+    await invoke('show_in_folder', { path: filePath })
+  } catch (e: any) {
+    const st = useStatusStore()
+    st.pushMessage(`操作失败: ${e}`, 'error')
+  }
+}
+
 onBeforeUnmount(() => {
   if (saveTimer) clearTimeout(saveTimer)
   // 退出前保存最新内容（仅在开启偏好时）
@@ -711,6 +890,17 @@ onBeforeUnmount(() => {
                 d="M256 160v64H172.8a12.8 12.8 0 0 0-12.8 12.8v678.4c0 7.04 5.76 12.8 12.8 12.8h550.4a12.8 12.8 0 0 0 12.8-12.8V832h64v102.4a57.6 57.6 0 0 1-57.6 57.6H153.6a57.6 57.6 0 0 1-57.6-57.6V217.6a57.6 57.6 0 0 1 57.6-57.6H256zM672 64v211.2c0 7.04 5.76 12.8 12.8 12.8H896v64h-243.2a44.8 44.8 0 0 1-44.8-44.8V64h64z" />
             </svg></span> 复制</div>
         <div class="ctx-item" @click="doPaste"><span class="ctx-icon">📌</span> 粘贴</div>
+
+        <!-- Condition 0: Image Right Click → Download -->
+        <template v-if="rightClickedImageSrc">
+          <div class="ctx-divider"></div>
+          <div class="ctx-item" @click="downloadRightClickedImage">
+            <span class="ctx-icon">💾</span> 下载图片
+          </div>
+          <div class="ctx-item" @click="showImageInFolder">
+            <span class="ctx-icon">📂</span> 在文件夹中显示
+          </div>
+        </template>
 
         <!-- Condition 1: Command Send to Terminal -->
         <template v-if="hasSelection || codeBlockText !== null">

@@ -7,7 +7,7 @@
 use std::sync::Arc;
 use axum::{
     extract::{State, Path},
-    http::StatusCode,
+    http::{StatusCode, header},
     response::Html,
     Json,
 };
@@ -33,6 +33,62 @@ impl Default for NoteShareConfig {
     fn default() -> Self {
         Self { port: 8899, host: "0.0.0.0".into() }
     }
+}
+
+// ═══════════════════════════════════════════════
+// Upload 目录（与 lib.rs 中一致）
+// ═══════════════════════════════════════════════
+fn get_upload_base_dir() -> Result<std::path::PathBuf, String> {
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .map_err(|_| "无法获取用户目录".to_string())?;
+    Ok(std::path::PathBuf::from(home).join(".jc9").join("Upload"))
+}
+
+/// 根据扩展名推断 MIME 类型
+fn mime_from_ext(ext: &str) -> &'static str {
+    match ext.to_lowercase().as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "bmp" => "image/bmp",
+        "ico" => "image/x-icon",
+        "mp4" => "video/mp4",
+        "webm" => "video/webm",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "pdf" => "application/pdf",
+        _ => "application/octet-stream",
+    }
+}
+
+/// GET /api/files/:year/:filename — 静态文件服务（Upload 目录）  
+pub async fn handle_serve_file(
+    Path((year, filename)): Path<(String, String)>,
+) -> Result<(StatusCode, axum::http::HeaderMap, Vec<u8>), StatusCode> {
+    let base = get_upload_base_dir().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let file_path = base.join(&year).join(&filename);
+
+    // 安全检查：防止路径穿越
+    let canonical_base = base.canonicalize().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let canonical_file = file_path.canonicalize().map_err(|_| StatusCode::NOT_FOUND)?;
+    if !canonical_file.starts_with(&canonical_base) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let data = tokio::fs::read(&file_path).await.map_err(|_| StatusCode::NOT_FOUND)?;
+
+    let ext = std::path::Path::new(&filename)
+        .extension()
+        .map(|e| e.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let mime = mime_from_ext(&ext);
+
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert(header::CONTENT_TYPE, axum::http::HeaderValue::from_str(mime).unwrap());
+    Ok((StatusCode::OK, headers, data))
 }
 
 // ═══════════════════════════════════════════════
@@ -122,6 +178,7 @@ impl NoteShareServer {
         let app = Router::new()
             .route("/api/notes/:id", get(handle_get_note_json))
             .route("/api/notes/:id/html", get(handle_get_note_html))
+            .route("/api/files/:year/:filename", get(handle_serve_file))
             .layer(CorsLayer::very_permissive())
             .with_state(shared_state);
 
@@ -231,6 +288,32 @@ fn add_heading_ids(html: &str) -> String {
     result
 }
 
+/// 将 HTML 中的 src="Upload/..." 映射为 src="/api/files/..."
+fn remap_upload_srcs(html: &str) -> String {
+    let re = regex::Regex::new(r#"src="(Upload/([^"]+))""#).unwrap();
+    re.replace_all(html, r#"src="/api/files/$2""#).to_string()
+}
+
+/// 从 HTML 内容提取标题生成 TOC
+fn extract_toc_from_html(html: &str) -> Vec<(usize, String, String)> {
+    let mut toc = Vec::new();
+    // Rust regex 不支持反向引用，逐级匹配 h1-h6
+    for level in 1..=6 {
+        let pattern = format!(r#"<h{}[^>]*>(.*?)</h{}>"#, level, level);
+        if let Ok(re) = regex::Regex::new(&pattern) {
+            for caps in re.captures_iter(html) {
+                let text = regex::Regex::new(r"<[^>]+>")
+                    .unwrap()
+                    .replace_all(&caps[1], "")
+                    .to_string();
+                let id = slugify(&text);
+                toc.push((level, text, id));
+            }
+        }
+    }
+    toc
+}
+
 /// 生成 TOC 的 HTML 树
 fn render_toc_html(toc: &[(usize, String, String)]) -> String {
     if toc.is_empty() { return String::new(); }
@@ -264,25 +347,38 @@ pub async fn handle_get_note_html(
     let db = state.db_conn.as_ref().ok_or((StatusCode::SERVICE_UNAVAILABLE, "数据库未就绪".into()))?;
     let conn = db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("数据库锁失败: {}", e)))?;
 
-    let (title, content, created, updated): (String, String, String, String) = conn.query_row(
-        "SELECT title, content, created_at, updated_at FROM notes WHERE id=?1 AND is_deleted=0",
+    let (title, content, format, created, updated): (String, String, String, String, String) = conn.query_row(
+        "SELECT title, content, COALESCE(format,'markdown'), created_at, updated_at FROM notes WHERE id=?1 AND is_deleted=0",
         params![id],
-        |row: &rusqlite::Row<'_>| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        |row: &rusqlite::Row<'_>| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
     ).map_err(|_| (StatusCode::NOT_FOUND, "笔记不存在".into()))?;
 
-    // pulldown-cmark: 纯 Rust CommonMark + GFM（表格/任务列表/删除线）
-    use pulldown_cmark::{Parser, Options, html};
-    let mut opts = Options::empty();
-    opts.insert(Options::ENABLE_TABLES);
-    opts.insert(Options::ENABLE_TASKLISTS);
-    opts.insert(Options::ENABLE_STRIKETHROUGH);
-    let parser = Parser::new_ext(&content, opts);
-    let mut html_body = String::new();
-    html::push_html(&mut html_body, parser);
+    let (html_body, toc_source) = if format == "html" {
+        // HTML 格式：直接使用，但需要：
+        // 1. 将 src="Upload/..." 映射为 src="/api/files/..."
+        // 2. 提取标题生成 TOC
+        let remapped = remap_upload_srcs(&content);
+        let toc = extract_toc_from_html(&content);
+        (remapped, toc)
+    } else {
+        // Markdown 格式：pulldown-cmark 渲染
+        use pulldown_cmark::{Parser, Options, html};
+        let mut opts = Options::empty();
+        opts.insert(Options::ENABLE_TABLES);
+        opts.insert(Options::ENABLE_TASKLISTS);
+        opts.insert(Options::ENABLE_STRIKETHROUGH);
+        let parser = Parser::new_ext(&content, opts);
+        let mut body = String::new();
+        html::push_html(&mut body, parser);
+        let toc = extract_toc(&content);
+        // Markdown 中也可能有 Upload/ 相对路径图片
+        let body = remap_upload_srcs(&body);
+        (body, toc)
+    };
+
     let html_body = add_heading_ids(&html_body);
-    let toc = extract_toc(&content);
-    let toc_html = render_toc_html(&toc);
-    let has_toc = !toc.is_empty();
+    let toc_html = render_toc_html(&toc_source);
+    let has_toc = !toc_source.is_empty();
     let body_class = if has_toc { "" } else { "no-toc" };
     let sun_svg = r#"<svg viewBox="0 0 1024 1024" width="16" height="16" fill="currentColor"><path d="M512.000213 733.353497c-122.06857 0-221.353283-99.284713-221.353283-221.353284S389.931643 290.64693 512.000213 290.64693 733.353497 389.931643 733.353497 512.000213 634.026117 733.353497 512.000213 733.353497z m0-357.373767A136.148482 136.148482 0 0 0 375.97973 512.000213 136.148482 136.148482 0 0 0 512.000213 648.020697 136.148482 136.148482 0 0 0 648.020697 512.000213 136.148482 136.148482 0 0 0 512.000213 375.97973zM554.666613 171.735673A42.154403 42.154403 0 0 1 512.000213 213.335413c-23.551853 0-42.6664-18.645217-42.6664-41.59974V41.603153A42.154403 42.154403 0 0 1 512.000213 0.003413c23.551853 0 42.6664 18.645217 42.6664 41.59974v130.13252zM554.666613 982.397273A42.154403 42.154403 0 0 1 512.000213 1023.997013c-23.594519 0-42.6664-18.687883-42.6664-41.59974v-130.175186A42.111737 42.111737 0 0 1 512.000213 810.665013c23.551853 0 42.6664 18.60255 42.6664 41.59974v130.13252zM171.735673 469.333813c22.954523 0 41.59974 19.114547 41.59974 42.6664 0 23.594519-18.645217 42.6664-41.59974 42.6664H41.603153A42.154403 42.154403 0 0 1 0.003413 512.000213c0-23.551853 18.645217-42.6664 41.59974-42.6664h130.13252zM982.397273 469.333813c22.954523 0 41.59974 19.114547 41.59974 42.6664 0 23.594519-18.687883 42.6664-41.59974 42.6664h-130.175186A42.111737 42.111737 0 0 1 810.665013 512.000213c0-23.551853 18.60255-42.6664 41.59974-42.6664h130.13252zM241.239239 722.430898a42.06907 42.06907 0 0 1 59.562294 0.767995 42.111737 42.111737 0 0 1 0.767996 59.562295l-92.031425 92.074091a42.154403 42.154403 0 0 1-59.562295-0.853328 42.154403 42.154403 0 0 1-0.767995-59.562294l92.031425-91.988759zM814.462323 149.207814a42.154403 42.154403 0 0 1 59.562294 0.767995 42.154403 42.154403 0 0 1 0.767996 59.562295l-92.031425 92.031425a42.06907 42.06907 0 0 1-59.562295-0.767996 42.111737 42.111737 0 0 1-0.810661-59.562294l92.074091-92.031425zM241.239239 301.526862a42.19707 42.19707 0 0 0 59.604961-0.725329 42.111737 42.111737 0 0 0 0.767995-59.562294L209.538104 149.122481a42.154403 42.154403 0 0 0-59.562295 0.853328 42.111737 42.111737 0 0 0-0.767995 59.562295l92.031425 91.988758zM814.462323 874.792613a42.111737 42.111737 0 0 0 59.562294-0.810662 42.154403 42.154403 0 0 0 0.767996-59.562294l-92.031425-92.031425a42.06907 42.06907 0 0 0-59.562295 0.767995 42.111737 42.111737 0 0 0-0.810661 59.562294l92.074091 92.074092z"/></svg>"#;
     let moon_svg = r#"<svg viewBox="0 0 1024 1024" width="16" height="16" fill="currentColor"><path d="M644.5056 70.528C834.4064 127.488 972.8 303.5648 972.8 512c0 254.4896-206.3104 460.8-460.8 460.8-222.4128 0-408.0128-157.568-451.2768-367.1296A433.4848 433.4848 0 0 0 230.4 640c240.3584 0 435.2-194.8416 435.2-435.2 0-44.2112-6.5792-86.8608-18.8416-127.0528z"/></svg>"#;

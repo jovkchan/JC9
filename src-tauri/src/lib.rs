@@ -1951,6 +1951,106 @@ async fn proxy_ai_request(url: String, method: String, headers: Vec<(String, Str
     }
 }
 
+// ── Upload 文件管理 ──
+
+fn get_upload_base_dir() -> Result<std::path::PathBuf, String> {
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .map_err(|_| "无法获取用户目录".to_string())?;
+    Ok(std::path::PathBuf::from(home).join(".jc9").join("Upload"))
+}
+
+/// 获取 Upload 目录路径（前端用于 convertFileSrc）
+#[tauri::command]
+fn get_upload_dir() -> Result<String, String> {
+    let dir = get_upload_base_dir()?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建 Upload 目录失败: {}", e))?;
+    Ok(dir.to_string_lossy().to_string())
+}
+
+/// 保存上传文件：返回相对路径（Upload/2026-07/uuid.ext）
+#[tauri::command]
+fn save_upload(data: Vec<u8>, filename: String, _mime_type: String) -> Result<String, String> {
+    let base = get_upload_base_dir()?;
+    // 按年月分目录
+    let now = chrono::Local::now();
+    let month_dir = now.format("%Y-%m").to_string();
+    let dir = base.join(&month_dir);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建目录失败: {}", e))?;
+
+    // 生成唯一文件名，保留扩展名
+    let ext = std::path::Path::new(&filename)
+        .extension()
+        .map(|e| e.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let unique_name = if ext.is_empty() {
+        format!("{}.png", uuid::Uuid::new_v4())
+    } else {
+        format!("{}.{}", uuid::Uuid::new_v4(), ext)
+    };
+
+    let file_path = dir.join(&unique_name);
+    std::fs::write(&file_path, &data).map_err(|e| format!("写入文件失败: {}", e))?;
+
+    // 返回相对路径（相对于 Upload 目录本身）
+    Ok(format!("{}/{}", month_dir, unique_name))
+}
+
+/// 将 asset URL (http://asset.localhost/...) 解码为实际文件路径
+fn decode_asset_url(url_str: &str) -> Result<std::path::PathBuf, String> {
+    use url::Url;
+    if url_str.strip_prefix("http://asset.localhost/").is_some() {
+        // Url::path() 会自动 percent-decode
+        let parsed = Url::parse(url_str).map_err(|e| format!("URL 解析失败: {}", e))?;
+        let path = parsed.path().to_string();
+        Ok(std::path::PathBuf::from(path))
+    } else if let Some(path) = url_str.strip_prefix("asset://localhost/") {
+        Ok(std::path::PathBuf::from(path))
+    } else {
+        Err("不支持的 URL 格式，仅支持 asset:// 和 http://asset.localhost/".to_string())
+    }
+}
+
+/// 通过原生保存对话框下载 asset 图片/文件
+#[tauri::command]
+async fn download_asset_file(app: tauri::AppHandle, url: String, default_name: String) -> Result<String, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let file_path = decode_asset_url(&url)?;
+
+    if !file_path.exists() {
+        return Err(format!("文件不存在: {}", file_path.display()));
+    }
+
+    let (tx, rx) = tokio::sync::oneshot::channel::<Option<std::path::PathBuf>>();
+
+    app.dialog()
+        .file()
+        .set_file_name(&default_name)
+        .save_file(move |target| {
+            let path = target.and_then(|f| match f {
+                tauri_plugin_dialog::FilePath::Path(p) => Some(p),
+                tauri_plugin_dialog::FilePath::Url(u) => u.to_file_path().ok(),
+            });
+            let _ = tx.send(path);
+        });
+
+    let target = rx.await.map_err(|e| e.to_string())?
+        .ok_or_else(|| "用户取消了保存".to_string())?;
+
+    std::fs::copy(&file_path, &target)
+        .map_err(|e| format!("保存失败: {}", e))?;
+
+    Ok(target.to_string_lossy().to_string())
+}
+
+/// 解析 asset URL 为实际文件路径（不触发下载，仅返回路径）
+#[tauri::command]
+fn resolve_asset_path(url: String) -> Result<String, String> {
+    let file_path = decode_asset_url(&url)?;
+    Ok(file_path.to_string_lossy().to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let db = Database::new().expect("无法初始化数据库");
@@ -2422,6 +2522,11 @@ pub fn run() {
             get_note_share_status,
             note_share_start,
             note_share_stop,
+            // Upload commands
+            get_upload_dir,
+            save_upload,
+            download_asset_file,
+            resolve_asset_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
