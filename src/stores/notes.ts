@@ -450,7 +450,7 @@ export const useNotesStore = defineStore('notes', () => {
           const note = await createNote({
             title: draft.title || '无标题',
             content: draft.content,
-            format: 'markdown',
+            format: 'html',
             tags: draft.tags,
             groupId: selectedGroupId.value,
             visibility: 'PRIVATE',

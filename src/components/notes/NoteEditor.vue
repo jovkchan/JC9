@@ -8,9 +8,10 @@ import type { Note } from '@/types/notes'
 import { mergeAttributes } from '@tiptap/core'
 import Link from '@tiptap/extension-link'
 import { TableRow } from '@tiptap/extension-table'
+import { Details, DetailsSummary, DetailsContent } from '@tiptap/extension-details'
 
 // Yiitap: full WYSIWYG editor
-import { YiiEditor, OBlockquote, OTable, OTableCell, OTableHeader, OTableWrapper, DetailsSummary, DetailsContent } from '@yiitap/vue'
+import { YiiEditor, OBlockquote, OTable, OTableCell, OTableHeader, OTableWrapper } from '@yiitap/vue'
 import 'katex/dist/katex.min.css'
 
 // 自定义链接：jclink:// 渲染为 span（避免浏览器导航）
@@ -298,7 +299,12 @@ watch(() => props.existingNote, async (newNote) => {
     if (editorRef.value) {
       // 只有在真正切换了笔记（不同 ID）时，才重新载入编辑器内容；相同笔记时不覆盖载入，防止与自动保存机制冲突形成加载死循环
       if (isNoteSwitched) {
-        editorRef.value.commands.setContent(newNote.content, { contentType: 'markdown' })
+        const fmt = newNote.format || 'markdown'
+        if (fmt === 'html') {
+          editorRef.value.commands.setContent(newNote.content)
+        } else {
+          editorRef.value.commands.setContent(newNote.content, { contentType: 'markdown' })
+        }
       }
     }
   } finally {
@@ -318,9 +324,12 @@ syncTags()
 
 // 实时提取正文内联标签（不含代码块内）
 const inlineTags = ref<string[]>([])
-function extractInlineTags(md: string): string[] {
-  const cleaned = md.replace(/```[\s\S]*?```/g, '').replace(/`[^`]+`/g, '')
-  const matches = cleaned.match(/#([^\s#.,;:!?()（）\[\]{}]+)/g)
+function extractInlineTags(content: string): string[] {
+  // 移除 HTML 代码块 (<pre><code>...</code></pre>) 和内联代码 (<code>...</code>)
+  const cleaned = content.replace(/<pre[^>]*>[\s\S]*?<\/pre>/gi, '').replace(/<code[^>]*>[\s\S]*?<\/code>/gi, '')
+  // 移除 HTML 标签，保留文本内容
+  const textOnly = cleaned.replace(/<[^>]+>/g, ' ')
+  const matches = textOnly.match(/#([^\s#.,;:!?()（）\[\]{}]+)/g)
   if (!matches) return []
   return Array.from(new Set(matches.map(m => m.slice(1).trim()).filter(t => t.length >= 1 && t.length <= 40)))
 }
@@ -328,8 +337,8 @@ function extractInlineTags(md: string): string[] {
 let tagScanTimer: ReturnType<typeof setInterval> | null = null
 function startTagScan() {
   tagScanTimer = setInterval(() => {
-    const md = editorRef.value?.getMarkdown() ?? ''
-    inlineTags.value = extractInlineTags(md)
+    const html = editorRef.value?.getHTML() ?? ''
+    inlineTags.value = extractInlineTags(html)
   }, 500)
 }
 onBeforeUnmount(() => { if (tagScanTimer) clearInterval(tagScanTimer) })
@@ -382,7 +391,14 @@ const editorExtensions = computed(() => [
   'OAudio',
   'OEmbed',
   'OMultiColumn',
-  'ODetails',
+  Details.configure({
+    persist: true,
+    HTMLAttributes: { class: 'details' },
+    renderToggleButton: ({ element, isOpen }) => {
+      element.innerHTML = isOpen ? '▼' : '▶'
+      element.setAttribute('aria-label', isOpen ? '折叠' : '展开')
+    },
+  }),
   DetailsSummary,
   DetailsContent,
   'OShortcut',
@@ -408,7 +424,12 @@ function onEditorCreate(instance: any) {
 
   if (contentToLoad) {
     try {
-      instance.commands.setContent(contentToLoad, { contentType: 'markdown' })
+      const fmt = props.existingNote?.format || 'markdown'
+      if (fmt === 'html') {
+        instance.commands.setContent(contentToLoad)
+      } else {
+        instance.commands.setContent(contentToLoad, { contentType: 'markdown' })
+      }
       // 如果有草稿且存在已有笔记，同步草稿中的标题/标签到组件本地状态
       if (draft && props.existingNote) {
         if (draft.title && draft.title !== props.existingNote.title) {
@@ -438,11 +459,11 @@ function onEditorUpdate() {
 /** 将当前编辑器内容写入 store 草稿（供关闭标签时自动保存使用） */
 function updateDraft() {
   const noteId = editNoteId.value
-  const md = editorRef.value?.getMarkdown() ?? ''
+  const html = editorRef.value?.getHTML() ?? ''
   // 新建笔记尚无 ID，用空字符串作 key
   store.updateNoteDraft(noteId || '', {
     title: title.value,
-    content: md,
+    content: html,
     tags: tags.value,
   })
 }
@@ -505,7 +526,7 @@ function execCmd(cmd: string, value?: string) {
 }
 
 async function doSave(createVersion = false) {
-  const md = editorRef.value?.getMarkdown() ?? ''
+  const html = editorRef.value?.getHTML() ?? ''
 
   saving.value = true
   syncTags()
@@ -519,8 +540,8 @@ async function doSave(createVersion = false) {
       const note: Note = {
         ...existing,
         title: title.value || '无标题',
-        content: md,
-        format: 'markdown',
+        content: html,
+        format: 'html',
         tags: tags.value,
         updatedAt: new Date().toISOString(),
       }
@@ -529,8 +550,8 @@ async function doSave(createVersion = false) {
     } else {
       const note = await store.createNote({
         title: title.value || '无标题',
-        content: md,
-        format: 'markdown',
+        content: html,
+        format: 'html',
         tags: tags.value,
         groupId: store.selectedGroupId,
         visibility: 'PRIVATE',
@@ -546,6 +567,7 @@ async function doSave(createVersion = false) {
   lastSaved.value = new Date().toLocaleTimeString()
   saving.value = false
 }
+
 
 // 监听标题和标签输入的改变，不再触发自动保存
 // 但记录草稿以便关闭标签时自动保存
@@ -631,6 +653,7 @@ onBeforeUnmount(() => {
             :show-floating-menu="true" :show-side-menu="true" :bubble-menu="bubbleMenu" :floating-menu="floatingMenu"
             page-view="full" locale="zh-CN" @contextmenu="handleEditorContextMenu" @create="onEditorCreate"
             @update="onEditorUpdate" />
+  
         </section>
       </div>
     </div>
@@ -1058,6 +1081,52 @@ onBeforeUnmount(() => {
     &::before {
       content: '📄 ';
       font-size: 0.9em;
+    }
+  }
+
+  /* ── Details / 折叠面板样式 (tiptap 原生) ── */
+  [data-type='details'].details {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.25rem;
+    border: 1px solid var(--jc-border-default, #3e3e42);
+    border-radius: 6px;
+    margin: 0.8em 0;
+
+    & > button {
+      flex-shrink: 0;
+      background: transparent;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      padding: 6px;
+      color: var(--jc-text-secondary, #858585);
+      line-height: 1;
+      margin-top: 3px;
+
+      &:hover {
+        background: var(--jc-bg-hover, #2a2d2e);
+        color: var(--jc-text-highlight, #ffffff);
+      }
+    }
+
+    & > div {
+      overflow: hidden;
+      padding: 4px 8px 4px 28px;
+
+      & > [data-type='detailsContent'] {
+        padding-bottom: 4px;
+      }
+    }
+
+    /* summary 标题加粗 */
+    summary {
+      font-weight: 600;
+      color: var(--jc-text-highlight, #ffffff);
+      cursor: pointer;
+      outline: none;
+      padding: 6px 8px;
     }
   }
 

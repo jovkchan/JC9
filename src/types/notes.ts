@@ -16,7 +16,7 @@ export interface Note {
   groupId: string | null
   title: string
   content: string
-  format: 'plain' | 'markdown'
+  format: 'plain' | 'markdown' | 'html'
   isPinned: boolean
   tags: string[]
   visibility: 'PRIVATE' | 'PUBLIC' | 'PROTECTED'
@@ -46,7 +46,7 @@ export interface NoteVersion {
 export interface EditorState {
   title: string
   content: string
-  format: 'plain' | 'markdown'
+  format: 'plain' | 'markdown' | 'html'
   groupId: string | null
   tags: string[]
   visibility: 'PRIVATE' | 'PUBLIC' | 'PROTECTED'
