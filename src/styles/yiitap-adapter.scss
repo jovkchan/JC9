@@ -53,35 +53,52 @@
   align-items: center !important;
 }
 
-// 2. 视频、音频、3D 模型显示的宽度优化与缩放支持 ( resize: both 结合 padding 暴露手柄)
+// 2. 视频、音频、3D 模型显示的排版与尺寸自适应优化
 .o-video-view,
 .o-audio-view,
 .o-model-viewer-view {
-  display: block !important;
+  display: inline-block !important;
   width: 100% !important;
   max-width: 100% !important;
 }
 
-.o-video-view .video-container,
-.o-audio-view .audio-container,
+.o-video-view .video-container {
+  display: inline-block !important;
+  position: relative !important;
+  width: 480px;
+  max-width: 100% !important;
+  aspect-ratio: 16 / 9 !important;
+  border-radius: 8px;
+  overflow: visible !important;
+  background: var(--jc-bg-elevated, #252526) !important;
+  box-sizing: border-box !important;
+}
+
+.o-audio-view .audio-container {
+  display: inline-block !important;
+  position: relative !important;
+  width: 480px;
+  max-width: 100% !important;
+  height: 40px !important;
+  border-radius: 20px !important;
+  overflow: visible !important;
+  background: transparent !important;
+  box-sizing: border-box !important;
+}
+
 .o-model-viewer-view .model-viewer-container {
   display: inline-block !important;
   position: relative !important;
   width: 480px;
   max-width: 100% !important;
-  min-width: 200px !important;
-  min-height: 40px !important;
-  resize: both !important;
-  overflow: hidden !important;
-  border: 1px dashed var(--yii-border-color, #3e3e42) !important;
-  border-radius: 6px;
+  aspect-ratio: 16 / 9 !important;
+  border-radius: 8px;
+  overflow: visible !important;
   background: var(--jc-bg-elevated, #252526) !important;
-  padding: 0 16px 16px 0 !important; /* 在右侧和底部预留 16px 的内边距，暴露出浏览器原生的 resize 手柄，防止被视频/模型区域阻断鼠标拖拽 */
   box-sizing: border-box !important;
 }
 
 .o-video-view .video-container video,
-.o-audio-view .audio-container audio,
 .o-model-viewer-view .model-viewer-container model-viewer {
   width: 100% !important;
   height: 100% !important;
@@ -89,9 +106,17 @@
   max-height: 100% !important;
   object-fit: contain !important;
   display: block !important;
+  border-radius: inherit !important;
 }
 
-// 3. 高亮块 (Callout) 明暗模式配色适配 (重写 CSS 变量)
+.o-audio-view .audio-container audio {
+  width: 100% !important;
+  height: 100% !important;
+  display: block !important;
+  border-radius: inherit !important;
+}
+
+// 3. 高亮块 (Callout) 与音视频等明暗模式配色适配
 .dark {
   .o-callout-view,
   .yii-callout,
@@ -102,6 +127,11 @@
     background: var(--callout-back-color) !important;
     border-color: var(--callout-border-color) !important;
     color: var(--jc-text-primary, #cccccc) !important;
+  }
+
+  .o-audio-view .audio-container audio,
+  .o-video-view .video-container video {
+    color-scheme: dark !important;
   }
 }
 
@@ -115,6 +145,11 @@
     background: var(--callout-back-color) !important;
     border-color: var(--callout-border-color) !important;
     color: var(--jc-text-primary, #333333) !important;
+  }
+
+  .o-audio-view .audio-container audio,
+  .o-video-view .video-container video {
+    color-scheme: light !important;
   }
 }
 

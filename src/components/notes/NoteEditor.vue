@@ -7,9 +7,10 @@ import { invoke } from '@tauri-apps/api/core'
 import type { Note } from '@/types/notes'
 import { mergeAttributes } from '@tiptap/core'
 import Link from '@tiptap/extension-link'
+import { TableRow } from '@tiptap/extension-table'
 
 // Yiitap: full WYSIWYG editor
-import { YiiEditor, OBlockquote } from '@yiitap/vue'
+import { YiiEditor, OBlockquote, OTable, OTableCell, OTableHeader, OTableWrapper, DetailsSummary, DetailsContent } from '@yiitap/vue'
 import 'katex/dist/katex.min.css'
 
 // 自定义链接：jclink:// 渲染为 span（避免浏览器导航）
@@ -358,10 +359,11 @@ const editorExtensions = computed(() => [
   'InlineMath',
   'TaskList',
   'TaskItem',
-  'OTable',
-  'OTableCell',
-  'OTableHeader',
-  'OTableWrapper',
+  OTable,
+  TableRow,
+  OTableCell,
+  OTableHeader,
+  OTableWrapper,
   CustomBlockquote,
   'OCallout',
   'OCodeBlock',
@@ -372,6 +374,8 @@ const editorExtensions = computed(() => [
   'OEmbed',
   'OMultiColumn',
   'ODetails',
+  DetailsSummary,
+  DetailsContent,
   'OShortcut',
   'OSelectionDecoration',
   'OColorHighlighter',
@@ -391,7 +395,12 @@ function onEditorCreate(instance: any) {
 
   // 显式以 markdown 格式加载初始内容，防止首屏把 markdown 误当作 html 解析导致排版完全乱掉
   if (props.existingNote?.content) {
-    instance.commands.setContent(props.existingNote.content, { contentType: 'markdown' })
+    try {
+      instance.commands.setContent(props.existingNote.content, { contentType: 'markdown' })
+    } catch (e: any) {
+      console.error("❌ 加载笔记 markdown 失败:", e)
+      console.error("❌ 错误堆栈:", e.stack)
+    }
   }
 }
 
