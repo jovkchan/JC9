@@ -9,7 +9,7 @@ import { mergeAttributes } from '@tiptap/core'
 import Link from '@tiptap/extension-link'
 
 // Yiitap: full WYSIWYG editor
-import { YiiEditor } from '@yiitap/vue'
+import { YiiEditor, OBlockquote } from '@yiitap/vue'
 import 'katex/dist/katex.min.css'
 
 // 自定义链接：jclink:// 渲染为 span（避免浏览器导航）
@@ -25,6 +25,11 @@ const CustomLink = Link.extend({
     }
     return ['a', mergeAttributes(HTMLAttributes, { rel: 'noopener noreferrer' }), 0]
   },
+})
+
+// 自定义 Blockquote，将 content 变更为 block*（原来是 block+），支持空引用块，防止 ProseMirror 报错
+const CustomBlockquote = OBlockquote.extend({
+  content: 'block*',
 })
 
 import { Plugin, PluginKey } from 'prosemirror-state'
@@ -109,8 +114,22 @@ function handleJclinkClick(e: MouseEvent) {
   }
 }
 
+function handleGlobalKeydown(e: KeyboardEvent) {
+  // Ctrl + S (或 Cmd + S) 手动保存当前笔记
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+    e.preventDefault()
+    doSave(false)
+  }
+  // Ctrl + Enter (或 Cmd + Enter) 手动保存并创建历史快照
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+    e.preventDefault()
+    doSave(true)
+  }
+}
+
 onMounted(() => {
   document.addEventListener('click', handleJclinkClick)
+  window.addEventListener('keydown', handleGlobalKeydown)
   // 监听明暗模式属性变化
   isDark.value = document.documentElement.getAttribute('data-theme') === 'dark'
   themeObserver = new MutationObserver(() => {
@@ -120,6 +139,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   document.removeEventListener('click', handleJclinkClick)
+  window.removeEventListener('keydown', handleGlobalKeydown)
   if (themeObserver) {
     themeObserver.disconnect()
   }
@@ -245,8 +265,6 @@ const activePopover = ref<string | null>(null)
 /** 标志：是否正在自身保存，避免 watcher 回写编辑器时光标跳动 */
 let selfSaving = false
 /** 标志：切换笔记或外部加载中，不触发自动保存 */
-let isLoadingNote = false
-
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 
 // ── 响应外部笔记变更（MCP 等外部修改或侧栏切换自动刷新）──
@@ -254,12 +272,12 @@ watch(() => props.existingNote, async (newNote) => {
   if (!newNote) return
   if (selfSaving) return
 
-  isLoadingNote = true
   try {
     if (newNote.title !== title.value) {
       title.value = newNote.title
     }
-    if (editNoteId.value !== newNote.id) {
+    const isNoteSwitched = editNoteId.value !== newNote.id
+    if (isNoteSwitched) {
       editNoteId.value = newNote.id
     }
     const newTagsStr = newNote.tags.join(', ')
@@ -268,15 +286,14 @@ watch(() => props.existingNote, async (newNote) => {
       syncTags()
     }
     if (editorRef.value) {
-      const currentMd = editorRef.value.getMarkdown()
-      if (newNote.content !== currentMd) {
-        editorRef.value.commands.setContent(convertTableTasksToHtml(newNote.content), { contentType: 'markdown' })
+      // 只有在真正切换了笔记（不同 ID）时，才重新载入编辑器内容；相同笔记时不覆盖载入，防止与自动保存机制冲突形成加载死循环
+      if (isNoteSwitched) {
+        editorRef.value.commands.setContent(newNote.content, { contentType: 'markdown' })
       }
     }
   } finally {
     // 延迟设为 false，确保所有的 update/watcher 已经消化完毕
     await nextTick()
-    isLoadingNote = false
   }
 }, { deep: true })
 
@@ -345,7 +362,7 @@ const editorExtensions = computed(() => [
   'OTableCell',
   'OTableHeader',
   'OTableWrapper',
-  'OBlockquote',
+  CustomBlockquote,
   'OCallout',
   'OCodeBlock',
   'OHorizontalRule',
@@ -368,51 +385,18 @@ const editorExtensions = computed(() => [
   CustomLink.configure({ openOnClick: true, HTMLAttributes: { rel: 'noopener noreferrer' } }),
 ])
 
-// 将 Markdown 表格内的 [ ] 或 [x] 任务标记临时转换成 HTML 任务列表结构，使 Tiptap 在 Markdown 表格 cell 中可以渲染复选框
-function convertTableTasksToHtml(md: string): string {
-  if (!md) return ''
-  const lines = md.split('\n')
-  const newLines = lines.map(line => {
-    const trimmed = line.trim()
-    if (trimmed.startsWith('|') && trimmed.endsWith('|') && trimmed.length > 2) {
-      const cells = line.split('|')
-      const newCells = cells.map((cell, idx) => {
-        if (idx === 0 || idx === cells.length - 1) return cell
-        const match = cell.match(/^(\s*)(?:[-*+]\s+)?\[([\sxX])\]\s*(.*)$/)
-        if (match) {
-          const space = match[1]
-          const checked = match[2].toLowerCase() === 'x'
-          const content = match[3].trim()
-          return `${space}<ul data-type="taskList"><li data-checked="${checked}">${content}</li></ul>`
-        }
-        return cell
-      })
-      return newCells.join('|')
-    }
-    return line
-  })
-  return newLines.join('\n')
-}
-
 function onEditorCreate(instance: any) {
   editorRef.value = instance
   startTagScan()
-  
+
   // 显式以 markdown 格式加载初始内容，防止首屏把 markdown 误当作 html 解析导致排版完全乱掉
   if (props.existingNote?.content) {
-    isLoadingNote = true
-    try {
-      instance.commands.setContent(convertTableTasksToHtml(props.existingNote.content), { contentType: 'markdown' })
-    } finally {
-      isLoadingNote = false
-    }
+    instance.commands.setContent(props.existingNote.content, { contentType: 'markdown' })
   }
 }
 
 function onEditorUpdate() {
-  if (!isLoadingNote) {
-    scheduleSave()
-  }
+  // 手动保存模式：编辑时不触发自动保存
 }
 
 
@@ -448,7 +432,7 @@ function execCmd(cmd: string, value?: string) {
     case 'underline': chain.toggleUnderline().run(); break
     case 'strike': chain.toggleStrike().run(); break
     case 'code': chain.toggleCode().run(); break
-    case 'heading': chain.toggleHeading({ level: Number(value) as 1|2|3|4|5|6 }).run(); break
+    case 'heading': chain.toggleHeading({ level: Number(value) as 1 | 2 | 3 | 4 | 5 | 6 }).run(); break
     case 'bulletList': ed.chain().focus().toggleBulletList().run(); break
     case 'orderedList': ed.chain().focus().toggleOrderedList().run(); break
     case 'taskList': ed.chain().focus().toggleTaskList().run(); break
@@ -472,20 +456,9 @@ function execCmd(cmd: string, value?: string) {
   activePopover.value = null
 }
 
-// ── 自动保存 ──
-function scheduleSave() {
-  if (isLoadingNote) return
-  if (saveTimer) clearTimeout(saveTimer)
-  saveTimer = setTimeout(() => {
-    if (!isLoadingNote) {
-      doSave(false) // 自动保存，不生成快照
-    }
-  }, 1000)
-}
-
 async function doSave(createVersion = false) {
   const md = editorRef.value?.getMarkdown() ?? ''
-  
+
   saving.value = true
   syncTags()
   mergeAllInlineTags()
@@ -526,17 +499,9 @@ async function doSave(createVersion = false) {
   saving.value = false
 }
 
-// 标题回车或按键
-function handleKeydown(e: KeyboardEvent) {
-  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-    e.preventDefault()
-    doSave(true) // 手动保存并创建版本
-  }
-}
-
-// 监听标题和标签输入的改变来触发自动保存，内容改变由 @update 侦测
+// 监听标题和标签输入的改变，不再触发自动保存
 watch([title, tagInput], () => {
-  if (!isLoadingNote) scheduleSave()
+  // 手动保存模式：标题与标签改变时不触发自动保存
 })
 
 async function copyNoteId() {
@@ -610,72 +575,43 @@ onBeforeUnmount(() => {
       <div class="layout-body">
         <!-- Editor Content Area (大滚动容器，内含标题和编辑器作为整体滚动) -->
         <section class="layout-content">
-          <input
-            v-model="title"
-            class="editor-title-input"
-            placeholder="请在这里输入标题"
-            @keydown="handleKeydown"
-          />
-          <YiiEditor
-            ref="yiiEditor"
-            class="editor-yiieditor"
-            :content="props.existingNote?.content ?? ''"
-            :extensions="editorExtensions"
-            :dark-mode="isDark"
-            :show-main-menu="false"
-            :main-menu="defaultMenu"
-            :show-bubble-menu="true"
-            :show-floating-menu="true"
-            :show-side-menu="true"
-            :bubble-menu="bubbleMenu"
-            :floating-menu="floatingMenu"
-            page-view="full"
-            locale="zh-CN"
-            @contextmenu="handleEditorContextMenu"
-            @create="onEditorCreate"
-            @update="onEditorUpdate"
-          />
+          <input v-model="title" class="editor-title-input" placeholder="请在这里输入标题" />
+          <YiiEditor ref="yiiEditor" class="editor-yiieditor" :content="''"
+            :extensions="editorExtensions" :dark-mode="isDark" :show-main-menu="false" :main-menu="defaultMenu"
+            :show-bubble-menu="true" :show-floating-menu="true" :show-side-menu="true" :bubble-menu="bubbleMenu"
+            :floating-menu="floatingMenu" page-view="full" locale="zh-CN" @contextmenu="handleEditorContextMenu"
+            @create="onEditorCreate" @update="onEditorUpdate" />
         </section>
       </div>
     </div>
 
     <!-- Slash Triggered Dialog Menu -->
-    <SlashCommandMenu
-      :visible="slashMenuVisible"
-      :editorRect="slashMenuRect"
-      @close="hideSlashMenu"
-      @insertLink="slashInsertLink"
-      @command="slashExecuteCommand"
-    />
+    <SlashCommandMenu :visible="slashMenuVisible" :editorRect="slashMenuRect" @close="hideSlashMenu"
+      @insertLink="slashInsertLink" @command="slashExecuteCommand" />
 
     <!-- Footer Bar: 重新融合标签、字数和操作按钮 -->
     <div class="editor-footer">
       <div class="tag-area">
-        <input
-          v-model="tagInput"
-          class="tag-input"
-          placeholder="添加标签, 用逗号分隔"
-        />
+        <input v-model="tagInput" class="tag-input" placeholder="添加标签, 用逗号分隔" />
         <div v-if="inlineTags.length" class="inline-tags">
           <span class="inline-tags-hint">提取的内联标签:</span>
-          <span
-            v-for="t in inlineTags.filter(x => !tags.includes(x))" :key="t"
-            class="inline-tag-chip"
-            @click="mergeInlineTag(t)"
-            title="点击添加到标签栏"
-          >#{{ t }} +</span>
+          <span v-for="t in inlineTags.filter(x => !tags.includes(x))" :key="t" class="inline-tag-chip"
+            @click="mergeInlineTag(t)" title="点击添加到标签栏">#{{ t }} +</span>
         </div>
       </div>
-      
+
       <div class="footer-actions">
-        <span v-if="lastSaved" class="saved-hint">已自动保存 {{ lastSaved }}</span>
+        <span v-if="lastSaved" class="saved-hint">已保存 {{ lastSaved }}</span>
         <span v-if="saving" class="saving-hint">保存中...</span>
-        
+        <button class="footer-btn pri" @click="doSave(false)" title="手动保存当前修改 (Ctrl+S)">
+          💾 保存
+        </button>
         <button class="footer-btn" @click="copyNoteId" title="复制局域网分享链接">
           🔗 分享
         </button>
-        <button class="footer-btn pri" @click="doSave(true)" title="手动生成一个版本快照 Ctrl+Enter">
-          💾 快照
+
+        <button class="footer-btn" @click="doSave(true)" title="生成一个版本历史快照 (Ctrl+Enter)">
+          📸 快照
         </button>
         <button class="footer-btn" @click="store.openVersionHistory()" title="查看历史修改版本">
           ⏳ 历史
@@ -691,22 +627,23 @@ onBeforeUnmount(() => {
       <div class="ctx-menu" :style="ctxStyle" @click.stop>
         <div class="ctx-item" @click="execCmd('undo')" title="撤销"><span class="ctx-icon">↩</span> 撤销</div>
         <div class="ctx-item" @click="execCmd('redo')" title="重做"><span class="ctx-icon">↪</span> 重做</div>
-        
+
         <div class="ctx-divider"></div>
         <div class="ctx-item" @click="doCut"><span class="ctx-icon">✂</span> 剪切</div>
-        <div class="ctx-item" @click="doCopy"><span class="ctx-icon"><svg viewBox="0 0 1024 1024" width="12" height="12" fill="currentColor"><path d="M281.6 32h374.464a70.4 70.4 0 0 1 49.792 20.608l201.536 201.536a70.4 70.4 0 0 1 20.608 49.792V806.4a57.6 57.6 0 0 1-57.6 57.6H281.6a57.6 57.6 0 0 1-57.6-57.6V89.6a57.6 57.6 0 0 1 57.6-57.6z m19.2 768h550.4a12.8 12.8 0 0 0 12.8-12.8V303.936a6.4 6.4 0 0 0-0.512-2.496l-1.344-2.048-201.536-201.536a6.4 6.4 0 0 0-4.48-1.856H300.8a12.8 12.8 0 0 0-12.8 12.8v678.4c0 7.04 5.76 12.8 12.8 12.8z"/><path d="M256 160v64H172.8a12.8 12.8 0 0 0-12.8 12.8v678.4c0 7.04 5.76 12.8 12.8 12.8h550.4a12.8 12.8 0 0 0 12.8-12.8V832h64v102.4a57.6 57.6 0 0 1-57.6 57.6H153.6a57.6 57.6 0 0 1-57.6-57.6V217.6a57.6 57.6 0 0 1 57.6-57.6H256zM672 64v211.2c0 7.04 5.76 12.8 12.8 12.8H896v64h-243.2a44.8 44.8 0 0 1-44.8-44.8V64h64z"/></svg></span> 复制</div>
+        <div class="ctx-item" @click="doCopy"><span class="ctx-icon"><svg viewBox="0 0 1024 1024" width="12" height="12"
+              fill="currentColor">
+              <path
+                d="M281.6 32h374.464a70.4 70.4 0 0 1 49.792 20.608l201.536 201.536a70.4 70.4 0 0 1 20.608 49.792V806.4a57.6 57.6 0 0 1-57.6 57.6H281.6a57.6 57.6 0 0 1-57.6-57.6V89.6a57.6 57.6 0 0 1 57.6-57.6z m19.2 768h550.4a12.8 12.8 0 0 0 12.8-12.8V303.936a6.4 6.4 0 0 0-0.512-2.496l-1.344-2.048-201.536-201.536a6.4 6.4 0 0 0-4.48-1.856H300.8a12.8 12.8 0 0 0-12.8 12.8v678.4c0 7.04 5.76 12.8 12.8 12.8z" />
+              <path
+                d="M256 160v64H172.8a12.8 12.8 0 0 0-12.8 12.8v678.4c0 7.04 5.76 12.8 12.8 12.8h550.4a12.8 12.8 0 0 0 12.8-12.8V832h64v102.4a57.6 57.6 0 0 1-57.6 57.6H153.6a57.6 57.6 0 0 1-57.6-57.6V217.6a57.6 57.6 0 0 1 57.6-57.6H256zM672 64v211.2c0 7.04 5.76 12.8 12.8 12.8H896v64h-243.2a44.8 44.8 0 0 1-44.8-44.8V64h64z" />
+            </svg></span> 复制</div>
         <div class="ctx-item" @click="doPaste"><span class="ctx-icon">📌</span> 粘贴</div>
-        
+
         <!-- Condition 1: Command Send to Terminal -->
         <template v-if="hasSelection || codeBlockText !== null">
           <div class="ctx-divider"></div>
           <div class="ctx-title">{{ hasSelection ? '发送选中文本至终端' : '运行当前代码块' }}</div>
-          <div
-            v-for="t in runningTerminals"
-            :key="t.processId"
-            class="ctx-item"
-            @click="execInTerminal(t.processId)"
-          >
+          <div v-for="t in runningTerminals" :key="t.processId" class="ctx-item" @click="execInTerminal(t.processId)">
             <span class="ctx-icon">▸</span>
             {{ t.name }}
           </div>
@@ -737,7 +674,8 @@ onBeforeUnmount(() => {
   flex-direction: column;
   flex: 1;
   min-height: 0;
-  padding: 0px; /* 移除外围内边距，使设计更加极简 */
+  padding: 0px;
+  /* 移除外围内边距，使设计更加极简 */
   overflow: hidden;
   background: var(--jc-bg-app, #1e1e1e);
 
@@ -818,6 +756,7 @@ onBeforeUnmount(() => {
     color: #ffffff;
     background: var(--jc-color-accent, #8a58ff);
     border-color: transparent;
+
     &:hover {
       background: color-mix(in srgb, var(--jc-color-accent, #8a58ff) 80%, white);
       box-shadow: 0 0 8px rgba(138, 88, 255, 0.4);
@@ -850,7 +789,8 @@ onBeforeUnmount(() => {
 .layout-content {
   flex: 1;
   min-height: 0;
-  overflow-y: auto; /* 编辑器和标题共享此大滚动条 */
+  overflow-y: auto;
+  /* 编辑器和标题共享此大滚动条 */
   background: var(--jc-bg-app, #1e1e1e);
 }
 
@@ -866,7 +806,7 @@ onBeforeUnmount(() => {
   font-weight: 700;
   outline: none;
   padding: 0;
-  
+
   &::placeholder {
     color: var(--jc-text-secondary, #858585);
     opacity: 0.4;
@@ -912,17 +852,57 @@ onBeforeUnmount(() => {
   line-height: 1.8;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
 
-  h1 { font-size: 1.85em; font-weight: 700; color: var(--jc-text-highlight, #ffffff); margin: 0.8em 0 0.4em; border-bottom: 1px solid var(--jc-border-default, #3e3e42); padding-bottom: 0.25em; }
-  h2 { font-size: 1.5em; font-weight: 600; color: var(--jc-text-highlight, #ffffff); margin: 0.7em 0 0.3em; }
-  h3 { font-size: 1.25em; font-weight: 600; color: var(--jc-text-highlight, #ffffff); margin: 0.6em 0 0.25em; }
-  h4 { font-size: 1.1em; font-weight: 600; color: var(--jc-text-highlight, #ffffff); margin: 0.5em 0 0.2em; }
+  h1 {
+    font-size: 1.85em;
+    font-weight: 700;
+    color: var(--jc-text-highlight, #ffffff);
+    margin: 0.8em 0 0.4em;
+    border-bottom: 1px solid var(--jc-border-default, #3e3e42);
+    padding-bottom: 0.25em;
+  }
 
-  p { margin: 0.6em 0; }
-  strong { font-weight: 700; color: var(--jc-text-highlight, #ffffff); }
-  em { font-style: italic; }
-  u { text-decoration: underline; }
-  s { text-decoration: line-through; }
-  
+  h2 {
+    font-size: 1.5em;
+    font-weight: 600;
+    color: var(--jc-text-highlight, #ffffff);
+    margin: 0.7em 0 0.3em;
+  }
+
+  h3 {
+    font-size: 1.25em;
+    font-weight: 600;
+    color: var(--jc-text-highlight, #ffffff);
+    margin: 0.6em 0 0.25em;
+  }
+
+  h4 {
+    font-size: 1.1em;
+    font-weight: 600;
+    color: var(--jc-text-highlight, #ffffff);
+    margin: 0.5em 0 0.2em;
+  }
+
+  p {
+    margin: 0.6em 0;
+  }
+
+  strong {
+    font-weight: 700;
+    color: var(--jc-text-highlight, #ffffff);
+  }
+
+  em {
+    font-style: italic;
+  }
+
+  u {
+    text-decoration: underline;
+  }
+
+  s {
+    text-decoration: line-through;
+  }
+
   code {
     background: var(--jc-bg-input, #3c3c3c);
     color: var(--jc-color-success, #4ec9b0);
@@ -931,7 +911,7 @@ onBeforeUnmount(() => {
     font-family: 'Cascadia Code', Consolas, monospace;
     font-size: 0.9em;
   }
-  
+
   mark {
     background: rgba(215, 186, 125, 0.25);
     color: var(--jc-text-highlight, #ffffff);
@@ -955,7 +935,7 @@ onBeforeUnmount(() => {
     padding: 16px;
     margin: 1em 0;
     overflow-x: auto;
-    
+
     code {
       background: none;
       padding: 0;
@@ -978,8 +958,9 @@ onBeforeUnmount(() => {
     width: auto !important;
     max-width: 100%;
     table-layout: fixed;
-    
-    td, th {
+
+    td,
+    th {
       min-width: 100px;
       border: 1px solid var(--jc-border-default, #3e3e42);
       padding: 8px 12px;
@@ -987,7 +968,7 @@ onBeforeUnmount(() => {
       background: var(--jc-bg-elevated, #252526);
       color: var(--jc-text-primary, #cccccc);
     }
-    
+
     th {
       font-weight: 600;
       background: var(--jc-bg-selected, #37373d);
@@ -999,7 +980,10 @@ onBeforeUnmount(() => {
     color: var(--jc-color-accent, #8a58ff);
     text-decoration: underline;
     cursor: pointer;
-    &:hover { color: color-mix(in srgb, var(--jc-color-accent, #8a58ff) 80%, white); }
+
+    &:hover {
+      color: color-mix(in srgb, var(--jc-color-accent, #8a58ff) 80%, white);
+    }
   }
 
   /* 笔记内链 span 样式设计 */
@@ -1013,13 +997,13 @@ onBeforeUnmount(() => {
     border-radius: 3px;
     cursor: pointer;
     transition: all 0.2s ease;
-    
+
     &:hover {
       background: rgba(88, 166, 255, 0.15);
       border-bottom-style: solid;
       color: #79c0ff;
     }
-    
+
     &::before {
       content: '📄 ';
       font-size: 0.9em;
@@ -1038,18 +1022,23 @@ onBeforeUnmount(() => {
     border-collapse: collapse;
     margin: 1em 0;
     width: 100%;
-    
-    th, td {
+
+    th,
+    td {
       border: 1px solid var(--jc-border-strong, #555555);
       padding: 8px 12px;
       min-width: 60px;
     }
+
     th {
       background: var(--jc-bg-elevated, #252526);
       font-weight: 600;
       color: var(--jc-text-highlight, #ffffff);
     }
-    td { background: var(--jc-bg-app, #1e1e1e); }
+
+    td {
+      background: var(--jc-bg-app, #1e1e1e);
+    }
   }
 }
 
@@ -1114,7 +1103,7 @@ onBeforeUnmount(() => {
   color: #4ec9b0;
   cursor: pointer;
   transition: background 0.15s, transform 0.1s;
-  
+
   &:hover {
     background: rgba(78, 201, 176, 0.22);
     transform: translateY(-1px);
@@ -1128,7 +1117,8 @@ onBeforeUnmount(() => {
 }
 
 /* 屏蔽 YIITAP 内部类 editor-content 的 padding，防止边缘挤压 */
-:deep(.yii-editor-content), :deep(.editor-content) {
+:deep(.yii-editor-content),
+:deep(.editor-content) {
   padding: 0 !important;
 }
 
@@ -1164,6 +1154,7 @@ onBeforeUnmount(() => {
     color: #ffffff;
     background: var(--jc-color-accent, #8a58ff);
     border-color: transparent;
+
     &:hover {
       background: color-mix(in srgb, var(--jc-color-accent, #8a58ff) 85%, white);
     }
@@ -1172,8 +1163,11 @@ onBeforeUnmount(() => {
 
 /* Custom Context Menu Layout */
 .ctx-overlay {
-  position: fixed; inset: 0; z-index: 10000;
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
 }
+
 .ctx-menu {
   position: fixed;
   background: var(--jc-bg-elevated, #252526);
@@ -1181,8 +1175,9 @@ onBeforeUnmount(() => {
   border-radius: 6px;
   padding: 4px 0;
   min-width: 170px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
+
 .ctx-title {
   padding: 4px 12px;
   font-size: 10px;
@@ -1193,6 +1188,7 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid var(--jc-border-default, #3e3e42);
   margin-bottom: 2px;
 }
+
 .ctx-item {
   display: flex;
   align-items: center;
@@ -1203,17 +1199,19 @@ onBeforeUnmount(() => {
   color: var(--jc-text-primary, #cccccc);
   white-space: nowrap;
   transition: all 0.1s;
-  
+
   &:hover {
     background: var(--jc-bg-selected, #37373d);
     color: var(--jc-color-accent, #8a58ff);
   }
 }
+
 .ctx-divider {
   height: 1px;
   background: var(--jc-border-default, #3e3e42);
   margin: 4px 8px;
 }
+
 .ctx-icon {
   color: var(--jc-color-success, #4ec9b0);
   font-weight: bold;
@@ -1221,8 +1219,10 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   width: 14px;
-  
-  &.plus { color: var(--jc-color-accent, #8a58ff); }
+
+  &.plus {
+    color: var(--jc-color-accent, #8a58ff);
+  }
 }
 
 /* 强制代码块及绘图工具栏水平一行排开，使用最高特异性选择器覆盖层级 column 限制 */
@@ -1233,6 +1233,7 @@ onBeforeUnmount(() => {
   align-items: center !important;
   justify-content: space-between !important;
 }
+
 :deep(.editor-yiieditor .o-code-block-view .code-block-toolbar .wrap) {
   display: flex !important;
   flex-direction: row !important;
