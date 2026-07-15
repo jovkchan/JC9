@@ -37,6 +37,7 @@
 // ══════════════════════════════════════════════════════════════
 
 // 1. 代码类型与操作图标布局在一行 ( nowrap 限制与 flex-direction: row 强制)
+.editor-yiieditor .o-code-block-view .code-block-toolbar,
 .o-code-block-view .code-block-toolbar {
   flex-direction: row !important;
   flex-wrap: nowrap !important;
@@ -44,6 +45,7 @@
   align-items: center !important;
   justify-content: space-between !important;
 }
+.editor-yiieditor .o-code-block-view .code-block-toolbar .wrap,
 .o-code-block-view .code-block-toolbar .wrap {
   flex-direction: row !important;
   flex-wrap: nowrap !important;
