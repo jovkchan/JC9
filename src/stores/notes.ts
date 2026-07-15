@@ -17,10 +17,28 @@ export const useNotesStore = defineStore('notes', () => {
   const searchQuery = ref('')
   const filterDate = ref<string | null>(null)
   const selectedTag = ref<string | null>(null)
-  const showSettings = ref(false)
   const showSearchPanel = ref(false)
-  /** 在右侧内容栏显示 NoteFeedView（标签/星标点击时打开） */
-  const showNoteFeed = ref(false)
+
+  /** 关闭标签时自动保存（直接从 localStorage 读，确保实时生效） */
+  function getSaveOnClose(): boolean {
+    return localStorage.getItem('notes-save-on-close') === 'true'
+  }
+
+  /** 编辑器未保存的内容草稿（用于关闭时自动保存） */
+  interface NoteDraft {
+    title: string
+    content: string
+    tags: string[]
+  }
+  const noteContentDrafts = ref<Record<string, NoteDraft>>({})
+
+  function updateNoteDraft(id: string, draft: NoteDraft) {
+    noteContentDrafts.value[id] = draft
+  }
+
+  function clearNoteDraft(id: string) {
+    delete noteContentDrafts.value[id]
+  }
 
   // ── Groups ──
   const groups = ref<NoteGroup[]>([])
@@ -408,7 +426,49 @@ export const useNotesStore = defineStore('notes', () => {
     activeNoteTabId.value = noteId
   }
 
-  function closeNoteTab(id: string) {
+  async function closeNoteTab(id: string) {
+    // 关闭标签时自动保存草稿（若开启偏好）
+    if (getSaveOnClose() && noteContentDrafts.value[id]) {
+      const draft = noteContentDrafts.value[id]
+      const existing = notes.value.find(n => n.id === id)
+      if (existing) {
+        const note: Note = {
+          ...existing,
+          title: draft.title || '无标题',
+          content: draft.content,
+          tags: draft.tags,
+          updatedAt: new Date().toISOString(),
+        }
+        try {
+          await saveNote(note, false)
+        } catch (e) {
+          console.error('关闭标签自动保存失败:', e)
+        }
+      } else {
+        // 新建但未保存的笔记
+        try {
+          const note = await createNote({
+            title: draft.title || '无标题',
+            content: draft.content,
+            format: 'markdown',
+            tags: draft.tags,
+            groupId: selectedGroupId.value,
+            visibility: 'PRIVATE',
+          })
+          if (note) {
+            // 更新 tab id 为实际 id
+            const tabIdx = noteTabs.value.findIndex(t => t.id === id)
+            if (tabIdx >= 0) noteTabs.value[tabIdx].id = note.id
+            // 更新后续操作使用新 id
+            id = note.id
+          }
+        } catch (e) {
+          console.error('关闭标签自动创建保存失败:', e)
+        }
+      }
+    }
+    clearNoteDraft(id)
+
     const idx = noteTabs.value.findIndex(t => t.id === id)
     if (idx >= 0) noteTabs.value.splice(idx, 1)
     if (activeNoteTabId.value === id) {
@@ -515,7 +575,7 @@ export const useNotesStore = defineStore('notes', () => {
 
   return {
     // Filter States
-    listTab, searchQuery, filterDate, selectedTag, showSettings, showSearchPanel, showNoteFeed,
+    listTab, searchQuery, filterDate, selectedTag, showSearchPanel,
     // Groups
     groups, selectedGroupId, groupTree,
     loadGroups, addGroup, updateGroup, removeGroup, getGroupPath,
@@ -526,6 +586,8 @@ export const useNotesStore = defineStore('notes', () => {
     searchNotes, togglePin, toggleArchive, copyContent,
     // Editor tabs
     noteTabs, activeNoteTabId, openNoteTab, closeNoteTab,
+    // Draft (close-to-save)
+    getSaveOnClose, noteContentDrafts, updateNoteDraft, clearNoteDraft,
     // Version history
     noteVersions, showVersionHistory, previewVersionId, previewVersionData,
     loadNoteVersions, openVersionHistory, closeVersionHistory,

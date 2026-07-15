@@ -51,6 +51,7 @@ const activeTab = ref<'general' | 'ai' | 'ai-roles' | 'backup' | 'skills' | 'com
 // ── General settings ──
 const defaultFormat = ref<'markdown' | 'plain'>('markdown')
 const defaultVisibility = ref<'PRIVATE' | 'PUBLIC'>('PRIVATE')
+const saveOnClose = ref(localStorage.getItem('notes-save-on-close') === 'true')
 
 // ── AI 模型配置 ──
 interface ModelConfig {
@@ -542,6 +543,7 @@ async function saveAllToJson() {
 async function saveSettings() {
   localStorage.setItem('notes-default-format', defaultFormat.value)
   localStorage.setItem('notes-default-visibility', defaultVisibility.value)
+  localStorage.setItem('notes-save-on-close', String(saveOnClose.value))
   localStorage.setItem('notes-ai-models', JSON.stringify(modelConfigs.value))
   saveAllRoles(rolesList.value)
   const first = modelConfigs.value[0]
@@ -563,7 +565,7 @@ async function saveSettings() {
   await saveAllToJson()
   status.pushMessage('设置保存成功', 'success')
   // 行内反馈
-  saveFeedback.value = '✅ 已保存'
+  saveFeedback.value = '已保存'
   setTimeout(() => { saveFeedback.value = '' }, 2000)
 }
 
@@ -577,6 +579,7 @@ function handleMcpOverlayClick(e: MouseEvent) { if (e.target === e.currentTarget
 onMounted(() => {
   defaultFormat.value = (localStorage.getItem('notes-default-format') as any) || 'markdown'
   defaultVisibility.value = (localStorage.getItem('notes-default-visibility') as any) || 'PRIVATE'
+  saveOnClose.value = localStorage.getItem('notes-save-on-close') === 'true'
   const saved = localStorage.getItem('notes-ai-models')
   if (saved) { try { modelConfigs.value = JSON.parse(saved) } catch {} }
   if (modelConfigs.value.length === 0) {
@@ -742,7 +745,10 @@ async function compressMemories() {
   <div class="settings-window">
     <!-- macOS Titlebar -->
     <div class="settings-titlebar" data-tauri-drag-region>
-      <div class="stb-spacer"></div>
+      <div class="stb-spacer">  <div class="settings-header">
+      <span class="settings-title">设置</span>
+      <span class="settings-subtitle">JC9 系统配置</span>
+    </div></div>
       <div class="stb-controls">
         <button class="stb-btn" @click="doMinimize" title="最小化">
           <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 13h10"/></svg>
@@ -758,10 +764,7 @@ async function compressMemories() {
     </div>
 
     <!-- Header -->
-    <div class="settings-header">
-      <span class="settings-title">设置</span>
-      <span class="settings-subtitle">JC9 系统配置</span>
-    </div>
+  
 
     <!-- Body: sidebar + content -->
     <div class="settings-body">
@@ -797,6 +800,16 @@ async function compressMemories() {
               <option value="PUBLIC">PUBLIC (公开)</option>
             </select>
             <span class="help-text">第一期完全本地化下默认均为 PRIVATE 级别</span>
+          </div>
+          <div class="form-group">
+            <label class="toggle-row">
+              <span>关闭标签时自动保存笔记</span>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="saveOnClose" />
+                <span class="toggle-slider"></span>
+              </label>
+            </label>
+            <span class="help-text">开启后，点击标签栏 ✕ 按钮或右键关闭标签时自动保存当前编辑内容</span>
           </div>
         </div>
 
@@ -1280,9 +1293,7 @@ async function compressMemories() {
 
     <!-- Footer -->
     <div class="settings-footer">
-      <button class="footer-btn-cancel" @click="doClose">取消</button>
-      <button class="footer-btn-save" @click="saveSettings">保存配置</button>
-      <span v-if="saveFeedback" class="save-feedback">{{ saveFeedback }}</span>
+      <button class="footer-btn-save" @click="saveSettings">{{ saveFeedback || '保存配置' }}</button>
     </div>
   </div>
 </template>
@@ -1311,7 +1322,7 @@ async function compressMemories() {
 /* Header */
 .settings-header {
   padding: 10px 16px 8px;
-  .settings-title { font-size: 16px; font-weight: 700; color: var(--jc-color-accent); }
+  .settings-title { font-size: 16px; font-weight: 700; }
   .settings-subtitle { font-size: 11px; color: var(--jc-text-secondary); margin-left: 8px; }
 }
 
@@ -1343,6 +1354,44 @@ async function compressMemories() {
 }
 .help-text { font-size: 10px; color: var(--jc-text-secondary); opacity: 0.8; }
 .form-row { display: flex; gap: 8px; }
+
+/* Toggle switch */
+.form-group .toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--jc-text-primary);
+  cursor: pointer;
+}
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+  flex-shrink: 0;
+  cursor: pointer;
+  input { opacity: 0; width: 0; height: 0; }
+  .toggle-slider {
+    position: absolute; inset: 0;
+    background: var(--jc-border-default, #444);
+    border-radius: 20px;
+    transition: background 0.2s;
+    &::before {
+      content: '';
+      position: absolute;
+      width: 16px; height: 16px;
+      left: 2px; bottom: 2px;
+      background: #fff;
+      border-radius: 50%;
+      transition: transform 0.2s;
+    }
+  }
+  input:checked + .toggle-slider { background: var(--jc-color-accent, #58a6ff); }
+  input:checked + .toggle-slider::before { transform: translateX(16px); }
+}
 .form-half { flex: 1; }
 .form-textarea { background: var(--jc-bg-input); border: 1px solid var(--jc-border-default); color: var(--jc-text-primary); font-size: 11px; padding: 6px 8px; border-radius: 4px; outline: none; resize: vertical; font-family: monospace; &:focus { border-color: var(--jc-color-accent); } }
 .form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }

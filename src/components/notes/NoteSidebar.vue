@@ -364,8 +364,6 @@ const tagCloud = computed(() => {
 function selectTag(tag: string) {
   selectedTag.value = selectedTag.value === tag ? null : tag
   listTab.value = 'tags'
-  // 在右侧内容栏打开 NoteFeedView
-  store.showNoteFeed = true
 }
 
 onMounted(() => document.addEventListener('click', closeCtx))
@@ -407,14 +405,15 @@ onMounted(() => document.addEventListener('click', closeGroupCtx))
           <path d="M6.67 7.33v4M9.33 7.33v4" />
         </svg>
       </button>
+
     </div>
 
     <!-- Tabs -->
     <div class="ns-tabs">
       <div :class="['ns-tab', { on: listTab === 'notes' }]" @click="listTab = 'notes'">笔记</div>
       <div :class="['ns-tab', { on: listTab === 'tags' }]" @click="listTab = 'tags'">标签</div>
-      <div :class="['ns-tab', { on: listTab === 'starred' }]" @click="listTab = 'starred'; store.showNoteFeed = true">星标</div>
-      <div :class="['ns-tab', { on: listTab === 'archived' }]" @click="listTab = 'archived'; store.showNoteFeed = true">归档</div>
+      <div :class="['ns-tab', { on: listTab === 'starred' }]" @click="listTab = 'starred'">星标</div>
+      <div :class="['ns-tab', { on: listTab === 'archived' }]" @click="listTab = 'archived'">归档</div>
     </div>
 
     <div v-if="filterDate" class="ns-filter-hint">日期: {{ filterDate }} <button class="ns-filter-clr"
@@ -427,6 +426,21 @@ onMounted(() => document.addEventListener('click', closeGroupCtx))
         <span class="ns-tag-name"># {{ tag }}</span><span class="ns-tag-count">{{ count }}</span>
       </div>
       <div v-if="tagCloud.length === 0" class="ns-empty">暂无标签</div>
+    </div>
+
+    <!-- Tag filtered notes list -->
+    <div v-if="listTab === 'tags' && selectedTag" class="ns-tree">
+      <div class="ns-filter-hint">
+        # {{ selectedTag }}
+        <button class="ns-filter-clr" @click="selectedTag = null">✕</button>
+      </div>
+      <div v-if="store.filteredNotes.length === 0" class="ns-empty">暂无匹配笔记</div>
+      <div v-for="n in store.filteredNotes" :key="n.id" class="ns-item note"
+        :class="{ sel: store.selectedNoteId === n.id, pinned: n.isPinned }"
+        @click="handleOpenNote(n.id)" @contextmenu="openCtx($event, n)" :title="n.title">
+        <span class="ns-dot" :class="[n.content ? 'has-content' : 'empty', readNoteIds.has(n.id) ? 'read' : '']"></span>
+        <span class="ns-label">{{ n.title || '无标题' }}</span>
+      </div>
     </div>
 
     <!-- Trash view -->
@@ -484,6 +498,7 @@ onMounted(() => document.addEventListener('click', closeGroupCtx))
 
     <!-- Starred list (flat, no groups) -->
     <div v-show="listTab === 'starred'" class="ns-tree">
+      <div class="ns-filter-hint">⭐ 星标 <button class="ns-filter-clr" @click="listTab = 'notes'">✕</button></div>
       <div v-if="starredNotes.length === 0" class="ns-empty">暂无星标笔记</div>
       <div v-for="n in starredNotes" :key="n.id" class="ns-item note" :class="{ sel: store.selectedNoteId === n.id }"
         @click="handleOpenNote(n.id)" @contextmenu="openCtx($event, n)" :title="n.title">
@@ -493,6 +508,7 @@ onMounted(() => document.addEventListener('click', closeGroupCtx))
 
     <!-- Archived list (flat) -->
     <div v-show="listTab === 'archived'" class="ns-tree">
+      <div class="ns-filter-hint">📁 归档 <button class="ns-filter-clr" @click="listTab = 'notes'">✕</button></div>
       <div v-if="store.notes.filter(n => !n.isDeleted && n.isArchived).length === 0" class="ns-empty">暂无归档笔记</div>
       <div v-for="n in store.notes.filter(x => !x.isDeleted && x.isArchived)" :key="n.id" class="ns-item note"
         :class="{ sel: store.selectedNoteId === n.id }" @click="handleOpenNote(n.id)" @contextmenu="openCtx($event, n)"

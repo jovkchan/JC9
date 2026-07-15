@@ -681,7 +681,7 @@ onUnmounted(() => {
 
 <template>
   <aside class="side" :class="{ 'no-tabs': !!forcedTab }">
-    <div class="side-head"></div>
+   
     <div v-if="!forcedTab" class="tabs" role="tablist">
       <div :class="['tab',{on:activeTab==='projects'}]" role="tab" :aria-selected="activeTab==='projects'" tabindex="0" @click="switchTab('projects')" @keyup.enter="switchTab('projects')">项目</div>
       <div :class="['tab',{on:activeTab==='workflows'}]" role="tab" :aria-selected="activeTab==='workflows'" tabindex="0" @click="switchTab('workflows')" @keyup.enter="switchTab('workflows')">快捷</div>
@@ -981,8 +981,8 @@ onUnmounted(() => {
 
 <style scoped lang="scss">
 @use "@/styles/mixins.scss" as *;
-.side { width:210px; min-width:210px; height:100%; background:var(--jc-bg-panel); display:flex; flex-direction:column; overflow:hidden; user-select:none; }
-/* panel-only 模式：宽度自适应，无 tab 栏间距 */
+.side { width:100%; min-width:0; height:100%; background:var(--jc-bg-panel); display:flex; flex-direction:column; overflow:hidden; user-select:none; }
+/* panel-only 模式：无 tab 栏间距（已由父容器控制宽度，保留类名向前兼容） */
 .side.no-tabs { width:100%; min-width:0; }
 .side-head { height:2px; background:var(--jc-color-accent); }
 .tabs { display:flex; }

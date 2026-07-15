@@ -21,8 +21,8 @@ const store = useProjectStore()
 
 <style scoped>
 .section-panel {
-  width: 280px;
-  min-width: 280px;
+  width: 100%;
+  height: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden;

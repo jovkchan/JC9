@@ -41,9 +41,7 @@ const CssUnits = defineAsyncComponent(() => import('@/components/tools/CssUnits.
 const SvgHelper = defineAsyncComponent(() => import('@/components/tools/SvgHelper.vue'))
 const IconGenerator = defineAsyncComponent(() => import('@/components/tools/IconGenerator.vue'))
 
-const NoteSettings = defineAsyncComponent(() => import('@/components/notes/NoteSettings.vue'))
 const VersionHistory = defineAsyncComponent(() => import('@/components/notes/VersionHistory.vue'))
-const NoteFeedView = defineAsyncComponent(() => import('@/components/notes/NoteFeedView.vue'))
 const AiHelper = defineAsyncComponent(() => import('@/components/tools/AiHelper.vue'))
 const FloatingSearch = defineAsyncComponent(() => import('@/components/notes/FloatingSearch.vue'))
 
@@ -441,12 +439,6 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- Note feed view（标签/星标/归档点击时打开） -->
-    <div v-if="notesStore.showNoteFeed" class="content" v-show="notesStore.showNoteFeed">
-      <div class="bar"><code class="cmdtext">{{ notesStore.selectedTag ? '# ' + notesStore.selectedTag : notesStore.listTab === 'starred' ? '⭐ 星标' : '📁 归档' }}</code></div>
-      <NoteFeedView />
-    </div>
-
     <!-- Memory detail content -->
     <div v-for="(t,i) in store.memoryTabs" :key="'memc'+t.id" class="content" v-show="showMemoryTabs&&store.activeTabType==='memory'&&i===store.activeMemoryIndex">
       <div class="bar">
@@ -458,7 +450,7 @@ onUnmounted(() => {
             <button class="btn pri" @click="saveMemoryTab(i)">保存</button>
           </template>
           <!-- 查看模式：编辑按钮 -->
-          <button v-else class="btn" @click="store.toggleMemoryEdit(i)">✏️ 编辑</button>
+          <button v-else class="btn" @click="store.toggleMemoryEdit(i)">编辑</button>
         </div>
       </div>
       <!-- 查看模式 -->
@@ -501,7 +493,7 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <div v-if="store.runningTabs.length===0&&store.docTabs.length===0&&store.toolTabs.length===0&&store.memoryTabs.length===0&&notesStore.noteTabs.length===0&&!notesStore.showNoteFeed" class="empty-or-feed" style="flex:1;display:flex">
+    <div v-if="store.runningTabs.length===0&&store.docTabs.length===0&&store.toolTabs.length===0&&store.memoryTabs.length===0&&notesStore.noteTabs.length===0" class="empty-or-feed" style="flex:1;display:flex">
       <div class="empty">从左侧面板选择功能开始使用</div>
     </div>
 
@@ -544,8 +536,6 @@ onUnmounted(() => {
     </Teleport>
 
     <!-- 笔记设置面板 -->
-    <NoteSettings :show="notesStore.showSettings" @close="notesStore.showSettings = false" />
-    
     <!-- 全局浮动搜索面板 -->
     <FloatingSearch />
   </div>

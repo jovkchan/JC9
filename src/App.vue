@@ -10,10 +10,11 @@ import TitleBar from '@/components/TitleBar.vue'
 import StatusBar from '@/components/StatusBar.vue'
 import IconNav from '@/components/nav/IconNav.vue'
 import SectionPanel from '@/components/sections/SectionPanel.vue'
+import SplitPanel from '@/components/SplitPanel.vue'
 
 // 动态载入次要大面板
 const AiAgentPanel = defineAsyncComponent(() => import('@/components/ai-agent/AiAgentPanel.vue'))
-const SettingsPanel = defineAsyncComponent(() => import('@/components/settings/SettingsPanel.vue'))
+import SettingsPanel from '@/components/settings/SettingsPanel.vue'
 const VersionDiffWindow = defineAsyncComponent(() => import('@/components/notes/VersionDiffWindow.vue'))
 const AiHelper = defineAsyncComponent(() => import('@/components/tools/AiHelper.vue'))
 const QuickNote = defineAsyncComponent(() => import('@/components/tools/QuickNote.vue'))
@@ -211,8 +212,12 @@ onUnmounted(() => {
     <template v-else>
       <div class="app-body">
         <IconNav />
-        <SectionPanel />
-        <MainPanel />
+        <SplitPanel storage-key="jc9-section-panel-width" :default-size="280" :min-size="180" :max-size="500">
+          <template #left>
+            <SectionPanel />
+          </template>
+          <MainPanel />
+        </SplitPanel>
       </div>
       <StatusBar />
     </template>

@@ -256,8 +256,17 @@ const emit = defineEmits<{
   cancel: []
 }>()
 
-const title = ref(props.existingNote?.title ?? '')
-const tagInput = ref(props.existingNote?.tags.join(', ') ?? '')
+/** 从草稿中恢复内容（切换标签页后重新打开时使用） */
+function getDraftForNote(noteId: string | null | undefined) {
+  if (!noteId) return null
+  return store.noteContentDrafts[noteId] ?? null
+}
+
+const noteIdForDraft = props.existingNote?.id ?? null
+const existingDraft = getDraftForNote(noteIdForDraft)
+
+const title = ref(existingDraft?.title ?? props.existingNote?.title ?? '')
+const tagInput = ref(existingDraft?.tags?.join(', ') ?? props.existingNote?.tags.join(', ') ?? '')
 const saving = ref(false)
 const lastSaved = ref('')
 const editNoteId = ref<string | null>(props.existingNote?.id ?? null)
@@ -393,10 +402,26 @@ function onEditorCreate(instance: any) {
   editorRef.value = instance
   startTagScan()
 
-  // 显式以 markdown 格式加载初始内容，防止首屏把 markdown 误当作 html 解析导致排版完全乱掉
-  if (props.existingNote?.content) {
+  // 优先从草稿恢复内容（切换标签页再返回时使用），其次从已有笔记加载
+  const draft = editNoteId.value ? getDraftForNote(editNoteId.value) : null
+  const contentToLoad = draft?.content ?? props.existingNote?.content ?? ''
+
+  if (contentToLoad) {
     try {
-      instance.commands.setContent(props.existingNote.content, { contentType: 'markdown' })
+      instance.commands.setContent(contentToLoad, { contentType: 'markdown' })
+      // 如果有草稿且存在已有笔记，同步草稿中的标题/标签到组件本地状态
+      if (draft && props.existingNote) {
+        if (draft.title && draft.title !== props.existingNote.title) {
+          title.value = draft.title
+        }
+        if (draft.tags?.length) {
+          const draftTagsStr = draft.tags.join(', ')
+          if (draftTagsStr !== props.existingNote.tags.join(', ')) {
+            tagInput.value = draftTagsStr
+            syncTags()
+          }
+        }
+      }
     } catch (e: any) {
       console.error("❌ 加载笔记 markdown 失败:", e)
       console.error("❌ 错误堆栈:", e.stack)
@@ -406,6 +431,20 @@ function onEditorCreate(instance: any) {
 
 function onEditorUpdate() {
   // 手动保存模式：编辑时不触发自动保存
+  // 但记录草稿以便关闭标签时自动保存
+  updateDraft()
+}
+
+/** 将当前编辑器内容写入 store 草稿（供关闭标签时自动保存使用） */
+function updateDraft() {
+  const noteId = editNoteId.value
+  const md = editorRef.value?.getMarkdown() ?? ''
+  // 新建笔记尚无 ID，用空字符串作 key
+  store.updateNoteDraft(noteId || '', {
+    title: title.value,
+    content: md,
+    tags: tags.value,
+  })
 }
 
 
@@ -509,8 +548,9 @@ async function doSave(createVersion = false) {
 }
 
 // 监听标题和标签输入的改变，不再触发自动保存
+// 但记录草稿以便关闭标签时自动保存
 watch([title, tagInput], () => {
-  // 手动保存模式：标题与标签改变时不触发自动保存
+  updateDraft()
 })
 
 async function copyNoteId() {
@@ -570,7 +610,8 @@ function doPaste() { closeCtx(); editorRef.value?.chain().focus().run(); documen
 
 onBeforeUnmount(() => {
   if (saveTimer) clearTimeout(saveTimer)
-  doSave(false) // 退出前保存最新内容
+  // 退出前保存最新内容（仅在开启偏好时）
+  if (store.getSaveOnClose()) doSave(false)
   if (editorRef.value) {
     editorRef.value.destroy()
   }
@@ -798,6 +839,7 @@ onBeforeUnmount(() => {
 .layout-content {
   flex: 1;
   min-height: 0;
+  padding-left: 50px;
   overflow-y: auto;
   /* 编辑器和标题共享此大滚动条 */
   background: var(--jc-bg-app, #1e1e1e);
@@ -854,7 +896,7 @@ onBeforeUnmount(() => {
 /* TipTap / ProseMirror 自定义内容排版 */
 :deep(.ProseMirror) {
   min-height: 100%;
-  padding: 16px 32px 64px;
+
   outline: none;
   color: var(--jc-text-primary, #cccccc);
   font-size: 14px;

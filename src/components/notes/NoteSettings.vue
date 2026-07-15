@@ -54,6 +54,7 @@ function handleRoleOverlayClick(e: MouseEvent) {
 // ── 设置偏好状态 (存入 localStorage) ──
 const defaultFormat = ref<'markdown' | 'plain'>('markdown')
 const defaultVisibility = ref<'PRIVATE' | 'PUBLIC'>('PRIVATE')
+const saveOnClose = ref(localStorage.getItem('notes-save-on-close') === 'true')
 
 // ── AI 模型配置列表 ──
 interface ModelConfig {
@@ -158,6 +159,7 @@ onMounted(async () => {
 
   defaultFormat.value = (localStorage.getItem('notes-default-format') as any) || 'markdown'
   defaultVisibility.value = (localStorage.getItem('notes-default-visibility') as any) || 'PRIVATE'
+  saveOnClose.value = localStorage.getItem('notes-save-on-close') === 'true'
 
   // 读取模型配置列表
   const saved = localStorage.getItem('notes-ai-models')
@@ -206,6 +208,7 @@ async function saveAiConfigToJson() {
 async function saveSettings() {
   localStorage.setItem('notes-default-format', defaultFormat.value)
   localStorage.setItem('notes-default-visibility', defaultVisibility.value)
+  localStorage.setItem('notes-save-on-close', String(saveOnClose.value))
   localStorage.setItem('notes-ai-models', JSON.stringify(modelConfigs.value))
   
   // 保存 AI 角色配置
@@ -676,6 +679,17 @@ async function importData() {
                 <option value="PUBLIC">PUBLIC (公开/对接远端后可见)</option>
               </select>
               <span class="help-text">第一期完全本地化下默认均为 PRIVATE 级别</span>
+            </div>
+
+            <div class="form-group">
+              <label class="toggle-row">
+                <span>关闭标签时自动保存笔记</span>
+                <label class="toggle-switch">
+                  <input type="checkbox" v-model="saveOnClose" />
+                  <span class="toggle-slider"></span>
+                </label>
+              </label>
+              <span class="help-text">开启后，点击标签栏 ✕ 按钮或右键关闭标签时自动保存当前编辑内容</span>
             </div>
           </div>
 
@@ -1172,6 +1186,62 @@ async function importData() {
     font-size: 10px;
     color: var(--jc-text-secondary);
     opacity: 0.8;
+  }
+
+  /* 开关行：标签 + toggle 并排 */
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--jc-text-primary);
+    cursor: pointer;
+  }
+}
+
+/* ── Toggle Switch ── */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+  flex-shrink: 0;
+  cursor: pointer;
+
+  input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+
+  .toggle-slider {
+    position: absolute;
+    inset: 0;
+    background: var(--jc-border-default, #444);
+    border-radius: 20px;
+    transition: background 0.2s;
+
+    &::before {
+      content: '';
+      position: absolute;
+      width: 16px;
+      height: 16px;
+      left: 2px;
+      bottom: 2px;
+      background: #fff;
+      border-radius: 50%;
+      transition: transform 0.2s;
+    }
+  }
+
+  input:checked + .toggle-slider {
+    background: var(--jc-color-accent, #58a6ff);
+  }
+
+  input:checked + .toggle-slider::before {
+    transform: translateX(16px);
   }
 }
 
