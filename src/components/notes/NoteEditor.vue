@@ -881,7 +881,7 @@ onBeforeUnmount(() => {
         <!-- Editor Content Area (大滚动容器，内含标题和编辑器作为整体滚动) -->
         <section class="layout-content">
           <input v-model="title" class="editor-title-input" placeholder="请在这里输入标题" />
-          <div v-show="editorMode === 'wysiwyg'" class="editor-wrapper">
+          <div v-show="editorMode === 'wysiwyg'">
             <YiiEditor ref="yiiEditor" class="editor-yiieditor" :content="''" :extensions="editorExtensions"
               :dark-mode="isDark" :show-main-menu="false" :main-menu="defaultMenu" :show-bubble-menu="true"
               :show-floating-menu="true" :show-side-menu="true" :bubble-menu="bubbleMenu" :floating-menu="floatingMenu"
@@ -1117,8 +1117,6 @@ onBeforeUnmount(() => {
   min-height: 0;
   padding-left: 50px;
   overflow-y: auto;
-  display: flex;
-  flex-direction: column;
   /* 编辑器和标题共享此大滚动条 */
   background: var(--jc-bg-app, #1e1e1e);
 }
@@ -1142,14 +1140,6 @@ onBeforeUnmount(() => {
   }
 }
 
-/* 编辑器外包裹层：v-show 不直接放 YiiEditor 上，避免 :deep() !important 覆盖 display:none */
-.editor-wrapper {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-}
-
 .editor-yiieditor {
   height: auto;
   display: flex !important;
@@ -1158,7 +1148,7 @@ onBeforeUnmount(() => {
 
 /* ── 源码编辑模式 Textarea ── */
 .source-editor {
-  flex: 1;
+  /* flex: 1; */
   width: 100%;
   max-width: 100%;
   margin: 16px 0 0 0;
@@ -1173,6 +1163,7 @@ onBeforeUnmount(() => {
   resize: none;
   outline: none;
   box-sizing: border-box;
+  min-height: calc(100vh - 260px);
 
   &::placeholder {
     color: var(--jc-text-secondary, #858585);
