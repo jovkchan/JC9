@@ -1102,6 +1102,10 @@ async fn cmd_note_update(state: &Arc<AppState>, args: &Value) -> Result<Value, S
 
     let title = new_title.unwrap_or(existing["title"].as_str().unwrap_or(""));
     let content = new_content.unwrap_or(existing["content"].as_str().unwrap_or(""));
+    // MCP 写入的内容始终是 Markdown，若更新了内容则同步设置 format='markdown'
+    let format = if new_content.is_some() { "markdown" } else {
+        existing["format"].as_str().unwrap_or("markdown")
+    };
     let tags = new_tags.unwrap_or_else(|| {
         existing["tags"].as_array()
             .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
@@ -1111,8 +1115,8 @@ async fn cmd_note_update(state: &Arc<AppState>, args: &Value) -> Result<Value, S
     let full_id = existing["id"].as_str().unwrap_or(note_id);
 
     conn.execute(
-        "UPDATE notes SET title=?1, content=?2, tags=?3, updated_at=?4 WHERE id=?5 AND is_deleted=0",
-        params![title, content, tags_json, now, full_id],
+        "UPDATE notes SET title=?1, content=?2, format=?3, tags=?4, updated_at=?5 WHERE id=?6 AND is_deleted=0",
+        params![title, content, format, tags_json, now, full_id],
     ).map_err(|e| format!("更新笔记失败: {}", e))?;
     drop(conn);
 
@@ -1128,8 +1132,8 @@ async fn cmd_note_update(state: &Arc<AppState>, args: &Value) -> Result<Value, S
                 |row| row.get(0),
             ).unwrap_or(1);
             let _ = conn.execute(
-                "INSERT INTO note_versions (id, note_id, title, content, format, tags, version, created_at) VALUES (?1, ?2, ?3, ?4, 'markdown', ?5, ?6, ?7)",
-                params![version_id, note_id, title, content, tags_json, next_ver, now],
+                "INSERT INTO note_versions (id, note_id, title, content, format, tags, version, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![version_id, note_id, title, content, format, tags_json, next_ver, now],
             );
         }
     }

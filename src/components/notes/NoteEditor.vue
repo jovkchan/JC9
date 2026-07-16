@@ -260,6 +260,22 @@ function unresolveContentUrls(html: string): string {
   })
 }
 
+/** 加载 Markdown 内容时：将相对路径图片转为 convertFileSrc URL */
+function resolveMarkdownUrls(md: string): string {
+  if (!uploadBaseDir) return md
+  return md.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_m, alt, url) => {
+    return `![${alt}](${relToUrl(url)})`
+  })
+}
+
+/** 保存 Markdown 内容前：将 convertFileSrc URL 还原为相对路径 */
+function unresolveMarkdownUrls(md: string): string {
+  if (!uploadBaseDir) return md
+  return md.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_m, alt, url) => {
+    return `![${alt}](${urlToRel(url)})`
+  })
+}
+
 // ── 右键菜单与代码块快捷运行集成 ──
 const hasSelection = ref(false)
 const selectedText = ref('')
@@ -392,11 +408,13 @@ watch(() => props.existingNote, async (newNote) => {
       if (isNoteSwitched) {
         await ensureUploadDir()
         const fmt = newNote.format || 'markdown'
-        const content = fmt === 'html' ? resolveContentUrls(newNote.content) : newNote.content
-        if (fmt === 'html') {
-          editorRef.value.commands.setContent(content)
+        if (fmt === 'markdown') {
+          const md = resolveMarkdownUrls(newNote.content)
+          editorRef.value.commands.setContent(md, { contentType: 'markdown' })
         } else {
-          editorRef.value.commands.setContent(content, { contentType: 'markdown' })
+          // 兼容旧 HTML 格式笔记
+          const html = resolveContentUrls(newNote.content)
+          editorRef.value.commands.setContent(html)
         }
       }
     }
@@ -417,9 +435,9 @@ syncTags()
 
 // 实时提取正文内联标签（不含代码块内）
 const inlineTags = ref<string[]>([])
-function extractInlineTags(content: string): string[] {
+function extractInlineTags(html: string): string[] {
   // 移除 HTML 代码块 (<pre><code>...</code></pre>) 和内联代码 (<code>...</code>)
-  const cleaned = content.replace(/<pre[^>]*>[\s\S]*?<\/pre>/gi, '').replace(/<code[^>]*>[\s\S]*?<\/code>/gi, '')
+  const cleaned = html.replace(/<pre[^>]*>[\s\S]*?<\/pre>/gi, '').replace(/<code[^>]*>[\s\S]*?<\/code>/gi, '')
   // 移除 HTML 标签，保留文本内容
   const textOnly = cleaned.replace(/<[^>]+>/g, ' ')
   const matches = textOnly.match(/#([^\s#.,;:!?()（）\[\]{}]+)/g)
@@ -574,10 +592,12 @@ async function onEditorCreate(instance: any) {
   if (contentToLoad) {
     try {
       const fmt = props.existingNote?.format || 'markdown'
-      if (fmt === 'html') {
-        instance.commands.setContent(contentToLoad)
+      if (fmt === 'markdown') {
+        const md = resolveMarkdownUrls(contentToLoad)
+        instance.commands.setContent(md, { contentType: 'markdown' })
       } else {
-        instance.commands.setContent(contentToLoad, { contentType: 'markdown' })
+        // 兼容旧 HTML 格式笔记
+        instance.commands.setContent(contentToLoad)
       }
       // 如果有草稿且存在已有笔记，同步草稿中的标题/标签到组件本地状态
       if (draft && props.existingNote) {
@@ -608,12 +628,12 @@ function onEditorUpdate() {
 /** 将当前编辑器内容写入 store 草稿（供关闭标签时自动保存使用） */
 function updateDraft() {
   const noteId = editNoteId.value
-  const rawHtml = editorRef.value?.getHTML() ?? ''
-  const html = unresolveContentUrls(rawHtml)
-  // 新建笔记尚无 ID，用空字符串作 key
+  // 优先输出 Markdown，回退 HTML
+  const markdown = editorRef.value?.getMarkdown?.()
+  const content = markdown ? unresolveMarkdownUrls(markdown) : (unresolveContentUrls(editorRef.value?.getHTML() ?? ''))
   store.updateNoteDraft(noteId || '', {
     title: title.value,
-    content: html,
+    content,
     tags: tags.value,
   })
 }
@@ -676,8 +696,10 @@ function execCmd(cmd: string, value?: string) {
 }
 
 async function doSave(createVersion = false) {
-  const rawHtml = editorRef.value?.getHTML() ?? ''
-  const html = unresolveContentUrls(rawHtml)
+  // 优先输出 Markdown（高效），回退 HTML（兜底）
+  const markdown = editorRef.value?.getMarkdown?.()
+  const content = markdown ? unresolveMarkdownUrls(markdown) : unresolveContentUrls(editorRef.value?.getHTML() ?? '')
+  const fmt: 'markdown' | 'html' = markdown ? 'markdown' : 'html'
 
   saving.value = true
   syncTags()
@@ -691,8 +713,8 @@ async function doSave(createVersion = false) {
       const note: Note = {
         ...existing,
         title: title.value || '无标题',
-        content: html,
-        format: 'html',
+        content,
+        format: fmt,
         tags: tags.value,
         updatedAt: new Date().toISOString(),
       }
@@ -701,8 +723,8 @@ async function doSave(createVersion = false) {
     } else {
       const note = await store.createNote({
         title: title.value || '无标题',
-        content: html,
-        format: 'html',
+        content,
+        format: fmt,
         tags: tags.value,
         groupId: store.selectedGroupId,
         visibility: 'PRIVATE',
