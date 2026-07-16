@@ -380,6 +380,26 @@ const lastSaved = ref('')
 const editNoteId = ref<string | null>(props.existingNote?.id ?? null)
 const activePopover = ref<string | null>(null)
 
+// ── 编辑器模式：wysiwyg（所见即所得，Markdown）| plain（纯文本）──
+const editorMode = ref<'wysiwyg' | 'plain'>('wysiwyg')
+const sourceContent = ref('')
+
+function toggleEditorMode() {
+  if (editorMode.value === 'wysiwyg') {
+    // 切换到纯文本模式：提取当前 Markdown 到 textarea
+    sourceContent.value = editorRef.value?.getMarkdown?.() ?? ''
+    editorMode.value = 'plain'
+  } else {
+    // 切换回 WYSIWYG：将纯文本 Markdown 加载到编辑器
+    editorMode.value = 'wysiwyg'
+    nextTick(() => {
+      if (editorRef.value && sourceContent.value) {
+        editorRef.value.commands.setContent(sourceContent.value, { contentType: 'markdown' })
+      }
+    })
+  }
+}
+
 /** 标志：是否正在自身保存，避免 watcher 回写编辑器时光标跳动 */
 let selfSaving = false
 /** 标志：切换笔记或外部加载中，不触发自动保存 */
@@ -408,11 +428,16 @@ watch(() => props.existingNote, async (newNote) => {
       if (isNoteSwitched) {
         await ensureUploadDir()
         const fmt = newNote.format || 'markdown'
-        if (fmt === 'markdown') {
+        if (fmt === 'plain') {
+          sourceContent.value = newNote.content
+          editorMode.value = 'plain'
+        } else if (fmt === 'markdown') {
+          editorMode.value = 'wysiwyg'
           const md = resolveMarkdownUrls(newNote.content)
           editorRef.value.commands.setContent(md, { contentType: 'markdown' })
         } else {
           // 兼容旧 HTML 格式笔记
+          editorMode.value = 'wysiwyg'
           const html = resolveContentUrls(newNote.content)
           editorRef.value.commands.setContent(html)
         }
@@ -592,11 +617,16 @@ async function onEditorCreate(instance: any) {
   if (contentToLoad) {
     try {
       const fmt = props.existingNote?.format || 'markdown'
-      if (fmt === 'markdown') {
+      if (fmt === 'plain') {
+        sourceContent.value = contentToLoad
+        editorMode.value = 'plain'
+      } else if (fmt === 'markdown') {
+        editorMode.value = 'wysiwyg'
         const md = resolveMarkdownUrls(contentToLoad)
         instance.commands.setContent(md, { contentType: 'markdown' })
       } else {
         // 兼容旧 HTML 格式笔记
+        editorMode.value = 'wysiwyg'
         instance.commands.setContent(contentToLoad)
       }
       // 如果有草稿且存在已有笔记，同步草稿中的标题/标签到组件本地状态
@@ -628,9 +658,10 @@ function onEditorUpdate() {
 /** 将当前编辑器内容写入 store 草稿（供关闭标签时自动保存使用） */
 function updateDraft() {
   const noteId = editNoteId.value
-  // 优先输出 Markdown，回退 HTML
-  const markdown = editorRef.value?.getMarkdown?.()
-  const content = markdown ? unresolveMarkdownUrls(markdown) : (unresolveContentUrls(editorRef.value?.getHTML() ?? ''))
+  // plain 模式用 sourceContent，wysiwyg 用 getMarkdown
+  const content = editorMode.value === 'plain'
+    ? sourceContent.value
+    : (editorRef.value?.getMarkdown?.() ?? unresolveContentUrls(editorRef.value?.getHTML() ?? ''))
   store.updateNoteDraft(noteId || '', {
     title: title.value,
     content,
@@ -696,10 +727,11 @@ function execCmd(cmd: string, value?: string) {
 }
 
 async function doSave(createVersion = false) {
-  // 优先输出 Markdown（高效），回退 HTML（兜底）
-  const markdown = editorRef.value?.getMarkdown?.()
-  const content = markdown ? unresolveMarkdownUrls(markdown) : unresolveContentUrls(editorRef.value?.getHTML() ?? '')
-  const fmt: 'markdown' | 'html' = markdown ? 'markdown' : 'html'
+  // plain 模式保存纯文本，wysiwyg 保存 Markdown
+  const isPlain = editorMode.value === 'plain'
+  const rawContent = isPlain ? sourceContent.value : (editorRef.value?.getMarkdown?.() ?? editorRef.value?.getHTML() ?? '')
+  const content = isPlain ? rawContent : unresolveMarkdownUrls(rawContent)
+  const fmt: 'markdown' | 'plain' = isPlain ? 'plain' : 'markdown'
 
   saving.value = true
   syncTags()
@@ -849,11 +881,15 @@ onBeforeUnmount(() => {
         <!-- Editor Content Area (大滚动容器，内含标题和编辑器作为整体滚动) -->
         <section class="layout-content">
           <input v-model="title" class="editor-title-input" placeholder="请在这里输入标题" />
-          <YiiEditor ref="yiiEditor" class="editor-yiieditor" :content="''" :extensions="editorExtensions"
-            :dark-mode="isDark" :show-main-menu="false" :main-menu="defaultMenu" :show-bubble-menu="true"
-            :show-floating-menu="true" :show-side-menu="true" :bubble-menu="bubbleMenu" :floating-menu="floatingMenu"
-            page-view="full" locale="zh-CN" @contextmenu="handleEditorContextMenu" @create="onEditorCreate"
-            @update="onEditorUpdate" />
+          <div v-show="editorMode === 'wysiwyg'" class="editor-wrapper">
+            <YiiEditor ref="yiiEditor" class="editor-yiieditor" :content="''" :extensions="editorExtensions"
+              :dark-mode="isDark" :show-main-menu="false" :main-menu="defaultMenu" :show-bubble-menu="true"
+              :show-floating-menu="true" :show-side-menu="true" :bubble-menu="bubbleMenu" :floating-menu="floatingMenu"
+              page-view="full" locale="zh-CN" @contextmenu="handleEditorContextMenu" @create="onEditorCreate"
+              @update="onEditorUpdate" />
+          </div>
+          <textarea v-show="editorMode === 'plain'" v-model="sourceContent" class="source-editor"
+            placeholder="纯文本编辑…" spellcheck="false"></textarea>
   
         </section>
       </div>
@@ -866,6 +902,11 @@ onBeforeUnmount(() => {
     <!-- Footer Bar: 重新融合标签、字数和操作按钮 -->
     <div class="editor-footer">
       <div class="tag-area">
+        <button class="mode-toggle" :class="editorMode" @click="toggleEditorMode" :title="editorMode === 'wysiwyg' ? '点击切换到纯文本模式' : '点击切换到所见即所得 Markdown 模式'">
+          <span v-if="editorMode === 'wysiwyg'" class="mode-icon">👁</span>
+          <span v-else class="mode-icon">&lt;/&gt;</span>
+          <span class="mode-label">{{ editorMode === 'wysiwyg' ? 'Markdown' : 'Plain' }}</span>
+        </button>
         <input v-model="tagInput" class="tag-input" placeholder="添加标签, 用逗号分隔" />
         <div v-if="inlineTags.length" class="inline-tags">
           <span class="inline-tags-hint">提取的内联标签:</span>
@@ -1076,6 +1117,8 @@ onBeforeUnmount(() => {
   min-height: 0;
   padding-left: 50px;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
   /* 编辑器和标题共享此大滚动条 */
   background: var(--jc-bg-app, #1e1e1e);
 }
@@ -1099,10 +1142,42 @@ onBeforeUnmount(() => {
   }
 }
 
+/* 编辑器外包裹层：v-show 不直接放 YiiEditor 上，避免 :deep() !important 覆盖 display:none */
+.editor-wrapper {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
 .editor-yiieditor {
   height: auto;
   display: flex !important;
   flex-direction: column !important;
+}
+
+/* ── 源码编辑模式 Textarea ── */
+.source-editor {
+  flex: 1;
+  width: 100%;
+  max-width: 100%;
+  margin: 16px 0 0 0;
+  padding: 20px 80px 20px 20px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--jc-text-primary, #cccccc);
+  font-family: 'Cascadia Code', Consolas, 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.7;
+  resize: none;
+  outline: none;
+  box-sizing: border-box;
+
+  &::placeholder {
+    color: var(--jc-text-secondary, #858585);
+    opacity: 0.4;
+  }
 }
 
 /* 精准拉伸编辑器外层布局骨架，使用 > 限制仅穿透至最外侧骨架层，彻底防止侵入 ProseMirror 内部以防污染代码块、折叠列表、表格、卡片等所有组件 */
@@ -1425,6 +1500,46 @@ onBeforeUnmount(() => {
   &::placeholder {
     color: var(--jc-text-secondary, #858585);
     opacity: 0.6;
+  }
+}
+
+/* ── 编辑器模式切换按钮 ── */
+.mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--jc-border-default, #3e3e42);
+  border-radius: 4px;
+  background: var(--jc-bg-input, #3c3c3c);
+  color: var(--jc-text-secondary, #858585);
+  font-size: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+
+  &:hover {
+    border-color: var(--jc-color-accent, #8a58ff);
+    color: var(--jc-text-highlight, #ffffff);
+  }
+
+  &.plain {
+    background: rgba(78, 201, 176, 0.12);
+    border-color: rgba(78, 201, 176, 0.35);
+    color: #4ec9b0;
+  }
+
+  .mode-icon {
+    font-size: 12px;
+    line-height: 1;
+  }
+
+  .mode-label {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
   }
 }
 
