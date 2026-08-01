@@ -276,6 +276,91 @@ function unresolveMarkdownUrls(md: string): string {
   })
 }
 
+/**
+ * 预处理器：将 ::: 块语法转为 TipTap parseHTML 能识别的 HTML 标签
+ *
+ * 解决的问题：@tiptap/markdown 底层用 marked 解析，marked 不认识 ::: 容器语法，
+ * 导致 Details/Callout/MultiColumn/AiBlock 等扩展的 parseMarkdown handler 永远不被调用。
+ * 此预处理器在 marked 之前把 ::: 块转为 HTML，marked 会将 HTML 识别为 html token，
+ * 然后 parseHTMLToken() 使用扩展的 parseHTML 规则正确解析。
+ *
+ * 支持的块类型 → HTML 映射（对应各扩展的 parseHTML 规则）：
+ *   details        → <details>
+ *   detailsSummary → <summary>（内联自闭合）
+ *   detailsContent → <div data-type="detailsContent">
+ *   callout        → <div data-type="callout" data-callout-type="...">
+ *   column-container → <div data-type="column-container">
+ *   column         → <div data-type="column">
+ *   aiBlock        → <div data-type="aiBlock">
+ */
+const BLOCK_MAP: Record<string, { open: string; close: string; inline?: boolean }> = {
+  details:           { open: '<details>',                           close: '</details>' },
+  detailsSummary:    { open: '',                                     close: '',          inline: true },
+  detailsContent:    { open: '<div data-type="detailsContent">',     close: '</div>' },
+  callout:           { open: '',                                     close: '</div>' },
+  'column-container':{ open: '<div data-type="column-container">', close: '</div>' },
+  column:            { open: '<div data-type="column">',            close: '</div>' },
+  aiBlock:           { open: '<div data-type="aiBlock">',           close: '</div>' },
+}
+
+function preprocessMarkdownForLoad(md: string): string {
+  const lines = md.split('\n')
+  const result: string[] = []
+  const stack: { type: string }[] = []
+
+  const blockRe = /^:::\s+(\S+)\s*(.*)$/  // ::: typeName rest...
+  const closeRe = /^:::\s*$/                // :::
+
+  for (const line of lines) {
+    const blockMatch = line.match(blockRe)
+
+    if (blockMatch) {
+      const type = blockMatch[1]
+      const rest = blockMatch[2]
+      const spec = BLOCK_MAP[type]
+
+      if (!spec) {
+        result.push(line) // 未知类型，原样保留
+        continue
+      }
+
+      stack.push({ type })
+
+      if (spec.inline) {
+        // detailsSummary: 把参数作为 summary 文本，内联自闭合
+        result.push(`<summary>${rest || type}</summary>`)
+      } else if (type === 'callout') {
+        result.push(`<div data-type="callout" data-callout-type="${rest || 'info'}">`)
+      } else {
+        result.push(spec.open)
+      }
+    } else if (closeRe.test(line)) {
+      if (stack.length === 0) {
+        result.push(line) // 多余的 ::: 视为普通文本
+        continue
+      }
+      const item = stack.pop()!
+      const spec = BLOCK_MAP[item.type]
+      if (spec && !spec.inline && spec.close) {
+        result.push(spec.close)
+      }
+    } else {
+      result.push(line)
+    }
+  }
+
+  // 闭合未关闭的块
+  while (stack.length > 0) {
+    const item = stack.pop()!
+    const spec = BLOCK_MAP[item.type]
+    if (spec && !spec.inline && spec.close) {
+      result.push(spec.close)
+    }
+  }
+
+  return result.join('\n')
+}
+
 // ── 右键菜单与代码块快捷运行集成 ──
 const hasSelection = ref(false)
 const selectedText = ref('')
@@ -394,7 +479,8 @@ function toggleEditorMode() {
     editorMode.value = 'wysiwyg'
     nextTick(() => {
       if (editorRef.value && sourceContent.value) {
-        editorRef.value.commands.setContent(sourceContent.value, { contentType: 'markdown' })
+        const processed = preprocessMarkdownForLoad(sourceContent.value)
+        editorRef.value.commands.setContent(processed, { contentType: 'markdown' })
       }
     })
   }
@@ -433,7 +519,7 @@ watch(() => props.existingNote, async (newNote) => {
           editorMode.value = 'plain'
         } else if (fmt === 'markdown') {
           editorMode.value = 'wysiwyg'
-          const md = resolveMarkdownUrls(newNote.content)
+          const md = preprocessMarkdownForLoad(resolveMarkdownUrls(newNote.content))
           editorRef.value.commands.setContent(md, { contentType: 'markdown' })
         } else {
           // 兼容旧 HTML 格式笔记
@@ -622,7 +708,10 @@ async function onEditorCreate(instance: any) {
         editorMode.value = 'plain'
       } else if (fmt === 'markdown') {
         editorMode.value = 'wysiwyg'
-        const md = resolveMarkdownUrls(contentToLoad)
+        const rawMd = resolveMarkdownUrls(contentToLoad)
+        const md = preprocessMarkdownForLoad(rawMd)
+        console.log('🔧 [MD预处理器] 原始:', rawMd.slice(0, 200))
+        console.log('🔧 [MD预处理器] 处理后:', md.slice(0, 200))
         instance.commands.setContent(md, { contentType: 'markdown' })
       } else {
         // 兼容旧 HTML 格式笔记
