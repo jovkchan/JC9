@@ -628,6 +628,7 @@ const allTools = [
   { type: 'case', name: '命名风格转换', desc: '下划线/驼峰/帕斯卡/烤串/常量命名互转', category: 'code', icon: 'base64' },
   { type: 'lorem', name: '占位假文生成', desc: '一键生成中英文假文段落填充UI', category: 'code', icon: 'json' },
   { type: 'lines', name: '文本行操作器', desc: '多行文本排序、去重、拆分与合并', category: 'code', icon: 'diff' },
+  { type: 'md-txt', name: 'MD 转 TXT', desc: 'Markdown 净化转纯文本，修复被污染/转义的笔记', category: 'code', icon: 'base64' },
   { type: 'aes-des', name: '对称加解密 (AES/DES)', desc: 'AES/DES 在线加解密与编码转换', category: 'code', icon: 'aes' },
   { type: 'rsa', name: '非对称加密 (RSA)', desc: 'RSA 密钥对生成、加解密与签名验签', category: 'code', icon: 'rsa' },
   { type: 'css', name: 'CSS 单位换算', desc: 'PX、REM、EM、VW、VH 实时联动转换', category: 'code', icon: 'color' },

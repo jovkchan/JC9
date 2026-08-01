@@ -35,6 +35,7 @@ const CronGenerator = defineAsyncComponent(() => import('@/components/tools/Cron
 const CaseConverter = defineAsyncComponent(() => import('@/components/tools/CaseConverter.vue'))
 const LoremIpsum = defineAsyncComponent(() => import('@/components/tools/LoremIpsum.vue'))
 const TextLines = defineAsyncComponent(() => import('@/components/tools/TextLines.vue'))
+const MdToTxt = defineAsyncComponent(() => import('@/components/tools/MdToTxt.vue'))
 const SymmetricCrypto = defineAsyncComponent(() => import('@/components/tools/SymmetricCrypto.vue'))
 const RsaCrypto = defineAsyncComponent(() => import('@/components/tools/RsaCrypto.vue'))
 const CssUnits = defineAsyncComponent(() => import('@/components/tools/CssUnits.vue'))
@@ -410,6 +411,7 @@ onUnmounted(() => {
         <CaseConverter v-else-if="t.toolType === 'case'" />
         <LoremIpsum v-else-if="t.toolType === 'lorem'" />
         <TextLines v-else-if="t.toolType === 'lines'" />
+        <MdToTxt v-else-if="t.toolType === 'md-txt'" />
         <SymmetricCrypto v-else-if="t.toolType === 'aes-des'" />
         <RsaCrypto v-else-if="t.toolType === 'rsa'" />
         <CssUnits v-else-if="t.toolType === 'css'" />

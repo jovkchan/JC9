@@ -303,7 +303,17 @@ const BLOCK_MAP: Record<string, { open: string; close: string; inline?: boolean 
   aiBlock:           { open: '<div data-type="aiBlock">',           close: '</div>' },
 }
 
+/**
+ * 清理 TipTap 合并单元格时写入的内部分隔符 \u001f（保存/显示/加载时避免内容被污染）。
+ * 注意：必须替换为空格而非换行——Markdown 表格单元格内不允许换行，否则会把表格行拆断。
+ */
+function stripCellSeparator(text: string): string {
+  return text.replace(/\u001f/g, ' ')
+}
+
 function preprocessMarkdownForLoad(md: string): string {
+  // 加载前先清理可能残留的 \u001f（历史污染笔记）
+  md = stripCellSeparator(md)
   const lines = md.split('\n')
   const result: string[] = []
   const stack: { type: string }[] = []
@@ -367,6 +377,142 @@ const selectedText = ref('')
 const codeBlockText = ref<string | null>(null)
 const rightClickedImageSrc = ref<string | null>(null)
 
+// ── 表格编辑状态（合并/拆分/底色/列宽）──
+const inTableCell = ref(false)
+const canMergeCells = ref(false)
+const canSplitCell = ref(false)
+/** 单元格底色预设色板 */
+const cellBgColors = ['#ffd7d7', '#ffe7c7', '#fff2cc', '#d8f0d8', '#d7e7ff', '#e7d7ff', '#f5f5f5', '#2b2b2e']
+/** 列宽预设（px），0 表示自适应 */
+const colWidthPresets = [0, 80, 120, 160, 200, 260]
+
+/** 检测当前文档是否含有 Markdown 无法表达的表格结构（合并/底色/列宽） */
+function docHasSpecialTable(ed: any): boolean {
+  const doc = ed?.state?.doc
+  if (!doc) return false
+  let found = false
+  doc.descendants((node: any) => {
+    if (found) return false
+    if (node.type.name === 'table') {
+      node.descendants((cell: any) => {
+        if (found) return false
+        if (cell.type.name === 'tableCell' || cell.type.name === 'tableHeader') {
+          const a = cell.attrs || {}
+          if ((a.colspan || 1) > 1 || (a.rowspan || 1) > 1) { found = true; return false }
+          if (a.background) { found = true; return false }
+          if (Array.isArray(a.colwidth) && a.colwidth.some((w: any) => w)) { found = true; return false }
+        }
+      })
+    }
+  })
+  return found
+}
+
+/** 检测光标是否处于表格内，并刷新合并/拆分可用状态 */
+function updateTableState() {
+  const ed = editorRef.value
+  if (!ed) {
+    inTableCell.value = false
+    canMergeCells.value = false
+    canSplitCell.value = false
+    return
+  }
+  const { state } = ed
+  let inTable = false
+  for (let d = state.selection.$from.depth; d > 0; d--) {
+    if (state.selection.$from.node(d).type.name === 'table') {
+      inTable = true
+      break
+    }
+  }
+  inTableCell.value = inTable
+  if (inTable) {
+    try {
+      canMergeCells.value = !!ed.can().mergeCells()
+      canSplitCell.value = !!ed.can().splitCell()
+    } catch {
+      canMergeCells.value = false
+      canSplitCell.value = false
+    }
+  } else {
+    canMergeCells.value = false
+    canSplitCell.value = false
+  }
+}
+
+/**
+ * 设置光标所在列的宽度（px），0 / 负数表示恢复自适应。
+ * 会对覆盖该列的所有单元格（含跨行/跨列）统一写入 colwidth。
+ */
+function setColumnWidth(width: number) {
+  const ed = editorRef.value
+  if (!ed) return
+  const { state, dispatch } = ed.view
+  const { selection } = state
+  const $from = selection.$from
+
+  // 1. 定位当前所在的 table 节点
+  let tableInfo: { pos: number; node: any } | null = null
+  for (let d = $from.depth; d > 0; d--) {
+    const node = $from.node(d)
+    if (node.type.name === 'table') {
+      tableInfo = { pos: $from.before(d), node }
+      break
+    }
+  }
+  if (!tableInfo) return
+  const tableStart = tableInfo.pos
+  const table = tableInfo.node
+  const cursorPos = $from.pos
+
+  // 2. 计算光标落在第几列（考虑 colspan/rowspan）
+  const rows: { row: any; offset: number }[] = []
+  table.forEach((row: any, offset: number) => rows.push({ row, offset }))
+
+  let colIndex = -1
+  for (const { row, offset: rowOffset } of rows) {
+    let col = 0
+    let hit = false
+    row.forEach((cell: any, cellOffset: number) => {
+      const colspan = cell.attrs.colspan || 1
+      const cellAbsStart = tableStart + 1 + rowOffset + 1 + cellOffset
+      if (cursorPos >= cellAbsStart && cursorPos < cellAbsStart + cell.nodeSize) {
+        colIndex = col
+        hit = true
+      }
+      col += colspan
+    })
+    if (hit) break
+  }
+  if (colIndex < 0) return
+
+  // 3. 给覆盖该列的所有单元格写入 colwidth
+  const tr = state.tr
+  const widthVal = width > 0 ? width : null
+  table.forEach((rowNode: any, rowOffset: number) => {
+    let col = 0
+    rowNode.forEach((cell: any, cellOffset: number) => {
+      const colspan = cell.attrs.colspan || 1
+      if (colIndex >= col && colIndex < col + colspan) {
+        const cellPos = tableStart + 1 + rowOffset + 1 + cellOffset
+        const newAttrs = { ...cell.attrs }
+        if (widthVal) {
+          newAttrs.colwidth = Array(colspan).fill(widthVal)
+        } else {
+          delete newAttrs.colwidth
+        }
+        tr.setNodeMarkup(cellPos, undefined, newAttrs)
+      }
+      col += colspan
+    })
+  })
+
+  if (tr.docChanged) {
+    dispatch(tr)
+    updateTableState()
+  }
+}
+
 /** 检测光标是否处于代码块内，若是则提取其文本 */
 function checkActiveCodeBlock() {
   const ed = editorRef.value
@@ -391,6 +537,9 @@ function checkActiveCodeBlock() {
 function handleEditorContextMenu(e: MouseEvent) {
   const ed = editorRef.value
   if (!ed) return
+
+  // 刷新表格编辑状态（合并/拆分可用性随选区变化）
+  updateTableState()
 
   // 检查右键目标是否为图片，如果是则提供下载选项
   const target = e.target as HTMLElement
@@ -468,19 +617,54 @@ const activePopover = ref<string | null>(null)
 // ── 编辑器模式：wysiwyg（所见即所得，Markdown）| plain（纯文本）──
 const editorMode = ref<'wysiwyg' | 'plain'>('wysiwyg')
 const sourceContent = ref('')
+/**
+ * 进入纯文本模式前的编辑器状态快照（{ markdown, json }）。
+ * 用于在两个方向切换时判断对应视图内容是否被用户修改，从而做到无损切换：
+ *  - 切回纯文本：若 wysiwyg 内容自上次同步以来未变，则保留现有 sourceContent，
+ *    避免 getMarkdown() 对特殊字符做转义（\* 等）损坏原文本；
+ *  - 切回 WYSIWYG：若纯文本未变，则直接恢复快照中的 JSON，避免 Markdown 解析丢内容。
+ */
+let wysiwygSnapshot: { markdown: string; json: any } | null = null
+
+function jsonEquals(a: any, b: any): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  return JSON.stringify(a) === JSON.stringify(b)
+}
 
 function toggleEditorMode() {
+  const ed = editorRef.value
   if (editorMode.value === 'wysiwyg') {
-    // 切换到纯文本模式：提取当前 Markdown 到 textarea
-    sourceContent.value = editorRef.value?.getMarkdown?.() ?? ''
+    // 切换到纯文本模式
+    const json = ed?.getJSON?.() ?? null
+    const markdown = ed?.getMarkdown?.() ?? ''
+    // 若编辑器内容与进入纯文本模式前一致（未在 wysiwyg 中编辑），
+    // 则保留现有 sourceContent，避免 Markdown 往返造成转义/丢内容
+    const editorUnchanged = wysiwygSnapshot !== null && jsonEquals(json, wysiwygSnapshot.json)
+    if (!editorUnchanged) {
+      // 序列化为 Markdown 时清理 \u001f（合并单元格内部分隔符）
+      sourceContent.value = stripCellSeparator(markdown)
+    }
+    // 记录当前编辑器状态，作为下次切换的“未修改”基准
+    wysiwygSnapshot = { markdown, json }
     editorMode.value = 'plain'
   } else {
-    // 切换回 WYSIWYG：将纯文本 Markdown 加载到编辑器
+    // 切换回 WYSIWYG
     editorMode.value = 'wysiwyg'
+    const snap = wysiwygSnapshot
+    const plainUnchanged = !!snap && sourceContent.value === snap.markdown
     nextTick(() => {
-      if (editorRef.value && sourceContent.value) {
+      const e = editorRef.value
+      if (!e) return
+      if (plainUnchanged && snap?.json) {
+        // 纯文本未修改 → 直接恢复原编辑器内容（无损）
+        e.commands.setContent(snap.json)
+        wysiwygSnapshot = { markdown: snap.markdown, json: snap.json }
+      } else if (sourceContent.value) {
+        // 纯文本被修改或首次从纯文本加载 → 按 Markdown 解析
         const processed = preprocessMarkdownForLoad(sourceContent.value)
-        editorRef.value.commands.setContent(processed, { contentType: 'markdown' })
+        e.commands.setContent(processed, { contentType: 'markdown' })
+        wysiwygSnapshot = { markdown: sourceContent.value, json: e.getJSON?.() ?? null }
       }
     })
   }
@@ -527,6 +711,8 @@ watch(() => props.existingNote, async (newNote) => {
           const html = resolveContentUrls(newNote.content)
           editorRef.value.commands.setContent(html)
         }
+        // 切换笔记后重置模式快照，避免沿用上一笔记的状态
+        wysiwygSnapshot = null
       }
     }
   } finally {
@@ -580,7 +766,6 @@ function mergeAllInlineTags() {
 }
 
 // ── YiiEditor 响应式引用 ──
-const yiiEditor = ref<InstanceType<typeof YiiEditor>>()
 const editorRef = ref<any>(null)
 
 // 响应式扩展列表
@@ -640,6 +825,7 @@ const editorExtensions = computed(() => [
 async function onEditorCreate(instance: any) {
   editorRef.value = instance
   startTagScan()
+  updateTableState()
 
   // ── 自定义粘贴/拖入插件：截图/图片强制走 image 节点而非 embed ──
   const pasteImagePlugin = new Plugin({
@@ -718,6 +904,8 @@ async function onEditorCreate(instance: any) {
         editorMode.value = 'wysiwyg'
         instance.commands.setContent(contentToLoad)
       }
+      // 初始化后重置模式快照（编辑器内容刚由外部加载，尚未进入纯文本模式）
+      wysiwygSnapshot = null
       // 如果有草稿且存在已有笔记，同步草稿中的标题/标签到组件本地状态
       if (draft && props.existingNote) {
         if (draft.title && draft.title !== props.existingNote.title) {
@@ -744,13 +932,22 @@ function onEditorUpdate() {
   updateDraft()
 }
 
+/** 编辑器事务（光标/选区/内容变化）时刷新表格编辑状态 */
+function onEditorTransaction() {
+  updateTableState()
+}
+
 /** 将当前编辑器内容写入 store 草稿（供关闭标签时自动保存使用） */
 function updateDraft() {
   const noteId = editNoteId.value
-  // plain 模式用 sourceContent，wysiwyg 用 getMarkdown
-  const content = editorMode.value === 'plain'
+  // plain 用 sourceContent；含结构表格的笔记存 HTML（保留合并/底色/列宽）；否则存 Markdown
+  const isPlain = editorMode.value === 'plain'
+  const hasSpecialTable = !isPlain && docHasSpecialTable(editorRef.value)
+  const content = isPlain
     ? sourceContent.value
-    : (editorRef.value?.getMarkdown?.() ?? unresolveContentUrls(editorRef.value?.getHTML() ?? ''))
+    : hasSpecialTable
+      ? unresolveContentUrls(editorRef.value?.getHTML?.() ?? '')
+      : stripCellSeparator(editorRef.value?.getMarkdown?.() ?? unresolveContentUrls(editorRef.value?.getHTML() ?? ''))
   store.updateNoteDraft(noteId || '', {
     title: title.value,
     content,
@@ -807,20 +1004,42 @@ function execCmd(cmd: string, value?: string) {
       break
     }
     case 'table': ed.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(); break
+    case 'mergeCells': ed.chain().focus().mergeCells().run(); break
+    case 'splitCell': ed.chain().focus().splitCell().run(); break
+    case 'addRowBefore': ed.chain().focus().addRowBefore().run(); break
     case 'addRowAfter': ed.chain().focus().addRowAfter().run(); break
+    case 'addColBefore': ed.chain().focus().addColumnBefore().run(); break
     case 'addColAfter': ed.chain().focus().addColumnAfter().run(); break
+    case 'deleteRow': ed.chain().focus().deleteRow().run(); break
+    case 'deleteColumn': ed.chain().focus().deleteColumn().run(); break
     case 'deleteTable': ed.chain().focus().deleteTable().run(); break
+    case 'setCellBg': ed.chain().focus().setCellAttribute('background', value ?? '').run(); break
+    case 'setColWidth': setColumnWidth(Number(value) || 0); break
     default: break
   }
   activePopover.value = null
 }
 
 async function doSave(createVersion = false) {
-  // plain 模式保存纯文本，wysiwyg 保存 Markdown
+  // plain 存纯文本；含结构表格（合并/底色/列宽）的笔记存 HTML 以保留结构；否则存 Markdown
   const isPlain = editorMode.value === 'plain'
-  const rawContent = isPlain ? sourceContent.value : (editorRef.value?.getMarkdown?.() ?? editorRef.value?.getHTML() ?? '')
-  const content = isPlain ? rawContent : unresolveMarkdownUrls(rawContent)
-  const fmt: 'markdown' | 'plain' = isPlain ? 'plain' : 'markdown'
+  const hasSpecialTable = !isPlain && docHasSpecialTable(editorRef.value)
+  let rawContent: string
+  let content: string
+  let fmt: 'markdown' | 'plain' | 'html'
+  if (isPlain) {
+    rawContent = sourceContent.value
+    content = rawContent
+    fmt = 'plain'
+  } else if (hasSpecialTable) {
+    rawContent = editorRef.value?.getHTML?.() ?? ''
+    content = unresolveContentUrls(rawContent)
+    fmt = 'html'
+  } else {
+    rawContent = editorRef.value?.getMarkdown?.() ?? editorRef.value?.getHTML() ?? ''
+    content = stripCellSeparator(unresolveMarkdownUrls(rawContent))
+    fmt = 'markdown'
+  }
 
   saving.value = true
   syncTags()
@@ -971,11 +1190,11 @@ onBeforeUnmount(() => {
         <section class="layout-content">
           <input v-model="title" class="editor-title-input" placeholder="请在这里输入标题" />
           <div v-show="editorMode === 'wysiwyg'">
-            <YiiEditor ref="yiiEditor" class="editor-yiieditor" :content="''" :extensions="editorExtensions"
+            <YiiEditor class="editor-yiieditor" :content="''" :extensions="editorExtensions"
               :dark-mode="isDark" :show-main-menu="false" :main-menu="defaultMenu" :show-bubble-menu="true"
               :show-floating-menu="true" :show-side-menu="true" :bubble-menu="bubbleMenu" :floating-menu="floatingMenu"
               page-view="full" locale="zh-CN" @contextmenu="handleEditorContextMenu" @create="onEditorCreate"
-              @update="onEditorUpdate" />
+              @update="onEditorUpdate" @transaction="onEditorTransaction" />
           </div>
           <textarea v-show="editorMode === 'plain'" v-model="sourceContent" class="source-editor"
             placeholder="纯文本编辑…" spellcheck="false"></textarea>
@@ -1054,6 +1273,41 @@ onBeforeUnmount(() => {
           </div>
         </template>
 
+        <!-- Condition: 表格操作（光标在表格内） -->
+        <template v-if="inTableCell">
+          <div class="ctx-divider"></div>
+          <div class="ctx-title">表格操作</div>
+          <div class="ctx-item" :class="{ disabled: !canMergeCells }" @click="canMergeCells && execCmd('mergeCells')">
+            <span class="ctx-icon">⛶</span> 合并单元格
+          </div>
+          <div class="ctx-item" :class="{ disabled: !canSplitCell }" @click="canSplitCell && execCmd('splitCell')">
+            <span class="ctx-icon">⊞</span> 拆分单元格
+          </div>
+          <div class="ctx-divider"></div>
+          <div class="ctx-item" @click="execCmd('addRowBefore')"><span class="ctx-icon">⬆</span> 上方插入行</div>
+          <div class="ctx-item" @click="execCmd('addRowAfter')"><span class="ctx-icon">⬇</span> 下方插入行</div>
+          <div class="ctx-item" @click="execCmd('addColBefore')"><span class="ctx-icon">⬅</span> 左侧插入列</div>
+          <div class="ctx-item" @click="execCmd('addColAfter')"><span class="ctx-icon">➡</span> 右侧插入列</div>
+          <div class="ctx-item" @click="execCmd('deleteRow')"><span class="ctx-icon">🗑</span> 删除当前行</div>
+          <div class="ctx-item" @click="execCmd('deleteColumn')"><span class="ctx-icon">🗑</span> 删除当前列</div>
+          <div class="ctx-item" @click="execCmd('deleteTable')"><span class="ctx-icon">✖</span> 删除表格</div>
+
+          <div class="ctx-divider"></div>
+          <div class="ctx-title">单元格底色</div>
+          <div class="ctx-color-row">
+            <span v-for="c in cellBgColors" :key="c" class="ctx-color-swatch" :style="{ background: c }"
+              :title="'底色 ' + c" @click="execCmd('setCellBg', c)"></span>
+            <span class="ctx-color-swatch none" title="清除底色" @click="execCmd('setCellBg', '')">∅</span>
+          </div>
+
+          <div class="ctx-divider"></div>
+          <div class="ctx-title">列宽</div>
+          <div class="ctx-width-row">
+            <button v-for="w in colWidthPresets" :key="w" class="ctx-width-btn" :class="{ auto: w === 0 }"
+              @click="execCmd('setColWidth', String(w))">{{ w === 0 ? '自动' : w + 'px' }}</button>
+          </div>
+        </template>
+
         <!-- Condition 1: Command Send to Terminal -->
         <template v-if="hasSelection || codeBlockText !== null">
           <div class="ctx-divider"></div>
@@ -1068,8 +1322,8 @@ onBeforeUnmount(() => {
           </div>
         </template>
 
-        <!-- Condition 2: Quick Insert Commands (when nothing is selected and cursor is not in code block) -->
-        <template v-else>
+        <!-- Condition 2: Quick Insert Commands (when nothing is selected and cursor is not in code block/table) -->
+        <template v-else-if="!inTableCell">
           <div class="ctx-divider"></div>
           <div class="ctx-title">快捷插入</div>
           <div class="ctx-item" @click="execCmd('table')"><span class="ctx-icon">田</span> 插入表格</div>
@@ -1762,6 +2016,67 @@ onBeforeUnmount(() => {
 
   &.plus {
     color: var(--jc-color-accent, #8a58ff);
+  }
+}
+
+/* 表格操作菜单：不可用项、底色色板、列宽按钮 */
+.ctx-item.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.ctx-color-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 6px 12px;
+}
+.ctx-color-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1px solid var(--jc-border-strong, #555555);
+  cursor: pointer;
+  transition: transform 0.1s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--jc-text-secondary, #858585);
+
+  &:hover {
+    transform: scale(1.2);
+    border-color: var(--jc-color-accent, #8a58ff);
+  }
+
+  &.none {
+    background: transparent;
+    border-style: dashed;
+  }
+}
+.ctx-width-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 6px 12px;
+}
+.ctx-width-btn {
+  background: var(--jc-bg-btn, #3c3c3c);
+  border: 1px solid var(--jc-border-default, #3e3e42);
+  color: var(--jc-text-primary, #cccccc);
+  padding: 2px 8px;
+  font-size: 11px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.1s;
+
+  &:hover {
+    border-color: var(--jc-color-accent, #8a58ff);
+    color: var(--jc-color-accent, #8a58ff);
+  }
+
+  &.auto {
+    color: var(--jc-text-secondary, #858585);
   }
 }
 
