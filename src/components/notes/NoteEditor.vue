@@ -102,7 +102,14 @@ function slashExecuteCommand(cmdId: string) {
 }
 
 // 笔记链接点击跳转
-const isDark = ref(document.documentElement.getAttribute('data-theme') === 'dark')
+/** 读取当前主题：data-theme 未设置时按应用默认（暗色）处理，避免 Mermaid 等用亮色主题渲染 */
+function getEffectiveTheme(): 'dark' | 'light' {
+  const t = document.documentElement.getAttribute('data-theme')
+  if (t === 'dark' || t === 'light') return t
+  return 'dark'
+}
+
+const isDark = ref(getEffectiveTheme() === 'dark')
 let themeObserver: MutationObserver | null = null
 
 function handleJclinkClick(e: MouseEvent) {
@@ -135,9 +142,9 @@ onMounted(() => {
   document.addEventListener('click', handleJclinkClick)
   window.addEventListener('keydown', handleGlobalKeydown)
   // 监听明暗模式属性变化
-  isDark.value = document.documentElement.getAttribute('data-theme') === 'dark'
+  isDark.value = getEffectiveTheme() === 'dark'
   themeObserver = new MutationObserver(() => {
-    isDark.value = document.documentElement.getAttribute('data-theme') === 'dark'
+    isDark.value = getEffectiveTheme() === 'dark'
   })
   themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
 })

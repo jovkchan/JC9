@@ -14,8 +14,10 @@ defineEmits<{ quickNote: [] }>()
 let unlistenResized: (() => void) | null = null
 
 onMounted(async () => {
-  const t = document.documentElement.getAttribute('data-theme')
-  if (t === 'light' || t === 'dark') theme.value = t
+  // 启动时把保存的（或默认暗色）主题显式写入 data-theme，保证 Mermaid 等组件拿到一致主题
+  const saved = localStorage.getItem('jc9-theme')
+  if (saved === 'light' || saved === 'dark') theme.value = saved
+  document.documentElement.setAttribute('data-theme', theme.value)
   localStorage.setItem('jc9-theme', theme.value)
 
   try {
