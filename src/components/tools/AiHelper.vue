@@ -353,7 +353,7 @@ onUnmounted(() => { destroy() })
     </div>
 
     <!-- ═══ Delete Confirm Dialog ═══ -->
-    <div v-if="confirmDelete.show" class="session-overlay" @click="confirmDelete.show = false">
+    <div v-if="confirmDelete.show" class="session-overlay" @mousedown.self="confirmDelete.show = false">
       <div class="confirm-modal" @click.stop>
         <div class="confirm-icon">🗑️</div>
         <div class="confirm-title">删除对话</div>
@@ -366,7 +366,7 @@ onUnmounted(() => { destroy() })
     </div>
 
     <!-- ═══ Browser Dialog ═══ -->
-    <div v-if="showBrowserDialog" class="session-overlay" @click="showBrowserDialog = false">
+    <div v-if="showBrowserDialog" class="session-overlay" @mousedown.self="showBrowserDialog = false">
       <div class="browser-modal" @click.stop>
         <div class="session-modal-header">
           <span>🌐 打开浏览器</span>

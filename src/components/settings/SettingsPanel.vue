@@ -1208,7 +1208,7 @@ async function compressMemories() {
           </div>
 
           <!-- 记忆弹窗 -->
-          <div v-if="showMemoryModal" class="form-overlay" @mousedown.self="closeMemoryModal" @click.self="closeMemoryModal">
+          <div v-if="showMemoryModal" class="form-overlay" @mousedown.self="closeMemoryModal">
             <div class="form-card" style="width:580px;max-height:85vh" @click.stop>
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
                 <h4 style="margin:0;font-size:14px">

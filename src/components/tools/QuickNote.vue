@@ -77,7 +77,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="quick-note-overlay" @click.self="cancel">
+  <div class="quick-note-overlay" @mousedown.self="cancel">
     <div class="quick-note-window">
       <div class="quick-note-header">
         <span class="quick-note-title">📝 快速笔记</span>
