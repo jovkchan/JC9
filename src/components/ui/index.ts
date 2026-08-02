@@ -31,6 +31,8 @@ export { default as JcSkeleton } from './JcSkeleton.vue'
 export { default as JcCard } from './JcCard.vue'
 export { default as JcTable } from './JcTable.vue'
 export { default as JcTree } from './JcTree.vue'
+export { default as JcTabBar } from './JcTabBar.vue'
+export type { JcTabItem } from './JcTabBar.vue'
 export { default as ToolShell } from './ToolShell.vue'
 
 // 命令式 Toast

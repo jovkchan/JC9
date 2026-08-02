@@ -7,12 +7,13 @@ import { useStatusStore } from '@/stores/status'
 import TerminalView from '@/components/TerminalView.vue'
 import LogPanel from '@/components/LogPanel.vue'
 import JcModal from '@/components/ui/JcModal.vue'
-import JcContextMenu from '@/components/ui/JcContextMenu.vue'
 import JcButton from '@/components/ui/JcButton.vue'
 import JcInput from '@/components/ui/JcInput.vue'
 import JcSelect from '@/components/ui/JcSelect.vue'
 import JcTextarea from '@/components/ui/JcTextarea.vue'
+import JcTabBar from '@/components/ui/JcTabBar.vue'
 import type { JcContextMenuItem } from '@/components/ui'
+import type { JcTabItem } from '@/components/ui'
 
 const memTypeOptions = [
   { label: 'decision', value: 'decision' },
@@ -132,31 +133,17 @@ async function saveMemoryTab(index: number) {
     useStatusStore().pushMessage('保存失败: ' + e, 'error')
   }
 }
-const ctxShow = ref(false)
-const ctxPos = ref({ x: 0, y: 0 })
 const ctxIdx = ref(-1)
 const showLogPid = ref('')
 
 // ── Note tab context menu ──
-const noteCtxShow = ref(false)
-const noteCtxPos = ref({ x: 0, y: 0 })
 const noteCtxTabId = ref<string | null>(null)
-
-function openNoteCtx(e: MouseEvent, tabId: string) {
-  e.preventDefault()
-  noteCtxPos.value = { x: e.clientX, y: e.clientY }
-  noteCtxTabId.value = tabId
-  noteCtxShow.value = true
-}
-
-function closeNoteCtx() { noteCtxShow.value = false }
 
 function noteCtxClose() {
   if (noteCtxTabId.value) {
     notesStore.closeNoteTab(noteCtxTabId.value)
     if (!notesStore.activeNoteTabId) store.activeTabType = 'term'
   }
-  closeNoteCtx()
 }
 
 function noteCtxRefresh() {
@@ -166,7 +153,6 @@ function noteCtxRefresh() {
     notesStore.closeNoteTab(id)
     setTimeout(() => notesStore.openNoteTab(id), 50)
   }
-  closeNoteCtx()
 }
 
 function noteCtxCloseOthers() {
@@ -175,7 +161,6 @@ function noteCtxCloseOthers() {
   const ids = [...notesStore.noteTabs.filter(t => t.id !== keep).map(t => t.id)]
   ids.forEach(id => notesStore.closeNoteTab(id))
   notesStore.activeNoteTabId = keep
-  closeNoteCtx()
 }
 
 function noteCtxCloseRight() {
@@ -183,7 +168,6 @@ function noteCtxCloseRight() {
   const tabs = [...notesStore.noteTabs]
   const idx = tabs.findIndex(t => t.id === noteCtxTabId.value)
   if (idx >= 0) tabs.slice(idx + 1).forEach(t => notesStore.closeNoteTab(t.id))
-  closeNoteCtx()
 }
 
 function noteCtxCloseLeft() {
@@ -191,52 +175,120 @@ function noteCtxCloseLeft() {
   const tabs = [...notesStore.noteTabs]
   const idx = tabs.findIndex(t => t.id === noteCtxTabId.value)
   if (idx > 0) tabs.slice(0, idx).forEach(t => notesStore.closeNoteTab(t.id))
-  closeNoteCtx()
 }
 
 function noteCtxCloseAll() {
   const ids = [...notesStore.noteTabs.map(t => t.id)]
   ids.forEach(id => notesStore.closeNoteTab(id))
   store.activeTabType = 'term'
-  closeNoteCtx()
 }
 
 const renameShow = ref(false)
 const renameValue = ref('')
 
-function openCtx(e: MouseEvent, i: number) {
-  e.preventDefault()
-  ctxPos.value = { x: e.clientX, y: e.clientY }
-  ctxIdx.value = i
-  ctxShow.value = true
-}
-
 function toggleLog(pid: string) {
   showLogPid.value = showLogPid.value === pid ? '' : pid
-}
-
-function closeCtx() {
-  ctxShow.value = false
 }
 const ctxItems: JcContextMenuItem[] = [
   { label: '重启', value: 'restart' },
   { label: '重命名', value: 'rename' },
   { label: '停止并关闭', value: 'stop', danger: true },
 ]
-function onCtxSelect(item: JcContextMenuItem) {
-  if (item.value === 'restart') ctxRestart()
-  else if (item.value === 'rename') ctxRename()
-  else if (item.value === 'stop') ctxStop()
+
+// ── JcTabBar 标签页数据与事件（按 sidebarTab 模块隔离） ──
+const termTabItems = computed<JcTabItem[]>(() =>
+  store.runningTabs
+    .map((t, i) => ({ t, i }))
+    .filter(({ t }) => store.sidebarTab === 'projects' ? t.projectId !== 'workflow' : t.projectId === 'workflow')
+    .map(({ t, i }) => ({
+      key: i,
+      label: t.commandName,
+      live: store.runningMap[store.cmdKey(t.projectId, t.commandId)] === 'running',
+    })),
+)
+const termActiveKey = computed(() => (store.activeTabType === 'term' ? store.activeTabIndex : -1))
+const docTabItems = computed<JcTabItem[]>(() => store.docTabs.map((t, i) => ({ key: i, label: t.title })))
+const docActiveKey = computed(() => (store.activeTabType === 'doc' ? store.activeDocIndex : -1))
+const toolTabItems = computed<JcTabItem[]>(() => store.toolTabs.map((t, i) => ({ key: i, label: t.title })))
+const toolActiveKey = computed(() => (store.activeTabType === 'tool' ? store.activeToolIndex : -1))
+const memoryTabItems = computed<JcTabItem[]>(() => store.memoryTabs.map((t, i) => ({ key: i, label: t.title })))
+const memoryActiveKey = computed(() => (store.activeTabType === 'memory' ? store.activeMemoryIndex : -1))
+const noteTabItems = computed<JcTabItem[]>(() =>
+  notesStore.noteTabs.map(t => ({ key: t.id, label: t.title || '新笔记' })),
+)
+const noteActiveKey = computed(() => (store.activeTabType === 'note' ? activeNoteId.value : null))
+
+// 终端
+function onTermTabSelect(key: string | number) {
+  store.activeTabType = 'term'
+  store.activeTabIndex = key as number
 }
-const noteCtxItems: JcContextMenuItem[] = [
-  { label: '刷新', value: 'refresh' },
-  { label: '关闭', value: 'close' },
-  { label: '关闭其他', value: 'closeOthers' },
-  { label: '关闭右侧标签页', value: 'closeRight' },
-  { label: '关闭左侧标签页', value: 'closeLeft' },
-  { label: '全部关闭', value: 'closeAll' },
-]
-function onNoteCtxSelect(item: JcContextMenuItem) {
+function onTermTabClose(key: string | number) {
+  store.closeTab(key as number)
+}
+function onTermCtxSelect(item: JcContextMenuItem, tab: JcTabItem) {
+  const idx = tab.key as number
+  if (item.value === 'restart') ctxRestart(idx)
+  else if (item.value === 'rename') ctxRename(idx)
+  else if (item.value === 'stop') ctxStop(idx)
+}
+
+// 通用关闭菜单分发（文档/工具/记忆）
+function onGenericCtxClose(item: JcContextMenuItem, tab: JcTabItem, closeFn: (key: string | number) => void, list: () => JcTabItem[]) {
+  const key = tab.key
+  const tabs = list()
+  const idx = tabs.findIndex(t => t.key === key)
+  if (item.value === 'close') closeFn(key)
+  else if (item.value === 'closeOthers') tabs.filter(t => t.key !== key).forEach(t => closeFn(t.key))
+  else if (item.value === 'closeRight') tabs.slice(idx + 1).forEach(t => closeFn(t.key))
+  else if (item.value === 'closeLeft') tabs.slice(0, idx).forEach(t => closeFn(t.key))
+  else if (item.value === 'closeAll') tabs.forEach(t => closeFn(t.key))
+}
+
+// 文档
+function onDocTabSelect(key: string | number) {
+  store.activeTabType = 'doc'
+  store.activeDocIndex = key as number
+}
+function onDocTabClose(key: string | number) {
+  store.closeDocTab(key as number)
+}
+function onDocCtxSelect(item: JcContextMenuItem, tab: JcTabItem) {
+  onGenericCtxClose(item, tab, onDocTabClose, () => docTabItems.value)
+}
+// 工具
+function onToolTabSelect(key: string | number) {
+  store.activeTabType = 'tool'
+  store.activeToolIndex = key as number
+}
+function onToolTabClose(key: string | number) {
+  store.closeToolTab(key as number)
+}
+function onToolCtxSelect(item: JcContextMenuItem, tab: JcTabItem) {
+  onGenericCtxClose(item, tab, onToolTabClose, () => toolTabItems.value)
+}
+// 记忆
+function onMemoryTabSelect(key: string | number) {
+  store.activeTabType = 'memory'
+  store.activeMemoryIndex = key as number
+}
+function onMemoryTabClose(key: string | number) {
+  store.closeMemoryTab(key as number)
+}
+function onMemoryCtxSelect(item: JcContextMenuItem, tab: JcTabItem) {
+  onGenericCtxClose(item, tab, onMemoryTabClose, () => memoryTabItems.value)
+}
+// 笔记
+function onNoteTabSelect(key: string | number) {
+  store.activeTabType = 'note'
+  notesStore.activeNoteTabId = key as string
+}
+function onNoteTabClose(key: string | number) {
+  notesStore.closeNoteTab(key as string)
+  if (!notesStore.activeNoteTabId) store.activeTabType = 'term'
+}
+function onNoteCtxSelect(item: JcContextMenuItem, tab: JcTabItem) {
+  noteCtxTabId.value = tab.key as string
   switch (item.value) {
     case 'refresh': return noteCtxRefresh()
     case 'close': return noteCtxClose()
@@ -247,30 +299,28 @@ function onNoteCtxSelect(item: JcContextMenuItem) {
   }
 }
 
-function ctxRestart() {
-  const t = store.runningTabs[ctxIdx.value]
+function ctxRestart(idx: number) {
+  const t = store.runningTabs[idx]
   const c = store.projects.find(p => p.id === t.projectId)?.commands.find(c => c.id === t.commandId)
   if (t && c) store.restartCommand(t.projectId, c)
-  closeCtx()
 }
 
-function ctxStop() {
-  const t = store.runningTabs[ctxIdx.value]
+function ctxStop(idx: number) {
+  const t = store.runningTabs[idx]
   if (t) {
     store.stopCommand(t.projectId, t.commandId)
-    store.closeTab(ctxIdx.value)
+    store.closeTab(idx)
   }
-  closeCtx()
 }
 
-function ctxRename() {
-  const t = store.runningTabs[ctxIdx.value]
+function ctxRename(idx: number) {
+  const t = store.runningTabs[idx]
   const c = store.projects.find(p => p.id === t.projectId)?.commands.find(c => c.id === t.commandId)
   if (c) {
     renameValue.value = c.name
+    ctxIdx.value = idx
     renameShow.value = true
   }
-  closeCtx()
 }
 
 function confirmRename() {
@@ -329,8 +379,6 @@ function handleKeyDownSearch(e: KeyboardEvent) {
 }
 
 onMounted(() => {
-  document.addEventListener('click', closeCtx)
-  document.addEventListener('click', closeNoteCtx)
   document.addEventListener('keydown', handleKeyDownSearch)
   if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
     Notification.requestPermission()
@@ -340,8 +388,6 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  document.removeEventListener('click', closeCtx)
-  document.removeEventListener('click', closeNoteCtx)
   document.removeEventListener('keydown', handleKeyDownSearch)
   if (reminderTimer) clearInterval(reminderTimer)
 })
@@ -349,56 +395,12 @@ onUnmounted(() => {
 
 <template>
   <div class="panel">
-    <!-- Tab Bar（按 sidebarTab 模块隔离） -->
-    <div class="tabs" v-if="showTermTabs&&store.runningTabs.length>0||showDocTabs&&store.docTabs.length>0||showToolTabs&&store.toolTabs.length>0||showMemoryTabs&&store.memoryTabs.length>0||showNoteTabs&&notesStore.noteTabs.length>0" role="tablist">
-      <div v-for="(t,i) in store.runningTabs" :key="'t'+t.projectId+t.commandId"
-        v-show="showTermTabs&&(store.sidebarTab==='projects'?t.projectId!=='workflow':t.projectId==='workflow')"
-        :class="['tab',{on:store.activeTabType==='term'&&i===store.activeTabIndex}]"
-        role="tab" :aria-selected="store.activeTabType==='term'&&i===store.activeTabIndex" tabindex="0"
-        @click="store.activeTabType='term';store.activeTabIndex=i" @contextmenu="openCtx($event,i)"
-        @keyup.enter="store.activeTabType='term';store.activeTabIndex=i">
-        <span class="tdot" :class="{live:store.runningMap[store.cmdKey(t.projectId,t.commandId)]==='running'}"></span>
-        <span class="tl">{{ t.commandName }}</span>
-        <button class="tx" @click.stop="store.closeTab(i)" aria-label="关闭标签">✕</button>
-      </div>
-      <div v-for="(t,i) in store.docTabs" :key="'d'+t.id"
-        v-show="showDocTabs"
-        :class="['tab',{on:store.activeTabType==='doc'&&i===store.activeDocIndex}]"
-        role="tab" :aria-selected="store.activeTabType==='doc'&&i===store.activeDocIndex" tabindex="0"
-        @click="store.activeTabType='doc';store.activeDocIndex=i"
-        @keyup.enter="store.activeTabType='doc';store.activeDocIndex=i">
-        <span class="tl">{{ t.title }}</span>
-        <button class="tx" @click.stop="store.closeDocTab(i)" aria-label="关闭标签">✕</button>
-      </div>
-      <div v-for="(t,i) in store.toolTabs" :key="'tl'+t.id"
-        v-show="showToolTabs"
-        :class="['tab',{on:store.activeTabType==='tool'&&i===store.activeToolIndex}]"
-        role="tab" :aria-selected="store.activeTabType==='tool'&&i===store.activeToolIndex" tabindex="0"
-        @click="store.activeTabType='tool';store.activeToolIndex=i"
-        @keyup.enter="store.activeTabType='tool';store.activeToolIndex=i">
-        <span class="tl">{{ t.title }}</span>
-        <button class="tx" @click.stop="store.closeToolTab(i)" aria-label="关闭标签">✕</button>
-      </div>
-      <div v-for="(t,i) in store.memoryTabs" :key="'mem'+t.id"
-        v-show="showMemoryTabs"
-        :class="['tab',{on:store.activeTabType==='memory'&&i===store.activeMemoryIndex}]"
-        role="tab" :aria-selected="store.activeTabType==='memory'&&i===store.activeMemoryIndex" tabindex="0"
-        @click="store.activeTabType='memory';store.activeMemoryIndex=i"
-        @keyup.enter="store.activeTabType='memory';store.activeMemoryIndex=i">
-        <span class="tl">{{ t.title }}</span>
-        <button class="tx" @click.stop="store.closeMemoryTab(i)" aria-label="关闭标签">✕</button>
-      </div>
-      <div v-for="t in notesStore.noteTabs" :key="'n'+t.id"
-        v-show="showNoteTabs"
-        :class="['tab',{on:store.activeTabType==='note'&&activeNoteId===t.id}]"
-        role="tab" :aria-selected="store.activeTabType==='note'&&activeNoteId===t.id" tabindex="0"
-        @click="store.activeTabType='note'; notesStore.activeNoteTabId = t.id"
-        @keyup.enter="store.activeTabType='note'; notesStore.activeNoteTabId = t.id"
-        @contextmenu="openNoteCtx($event, t.id)">
-        <span class="tl">{{ t.title || '新笔记' }}</span>
-        <button class="tx" @click.stop="notesStore.closeNoteTab(t.id); if(!notesStore.activeNoteTabId)store.activeTabType='term'" aria-label="关闭标签">✕</button>
-      </div>
-    </div>
+    <!-- Tab Bar（JcTabBar 组件，按 sidebarTab 模块隔离） -->
+    <JcTabBar v-if="showTermTabs&&store.runningTabs.length>0" :tabs="termTabItems" :active-key="termActiveKey" :context-items="ctxItems" @select="onTermTabSelect" @close="onTermTabClose" @context-select="onTermCtxSelect" />
+    <JcTabBar v-if="showDocTabs&&store.docTabs.length>0" :tabs="docTabItems" :active-key="docActiveKey" @select="onDocTabSelect" @close="onDocTabClose" @context-select="onDocCtxSelect" />
+    <JcTabBar v-if="showToolTabs&&store.toolTabs.length>0" :tabs="toolTabItems" :active-key="toolActiveKey" @select="onToolTabSelect" @close="onToolTabClose" @context-select="onToolCtxSelect" />
+    <JcTabBar v-if="showMemoryTabs&&store.memoryTabs.length>0" :tabs="memoryTabItems" :active-key="memoryActiveKey" @select="onMemoryTabSelect" @close="onMemoryTabClose" @context-select="onMemoryCtxSelect" />
+    <JcTabBar v-if="showNoteTabs&&notesStore.noteTabs.length>0" :tabs="noteTabItems" :active-key="noteActiveKey" @select="onNoteTabSelect" @close="onNoteTabClose" @context-select="onNoteCtxSelect" />
 
     <!-- Terminal content -->
     <div v-for="(t,i) in store.runningTabs" :key="'tc'+t.projectId+t.commandId" class="content" v-show="showTermTabs&&(store.sidebarTab==='projects'?t.projectId!=='workflow':t.projectId==='workflow')&&store.activeTabType==='term'&&i===store.activeTabIndex">
@@ -536,8 +538,6 @@ onUnmounted(() => {
       <div class="empty">从左侧面板选择功能开始使用</div>
     </div>
 
-    <JcContextMenu :show="ctxShow" :x="ctxPos.x" :y="ctxPos.y" :items="ctxItems" @select="onCtxSelect" @update:show="ctxShow = $event" />
-
     <JcModal v-model:open="renameShow" title="命令重命名" width="360">
             <div class="fld">
               <label>新名称</label>
@@ -549,9 +549,6 @@ onUnmounted(() => {
       </template>
     </JcModal>
 
-    <!-- 笔记标签页右键菜单 -->
-    <JcContextMenu :show="noteCtxShow" :x="noteCtxPos.x" :y="noteCtxPos.y" :items="noteCtxItems" @select="onNoteCtxSelect" @update:show="noteCtxShow = $event" />
-
     <!-- 笔记设置面板 -->
     <!-- 全局浮动搜索面板 -->
     <FloatingSearch />
@@ -561,16 +558,6 @@ onUnmounted(() => {
 <style scoped lang="scss">
 @use "@/styles/mixins.scss" as *;
 .panel { flex:1; display:flex; flex-direction:column; overflow:hidden; min-width:0; }
-.tabs { display:flex; background:var(--jc-bg-elevated); overflow-x:auto; flex-shrink:0; }
-.tab { display:flex; align-items:center; gap:4px; padding:6px 12px; font-size:12px; cursor:pointer; color:var(--jc-text-secondary); border-right:1px solid var(--jc-border-default); white-space:nowrap;
-  &:hover { color:var(--jc-text-primary); background:var(--jc-bg-hover); }
-  &.on { color:var(--jc-text-highlight); background:var(--jc-bg-app); }
-}
-.tdot { @include dot; }
-.tl { max-width:160px; overflow:hidden; text-overflow:ellipsis; }
-.tx { background:none; color:var(--jc-text-secondary); font-size:14px; padding:0 4px; cursor:pointer;
-  &:hover { color:var(--jc-color-error); }
-}
 .content { flex:1; display:flex; flex-direction:column; overflow:hidden; }
 .bar { @include bar; }
 .cmdtext { font-size:11px; color:var(--jc-color-success); font-family:'Cascadia Code',Consolas,monospace; }
