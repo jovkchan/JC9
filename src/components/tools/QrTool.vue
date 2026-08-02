@@ -2,6 +2,60 @@
 import { ref, onMounted, watch } from 'vue'
 import QRCode from 'qrcode'
 import jsQR from 'jsqr'
+import ToolShell from '@/components/ui/ToolShell.vue'
+import JcButton from '@/components/ui/JcButton.vue'
+import JcSelect from '@/components/ui/JcSelect.vue'
+import JcTextarea from '@/components/ui/JcTextarea.vue'
+import JcSegmented from '@/components/ui/JcSegmented.vue'
+
+const tabOptions = [
+  { label: '生成二维码', value: 'generate' },
+  { label: '解析二维码', value: 'parse' }
+]
+const gradientDirectionOptions = [
+  { label: '水平渐变', value: 'horizontal' },
+  { label: '垂直渐变', value: 'vertical' },
+  { label: '对角渐变', value: 'diagonal' }
+]
+const dotTypeOptions = [
+  { label: '直角方形 (普通)', value: 'square' },
+  { label: '优雅圆点 (圆润)', value: 'round' },
+  { label: '极简小圆 (多留白)', value: 'dot-small' },
+  { label: '重叠大圆 (流体粗体)', value: 'overlap' },
+  { label: '璀璨星形 (四角贝塞尔)', value: 'star' },
+  { label: '倾斜菱形 (45度倾斜)', value: 'diamond' },
+  { label: '平滑液态 (圆角融合)', value: 'liquid' },
+  { label: '简约十字 (极简格子)', value: 'cross' }
+]
+const eyeTypeOptions = [
+  { label: '方正经典 (外方内方)', value: 'square' },
+  { label: '圆润圆角 (外圆角内圆角)', value: 'round' },
+  { label: '前沿圆形 (外圆内圆)', value: 'circle' },
+  { label: '时尚盾牌 (外盾内方)', value: 'shield' },
+  { label: '左斜叶形 (左上右下圆角)', value: 'leaf-left' },
+  { label: '右斜叶形 (右上左下圆角)', value: 'leaf-right' },
+  { label: '外圆内方 (科技动感)', value: 'circle-square' },
+  { label: '外方内圆 (特色嵌套)', value: 'square-circle' }
+]
+const labelSizeOptions = [
+  { label: '11px (迷你)', value: 11 },
+  { label: '13px (标准)', value: 13 },
+  { label: '15px (较大)', value: 15 },
+  { label: '17px (醒目)', value: 17 }
+]
+const marginOptions = [
+  { label: '0个色块 (无白边)', value: 0 },
+  { label: '1个色块 (极窄)', value: 1 },
+  { label: '2个色块 (标准)', value: 2 },
+  { label: '3个色块 (宽边)', value: 3 },
+  { label: '4个色块 (超宽)', value: 4 }
+]
+const errorCorrectionOptions = [
+  { label: '7% (L 级 - 低)', value: 'L' },
+  { label: '15% (M 级 - 中)', value: 'M' },
+  { label: '25% (Q 级 - 高)', value: 'Q' },
+  { label: '30% (H 级 - 极高)', value: 'H' }
+]
 
 const activeTab = ref<'generate' | 'parse'>('generate')
 
@@ -607,14 +661,15 @@ function clearParse() {
 </script>
 
 <template>
-  <div class="tool-container">
-    <div class="tool-header">
-      <div class="tool-title">二维码生成 / 解析</div>
-      <div class="tool-actions-tabs">
-        <button :class="['tab-btn', { on: activeTab === 'generate' }]" @click="activeTab = 'generate'">生成二维码</button>
-        <button :class="['tab-btn', { on: activeTab === 'parse' }]" @click="activeTab = 'parse'">解析二维码</button>
-      </div>
-    </div>
+  <ToolShell title="二维码生成 / 解析">
+    <template #actions>
+      <JcSegmented
+        :model-value="activeTab"
+        :options="tabOptions"
+        size="small"
+        @update:model-value="(v) => activeTab = v as 'generate' | 'parse'"
+      />
+    </template>
 
     <!-- Tab 1: 生成与个性化美化 -->
     <div v-if="activeTab === 'generate'" class="tool-body-split">
@@ -622,7 +677,7 @@ function clearParse() {
         <!-- 模块一：内容 -->
         <div class="setting-section">
           <div class="section-subtitle">1. 文本与链接内容</div>
-          <textarea v-model="qrText" placeholder="在此输入需要转换成二维码的文本或 URL 链接..." class="text-input-box"></textarea>
+          <JcTextarea v-model="qrText" :rows="4" placeholder="在此输入需要转换成二维码的文本或 URL 链接..." />
         </div>
 
         <!-- 模块二：一键美化预置样式 -->
@@ -657,8 +712,8 @@ function clearParse() {
           <!-- 自定义上传选项 -->
           <div v-if="logoType === 'upload'" class="logo-control-row mt-8">
             <input type="file" ref="logoFileInput" @change="handleLogoUpload" accept="image/*" class="file-input-hidden" />
-            <button class="tool-btn pri small" @click="triggerLogoSelect">上传 LOGO 图片</button>
-            <button v-if="logoSrc" class="tool-btn err small" @click="clearLogo">清除 LOGO</button>
+            <JcButton type="primary" size="small" @click="triggerLogoSelect">上传 LOGO 图片</JcButton>
+            <JcButton v-if="logoSrc" size="small" danger @click="clearLogo">清除 LOGO</JcButton>
             <div v-if="logoSrc" class="logo-preview-box">
               <img :src="logoSrc" alt="logo-preview" />
             </div>
@@ -700,11 +755,7 @@ function clearParse() {
               </div>
               <div v-if="fgColorMode === 'gradient'" class="config-field">
                 <label>渐变方向</label>
-                <select v-model="fgGradientDirection" class="style-select">
-                  <option value="horizontal">水平渐变</option>
-                  <option value="vertical">垂直渐变</option>
-                  <option value="diagonal">对角渐变</option>
-                </select>
+                <JcSelect :model-value="fgGradientDirection" :options="gradientDirectionOptions" style="width: 100%" @update:model-value="(v) => fgGradientDirection = v as 'horizontal' | 'vertical' | 'diagonal'" />
               </div>
             </div>
           </div>
@@ -720,29 +771,11 @@ function clearParse() {
             </div>
             <div class="config-field">
               <label>码点形状 (Data Dots)</label>
-              <select v-model="dotType" class="style-select">
-                <option value="square">直角方形 (普通)</option>
-                <option value="round">优雅圆点 (圆润)</option>
-                <option value="dot-small">极简小圆 (多留白)</option>
-                <option value="overlap">重叠大圆 (流体粗体)</option>
-                <option value="star">璀璨星形 (四角贝塞尔)</option>
-                <option value="diamond">倾斜菱形 (45度倾斜)</option>
-                <option value="liquid">平滑液态 (圆角融合)</option>
-                <option value="cross">简约十字 (极简格子)</option>
-              </select>
+              <JcSelect :model-value="dotType" :options="dotTypeOptions" style="width: 100%" @update:model-value="(v) => dotType = v as DotShape" />
             </div>
             <div class="config-field">
               <label>码眼形状 (Finder Eyes)</label>
-              <select v-model="eyeType" class="style-select">
-                <option value="square">方正经典 (外方内方)</option>
-                <option value="round">圆润圆角 (外圆角内圆角)</option>
-                <option value="circle">前沿圆形 (外圆内圆)</option>
-                <option value="shield">时尚盾牌 (外盾内方)</option>
-                <option value="leaf-left">左斜叶形 (左上右下圆角)</option>
-                <option value="leaf-right">右斜叶形 (右上左下圆角)</option>
-                <option value="circle-square">外圆内方 (科技动感)</option>
-                <option value="square-circle">外方内圆 (特色嵌套)</option>
-              </select>
+              <JcSelect :model-value="eyeType" :options="eyeTypeOptions" style="width: 100%" @update:model-value="(v) => eyeType = v as EyeShape" />
             </div>
           </div>
 
@@ -790,7 +823,7 @@ function clearParse() {
           <div v-if="drawText" class="flex-config-row mt-8">
             <div class="config-field flex-2">
               <label>文字内容</label>
-              <input type="text" v-model="labelText" class="text-input-single" placeholder="例如：扫码查看详情" />
+              <JcInput v-model="labelText" placeholder="例如：扫码查看详情" />
             </div>
             <div class="config-field">
               <label>文字颜色</label>
@@ -801,12 +834,7 @@ function clearParse() {
             </div>
             <div class="config-field">
               <label>字号大小</label>
-              <select v-model="labelSize" class="style-select">
-                <option :value="11">11px (迷你)</option>
-                <option :value="13">13px (标准)</option>
-                <option :value="15">15px (较大)</option>
-                <option :value="17">17px (醒目)</option>
-              </select>
+              <JcSelect :model-value="labelSize" :options="labelSizeOptions" style="width: 100%" @update:model-value="(v) => labelSize = Number(v)" />
             </div>
           </div>
         </div>
@@ -817,22 +845,11 @@ function clearParse() {
           <div class="flex-config-row">
             <div class="config-field">
               <label>码边距 (Margins)</label>
-              <select v-model="margin" class="style-select">
-                <option :value="0">0个色块 (无白边)</option>
-                <option :value="1">1个色块 (极窄)</option>
-                <option :value="2">2个色块 (标准)</option>
-                <option :value="3">3个色块 (宽边)</option>
-                <option :value="4">4个色块 (超宽)</option>
-              </select>
+              <JcSelect :model-value="margin" :options="marginOptions" style="width: 100%" @update:model-value="(v) => margin = Number(v)" />
             </div>
             <div class="config-field">
               <label>二维码容错率</label>
-              <select v-model="errorCorrectionLevel" :disabled="logoType !== 'none'" class="style-select">
-                <option value="L">7% (L 级 - 低)</option>
-                <option value="M">15% (M 级 - 中)</option>
-                <option value="Q">25% (Q 级 - 高)</option>
-                <option value="H">30% (H 级 - 极高)</option>
-              </select>
+              <JcSelect :model-value="errorCorrectionLevel" :options="errorCorrectionOptions" :disabled="logoType !== 'none'" style="width: 100%" @update:model-value="(v) => errorCorrectionLevel = v as 'L' | 'M' | 'Q' | 'H'" />
               <span v-if="logoType !== 'none'" class="field-hint">嵌入 Logo 时强制为最高容错 (30%)</span>
             </div>
           </div>
@@ -844,7 +861,7 @@ function clearParse() {
         <div class="qr-canvas-wrapper" :style="{ backgroundColor: bgColor }">
           <canvas ref="qrCanvasRef" class="qr-canvas"></canvas>
         </div>
-        <button class="tool-btn pri full" @click="downloadQr" :disabled="!qrText.trim()">下载高清美化二维码</button>
+        <JcButton type="primary" block @click="downloadQr" :disabled="!qrText.trim()">下载高清美化二维码</JcButton>
         <div v-if="generateError" class="tool-footer-error style-inline">{{ generateError }}</div>
       </div>
     </div>
@@ -877,8 +894,8 @@ function clearParse() {
         <div class="pane-label-bar">
           <span>二维码解码结果</span>
           <div class="pane-acts">
-            <button class="tool-btn pri small" @click="copyParsedResult" :disabled="!parsedResult">复制内容</button>
-            <button class="tool-btn err small" @click="clearParse">重置</button>
+            <JcButton type="primary" size="small" @click="copyParsedResult" :disabled="!parsedResult">复制内容</JcButton>
+            <JcButton size="small" danger @click="clearParse">重置</JcButton>
           </div>
         </div>
         
@@ -889,52 +906,10 @@ function clearParse() {
         </div>
       </div>
     </div>
-  </div>
+  </ToolShell>
 </template>
 
 <style scoped lang="scss">
-.tool-container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 100%;
-  padding: 12px;
-  background: var(--jc-bg-app);
-  overflow: hidden;
-}
-.tool-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-  flex-shrink: 0;
-}
-.tool-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--jc-text-highlight);
-}
-.tool-actions-tabs {
-  display: flex;
-  background: var(--jc-bg-elevated);
-  border-radius: 4px;
-  padding: 2px;
-  border: 1px solid var(--jc-border-default);
-}
-.tab-btn {
-  background: none;
-  border: none;
-  color: var(--jc-text-secondary);
-  padding: 4px 12px;
-  font-size: 11px;
-  cursor: pointer;
-  border-radius: 3px;
-  transition: all 0.2s;
-  &.on {
-    background: var(--jc-color-accent);
-    color: var(--jc-color-white);
-  }
-}
 .tool-body-split {
   display: flex;
   flex: 1;
@@ -975,36 +950,6 @@ function clearParse() {
   border-left: 2px solid var(--jc-color-accent);
   padding-left: 6px;
   line-height: 1.2;
-}
-.text-input-box {
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  font-family: inherit;
-  font-size: 12px;
-  padding: 8px 10px;
-  resize: none;
-  outline: none;
-  border-radius: 3px;
-  min-height: 52px;
-  &:focus {
-    border-color: var(--jc-color-accent);
-  }
-}
-.text-input-single {
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  font-family: inherit;
-  font-size: 11px;
-  padding: 4px 8px;
-  outline: none;
-  border-radius: 3px;
-  height: 26px;
-  width: 100%;
-  &:focus {
-    border-color: var(--jc-color-accent);
-  }
 }
 
 /* 预设行网格 */
@@ -1173,17 +1118,6 @@ function clearParse() {
     width: 100%;
     outline: none;
   }
-}
-.style-select {
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  padding: 2px 6px;
-  font-size: 11px;
-  outline: none;
-  border-radius: 3px;
-  height: 26px;
-  cursor: pointer;
 }
 
 /* 右侧预览 */
@@ -1370,53 +1304,6 @@ function clearParse() {
   }
 }
 
-.tool-btn {
-  background: var(--jc-bg-btn);
-  color: var(--jc-text-primary);
-  border: none;
-  padding: 4px 12px;
-  font-size: 11px;
-  cursor: pointer;
-  border-radius: 2px;
-  transition: all 0.2s;
-  &:hover:not(:disabled) {
-    background: var(--jc-bg-btn-hover);
-  }
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-  &.pri {
-    background: var(--jc-color-accent);
-    color: var(--jc-color-white);
-    &:hover {
-      background: var(--jc-color-accent-hover);
-    }
-  }
-  &.err {
-    &:hover {
-      background: var(--jc-color-error);
-      color: var(--jc-color-white);
-    }
-  }
-  &.small {
-    padding: 2px 8px;
-    font-size: 10px;
-  }
-  &.full {
-    width: 100%;
-  }
-}
-.tool-footer-error.style-inline {
-  flex-shrink: 0;
-  margin-top: 8px;
-  font-size: 11px;
-  color: var(--jc-color-error);
-  background: rgba(244, 71, 71, 0.1);
-  padding: 6px 12px;
-  border-left: 3px solid var(--jc-color-error);
-  width: 100%;
-}
 .mt-8 { margin-top: 8px; }
 .mt-10 { margin-top: 10px; }
 </style>

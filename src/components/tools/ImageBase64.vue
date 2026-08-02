@@ -1,7 +1,17 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import ToolShell from '@/components/ui/ToolShell.vue'
+import JcButton from '@/components/ui/JcButton.vue'
+import JcInput from '@/components/ui/JcInput.vue'
+import JcTextarea from '@/components/ui/JcTextarea.vue'
+import JcSegmented from '@/components/ui/JcSegmented.vue'
 
 const activeTab = ref<'to-base64' | 'to-image'>('to-base64')
+
+const tabOptions = [
+  { label: '图片转 Base64', value: 'to-base64' },
+  { label: 'Base64 还原图片', value: 'to-image' }
+]
 
 // 图片转 Base64 状态
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -207,14 +217,15 @@ function clearDecoder() {
 </script>
 
 <template>
-  <div class="tool-container">
-    <div class="tool-header">
-      <div class="tool-title">图片 Base64 互转</div>
-      <div class="tool-actions-tabs">
-        <button :class="['tab-btn', { on: activeTab === 'to-base64' }]" @click="activeTab = 'to-base64'">图片转 Base64</button>
-        <button :class="['tab-btn', { on: activeTab === 'to-image' }]" @click="activeTab = 'to-image'">Base64 还原图片</button>
-      </div>
-    </div>
+  <ToolShell title="图片 Base64 互转">
+    <template #actions>
+      <JcSegmented
+        :model-value="activeTab"
+        :options="tabOptions"
+        size="small"
+        @update:model-value="(v) => activeTab = v as 'to-base64' | 'to-image'"
+      />
+    </template>
 
     <!-- Tab 1: 图片转 Base64 (重构后的扁平上下垂直结构) -->
     <div v-if="activeTab === 'to-base64'" class="tool-body-vertical">
@@ -251,7 +262,7 @@ function clearDecoder() {
               </span>
             </div>
           </div>
-          <button class="flat-remove-btn" @click="clearToConverter" title="清除并重新上传">✕ 重新上传</button>
+          <JcButton size="small" danger ghost @click="clearToConverter" title="清除并重新上传">✕ 重新上传</JcButton>
         </div>
       </div>
 
@@ -260,33 +271,33 @@ function clearDecoder() {
         <div class="copy-text-group flex-fill-group">
           <div class="group-title">
             <span>Data URL 格式 (用于 CSS / HTML 直引)</span>
-            <button class="tool-btn pri small" @click="copyText(base64DataUrl)" :disabled="!base64DataUrl">复制</button>
+            <JcButton size="small" type="primary" @click="copyText(base64DataUrl)" :disabled="!base64DataUrl">复制</JcButton>
           </div>
-          <textarea readonly class="base64-output-box flex-textarea" :value="base64DataUrl" placeholder="上传图片后自动生成..."></textarea>
+          <JcTextarea :model-value="base64DataUrl" mono readonly class="jc-fill" placeholder="上传图片后自动生成..." />
         </div>
 
         <div class="copy-text-group flex-fill-group">
           <div class="group-title">
             <span>纯 Base64 数据</span>
-            <button class="tool-btn small" @click="copyText(base64Pure)" :disabled="!base64Pure">复制</button>
+            <JcButton size="small" @click="copyText(base64Pure)" :disabled="!base64Pure">复制</JcButton>
           </div>
-          <textarea readonly class="base64-output-box flex-textarea" :value="base64Pure" placeholder="上传图片后自动生成..."></textarea>
+          <JcTextarea :model-value="base64Pure" mono readonly class="jc-fill" placeholder="上传图片后自动生成..." />
         </div>
 
         <div class="copy-text-group flex-row">
           <div class="flex-item">
             <div class="group-title">
               <span>HTML Image 标签</span>
-              <button class="tool-btn small" @click="copyText(base64Html)" :disabled="!base64Html">复制</button>
+              <JcButton size="small" @click="copyText(base64Html)" :disabled="!base64Html">复制</JcButton>
             </div>
-            <input type="text" readonly :value="base64Html" class="base64-input-line" placeholder="等待生成..." />
+            <JcInput :model-value="base64Html" readonly placeholder="等待生成..." style="font-family: 'Cascadia Code', Consolas, monospace" />
           </div>
           <div class="flex-item">
             <div class="group-title">
               <span>CSS Background 声明</span>
-              <button class="tool-btn small" @click="copyText(base64Css)" :disabled="!base64Css">复制</button>
+              <JcButton size="small" @click="copyText(base64Css)" :disabled="!base64Css">复制</JcButton>
             </div>
-            <input type="text" readonly :value="base64Css" class="base64-input-line" placeholder="等待生成..." />
+            <JcInput :model-value="base64Css" readonly placeholder="等待生成..." style="font-family: 'Cascadia Code', Consolas, monospace" />
           </div>
         </div>
       </div>
@@ -298,11 +309,11 @@ function clearDecoder() {
         <div class="pane-label-bar">
           <span>粘贴 Base64 字符串</span>
           <div class="pane-acts">
-            <button class="tool-btn pri small" @click="handleDecode" :disabled="!base64Input.trim()">解析还原</button>
-            <button class="tool-btn err small" @click="clearDecoder">清空</button>
+            <JcButton type="primary" size="small" @click="handleDecode" :disabled="!base64Input.trim()">解析还原</JcButton>
+            <JcButton size="small" danger ghost @click="clearDecoder">清空</JcButton>
           </div>
         </div>
-        <textarea v-model="base64Input" @input="handleDecode" class="base64-input-area" placeholder="在此处粘贴图片的 Base64 字符串（支持包含或不包含前缀 data:image/...;base64,）..." spellcheck="false"></textarea>
+        <JcTextarea v-model="base64Input" @input="handleDecode" mono :spellcheck="false" class="jc-fill" placeholder="在此处粘贴图片的 Base64 字符串（支持包含或不包含前缀 data:image/...;base64,）..." />
         <div v-if="decodeError" class="tool-footer-error style-inline">{{ decodeError }}</div>
       </div>
 
@@ -321,56 +332,14 @@ function clearDecoder() {
             <div>尺寸: <strong>{{ decodedWidth }} x {{ decodedHeight }} Px</strong></div>
             <div>预估大小: <strong>{{ formatBytes(decodedSize) }}</strong></div>
           </div>
-          <button class="tool-btn pri" @click="downloadDecodedImage">下载图片到本地</button>
+          <JcButton type="primary" block @click="downloadDecodedImage">下载图片到本地</JcButton>
         </div>
       </div>
     </div>
-  </div>
+  </ToolShell>
 </template>
 
 <style scoped lang="scss">
-.tool-container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 100%;
-  padding: 12px;
-  background: var(--jc-bg-app);
-  overflow: hidden;
-}
-.tool-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-  flex-shrink: 0;
-}
-.tool-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--jc-text-highlight);
-}
-.tool-actions-tabs {
-  display: flex;
-  background: var(--jc-bg-elevated);
-  border-radius: 4px;
-  padding: 2px;
-  border: 1px solid var(--jc-border-default);
-}
-.tab-btn {
-  background: none;
-  border: none;
-  color: var(--jc-text-secondary);
-  padding: 4px 12px;
-  font-size: 11px;
-  cursor: pointer;
-  border-radius: 3px;
-  transition: all 0.2s;
-  &.on {
-    background: var(--jc-color-accent);
-    color: var(--jc-color-white);
-  }
-}
 .file-input-hidden {
   position: absolute;
   width: 0;
@@ -495,21 +464,6 @@ function clearDecoder() {
     color: var(--jc-text-primary);
   }
 }
-.flat-remove-btn {
-  background: var(--jc-bg-btn);
-  color: var(--jc-text-primary);
-  border: 1px solid var(--jc-border-strong);
-  padding: 4px 10px;
-  font-size: 11px;
-  cursor: pointer;
-  border-radius: 3px;
-  transition: all 0.2s;
-  &:hover {
-    background: var(--jc-color-error);
-    color: #fff;
-    border-color: var(--jc-color-error);
-  }
-}
 
 /* 纵向伸展的 Base64 编码区 */
 .flat-results-pane {
@@ -548,36 +502,6 @@ function clearDecoder() {
   color: var(--jc-text-secondary);
   font-weight: 600;
 }
-.base64-output-box {
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  font-family: 'Cascadia Code', Consolas, monospace;
-  font-size: 11px;
-  padding: 8px;
-  outline: none;
-  border-radius: 3px;
-  width: 100%;
-  resize: none;
-  &:focus {
-    border-color: var(--jc-color-accent);
-  }
-  &.flex-textarea {
-    flex: 1;
-    min-height: 0;
-  }
-}
-.base64-input-line {
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  font-family: 'Cascadia Code', Consolas, monospace;
-  font-size: 11px;
-  padding: 6px 8px;
-  outline: none;
-  border-radius: 3px;
-  width: 100%;
-}
 
 /* ================= Tab 2: 原有 Base64 还原布局不变 ================= */
 .tool-body-split {
@@ -609,22 +533,6 @@ function clearDecoder() {
 .pane-acts {
   display: flex;
   gap: 6px;
-}
-.base64-input-area {
-  flex: 1;
-  width: 100%;
-  resize: none;
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  font-family: 'Cascadia Code', Consolas, monospace;
-  font-size: 11px;
-  padding: 8px;
-  outline: none;
-  border-radius: 3px;
-  &:focus {
-    border-color: var(--jc-color-accent);
-  }
 }
 
 .preview-decoded-pane {
@@ -689,40 +597,6 @@ function clearDecoder() {
   }
 }
 
-.tool-btn {
-  background: var(--jc-bg-btn);
-  color: var(--jc-text-primary);
-  border: none;
-  padding: 4px 12px;
-  font-size: 11px;
-  cursor: pointer;
-  border-radius: 2px;
-  transition: all 0.2s;
-  &:hover:not(:disabled) {
-    background: var(--jc-bg-btn-hover);
-  }
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-  &.pri {
-    background: var(--jc-color-accent);
-    color: var(--jc-color-white);
-    &:hover {
-      background: var(--jc-color-accent-hover);
-    }
-  }
-  &.err {
-    &:hover {
-      background: var(--jc-color-error);
-      color: var(--jc-color-white);
-    }
-  }
-  &.small {
-    padding: 2px 8px;
-    font-size: 10px;
-  }
-}
 .tool-footer-error.style-inline {
   flex-shrink: 0;
   margin-top: 8px;

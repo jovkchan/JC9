@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import ToolShell from '@/components/ui/ToolShell.vue'
+import JcButton from '@/components/ui/JcButton.vue'
+import JcTextarea from '@/components/ui/JcTextarea.vue'
 
 const tokenInput = ref('')
 const headerResult = ref('')
@@ -119,38 +122,32 @@ function clearAll() {
 </script>
 
 <template>
-  <div class="tool-container">
-    <div class="tool-header">
-      <div class="tool-title">JWT 解码器</div>
-      <div class="tool-actions">
-        <button class="tool-btn err" @click="clearAll">清空</button>
-      </div>
-    </div>
+  <ToolShell title="JWT 解码器">
+    <template #actions>
+      <JcButton danger size="small" @click="clearAll">清空</JcButton>
+    </template>
 
-    <!-- 上方：输入 Token -->
     <div class="jwt-input-section">
       <div class="pane-label">粘贴 JWT Token (三段式字符串)</div>
-      <textarea v-model="tokenInput" placeholder="在此处粘贴以 eyJ... 开头的三段式 JWT 令牌..." class="token-textarea" spellcheck="false"></textarea>
+      <JcTextarea v-model="tokenInput" mono :spellcheck="false" :rows="3" placeholder="在此处粘贴以 eyJ... 开头的三段式 JWT 令牌..." />
     </div>
 
-    <!-- 下方：Header 与 Payload 左右分栏 -->
     <div class="tool-body-split">
       <div class="editor-pane">
         <div class="pane-label-row">
           <span>Header (头部信息)</span>
-          <button class="tool-btn pri small" @click="copyText(headerResult)" :disabled="!headerResult">复制 Header</button>
+          <JcButton type="primary" size="small" :disabled="!headerResult" @click="copyText(headerResult)">复制 Header</JcButton>
         </div>
-        <textarea v-model="headerResult" readonly placeholder="等待解析..." class="readonly-output code-font" spellcheck="false"></textarea>
+        <JcTextarea v-model="headerResult" mono readonly :spellcheck="false" class="jc-fill" placeholder="等待解析..." />
       </div>
 
       <div class="editor-pane flex-column-layout">
         <div class="pane-label-row">
           <span>Payload (有效载荷)</span>
-          <button class="tool-btn pri small" @click="copyText(payloadResult)" :disabled="!payloadResult">复制 Payload</button>
+          <JcButton type="primary" size="small" :disabled="!payloadResult" @click="copyText(payloadResult)">复制 Payload</JcButton>
         </div>
-        <textarea v-model="payloadResult" readonly placeholder="等待解析..." class="readonly-output code-font flex-fill" spellcheck="false"></textarea>
-        
-        <!-- 时间戳声明解析看版 -->
+        <JcTextarea v-model="payloadResult" mono readonly :spellcheck="false" class="jc-fill" placeholder="等待解析..." />
+
         <div v-if="decodedTimes.length > 0" class="time-claims-panel">
           <div class="claims-title">时间戳声明转换</div>
           <div v-for="t in decodedTimes" :key="t.claim" class="claim-time-row">
@@ -162,31 +159,10 @@ function clearAll() {
       </div>
     </div>
     <div v-if="errorMsg" class="tool-footer-error">{{ errorMsg }}</div>
-  </div>
+  </ToolShell>
 </template>
 
 <style scoped lang="scss">
-.tool-container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 100%;
-  padding: 12px;
-  background: var(--jc-bg-app);
-  overflow: hidden;
-}
-.tool-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-  flex-shrink: 0;
-}
-.tool-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--jc-text-highlight);
-}
 .jwt-input-section {
   display: flex;
   flex-direction: column;
@@ -198,22 +174,6 @@ function clearAll() {
   color: var(--jc-text-secondary);
   margin-bottom: 6px;
   text-transform: uppercase;
-}
-.token-textarea {
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  font-family: 'Cascadia Code', Consolas, monospace;
-  font-size: 12px;
-  padding: 8px;
-  outline: none;
-  border-radius: 4px;
-  height: 70px;
-  resize: none;
-  width: 100%;
-  &:focus {
-    border-color: var(--jc-color-accent);
-  }
 }
 .tool-body-split {
   display: flex;
@@ -245,32 +205,6 @@ function clearAll() {
   margin-bottom: 6px;
   text-transform: uppercase;
   flex-shrink: 0;
-}
-textarea {
-  flex: 1;
-  width: 100%;
-  resize: none;
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  font-size: 12px;
-  padding: 8px;
-  outline: none;
-  border-radius: 2px;
-  &:focus {
-    border-color: var(--jc-color-accent);
-  }
-  &.code-font {
-    font-family: 'Cascadia Code', Consolas, monospace;
-  }
-}
-.flex-fill {
-  flex: 1;
-  min-height: 0;
-}
-.readonly-output {
-  background: var(--jc-bg-app);
-  color: var(--jc-color-success);
 }
 .time-claims-panel {
   margin-top: 8px;
@@ -312,40 +246,6 @@ textarea {
   color: var(--jc-color-success);
 }
 
-.tool-btn {
-  background: var(--jc-bg-btn);
-  color: var(--jc-text-primary);
-  border: none;
-  padding: 4px 12px;
-  font-size: 11px;
-  cursor: pointer;
-  border-radius: 2px;
-  transition: all 0.2s;
-  &:hover:not(:disabled) {
-    background: var(--jc-bg-btn-hover);
-  }
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-  &.pri {
-    background: var(--jc-color-accent);
-    color: var(--jc-color-white);
-    &:hover {
-      background: var(--jc-color-accent-hover);
-    }
-  }
-  &.err {
-    &:hover {
-      background: var(--jc-color-error);
-      color: var(--jc-color-white);
-    }
-  }
-  &.small {
-    padding: 2px 8px;
-    font-size: 10px;
-  }
-}
 .tool-footer-error {
   flex-shrink: 0;
   margin-top: 8px;

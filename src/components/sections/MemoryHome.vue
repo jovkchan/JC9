@@ -3,6 +3,8 @@ import { ref, computed, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useProjectStore } from '@/stores/project'
 import { useStatusStore } from '@/stores/status'
+import JcInput from '@/components/ui/JcInput.vue'
+import JcButton from '@/components/ui/JcButton.vue'
 
 interface Memory {
   id: string; scope: string; topicKey: string; title: string; content: string
@@ -104,16 +106,16 @@ onMounted(() => { loadMemoryList() })
           @click="memoryScope = sc; memoryPage = 1; loadMemoryList()">{{ sc }}</span>
       </div>
       <div class="memory-search-row">
-        <input v-model="memorySearch" class="memory-search-input" placeholder="搜索..." @keyup.enter="searchMemory" />
-        <button class="memory-search-btn" @click="searchMemory">搜索</button>
-        <button v-if="memorySearch" class="memory-clear-btn" @click="memorySearch = ''; searchMemory()">清除</button>
+        <JcInput v-model="memorySearch" placeholder="搜索..." style="flex:1;min-width:0" @keyup.enter="searchMemory" />
+        <JcButton size="small" @click="searchMemory">搜索</JcButton>
+        <JcButton v-if="memorySearch" size="small" @click="memorySearch = ''; searchMemory()">清除</JcButton>
       </div>
     </div>
 
     <div class="memory-list">
       <div class="memory-list-bar">
         <span>{{ memoryTotal }} 条</span>
-        <button v-if="compressSelected.length > 1" class="memory-compress-btn" @click="compressMemories">🗜 压缩 {{ compressSelected.length }}</button>
+        <JcButton v-if="compressSelected.length > 1" size="small" @click="compressMemories">🗜 压缩 {{ compressSelected.length }}</JcButton>
       </div>
 
       <div v-if="memoryList.length === 0" class="memory-empty">{{ memorySearch ? '无匹配' : '暂无记忆' }}</div>

@@ -1,10 +1,19 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import ToolShell from '@/components/ui/ToolShell.vue'
+import JcButton from '@/components/ui/JcButton.vue'
+import JcSegmented from '@/components/ui/JcSegmented.vue'
+import JcTextarea from '@/components/ui/JcTextarea.vue'
 
 const mode = ref<'encode' | 'decode'>('encode')
 const input = ref('')
 const output = ref('')
 const errorMsg = ref('')
+
+const modeOptions = [
+  { label: '文字 ➔ Base64', value: 'encode' },
+  { label: 'Base64 ➔ 文字', value: 'decode' },
+]
 
 function processText() {
   errorMsg.value = ''
@@ -58,149 +67,58 @@ function clearAll() {
 </script>
 
 <template>
-  <div class="tool-container">
-    <div class="tool-header">
-      <div class="tool-title">Base64 转换器</div>
-      <div class="tool-actions">
-        <div class="toggle-group">
-          <button :class="{ active: mode === 'encode' }" @click="switchMode('encode')">文字 ➔ Base64</button>
-          <button :class="{ active: mode === 'decode' }" @click="switchMode('decode')">Base64 ➔ 文字</button>
-        </div>
-        <button class="tool-btn pri" @click="processText">转换</button>
-        <button class="tool-btn" @click="copyResult" :disabled="!output">复制结果</button>
-        <button class="tool-btn err" @click="clearAll">清空</button>
+  <ToolShell title="Base64 转换器" subtitle="文字 ↔ Base64" split>
+    <template #actions>
+      <JcSegmented
+        :model-value="mode"
+        :options="modeOptions"
+        size="small"
+        @update:model-value="(v) => switchMode(v as 'encode' | 'decode')"
+      />
+      <JcButton type="primary" size="small" @click="processText">转换</JcButton>
+      <JcButton size="small" :disabled="!output" @click="copyResult">复制结果</JcButton>
+      <JcButton size="small" danger ghost @click="clearAll">清空</JcButton>
+    </template>
+
+    <template #left-label>{{ mode === 'encode' ? '原始内容 (文本)' : 'Base64 编码串' }}</template>
+    <template #left>
+      <JcTextarea
+        v-model="input"
+        mono
+        :spellcheck="false"
+        class="jc-fill"
+        :placeholder="mode === 'encode' ? '在此输入普通文本...' : '在此粘贴 Base64 串...'"
+        @input="processText"
+      />
+    </template>
+
+    <template #right-label>{{ mode === 'encode' ? 'Base64 编码串' : '恢复文本 (原始内容)' }}</template>
+    <template #right>
+      <div class="base64-right">
+        <JcTextarea
+          v-model="output"
+          mono
+          readonly
+          :spellcheck="false"
+          class="jc-fill"
+          :placeholder="mode === 'encode' ? '等待编码...' : '等待解码...'"
+        />
+        <div v-if="errorMsg" class="base64-error">{{ errorMsg }}</div>
       </div>
-    </div>
-    <div class="tool-body-split">
-      <div class="editor-pane">
-        <div class="pane-label">{{ mode === 'encode' ? '原始内容 (文本)' : 'Base64 编码串' }}</div>
-        <textarea v-model="input" @input="processText" :placeholder="mode === 'encode' ? '在此输入普通文本...' : '在此粘贴 Base64 串...'" spellcheck="false"></textarea>
-      </div>
-      <div class="editor-pane">
-        <div class="pane-label">{{ mode === 'encode' ? 'Base64 编码串' : '恢复文本 (原始内容)' }}</div>
-        <textarea v-model="output" readonly :placeholder="mode === 'encode' ? '等待编码...' : '等待解码...'" spellcheck="false" class="readonly-output"></textarea>
-      </div>
-    </div>
-    <div v-if="errorMsg" class="tool-footer-error">{{ errorMsg }}</div>
-  </div>
+    </template>
+  </ToolShell>
 </template>
 
-<style scoped lang="scss">
-.tool-container {
+<style scoped>
+.base64-right {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  width: 100%;
-  padding: 12px;
-  background: var(--jc-bg-app);
-  overflow: hidden;
-}
-.tool-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-  flex-shrink: 0;
-}
-.tool-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--jc-text-highlight);
-}
-.tool-actions {
-  display: flex;
-  align-items: center;
   gap: 8px;
-}
-.toggle-group {
-  display: flex;
-  border: 1px solid var(--jc-border-strong);
-  overflow: hidden;
-  button {
-    background: var(--jc-bg-btn);
-    color: var(--jc-text-secondary);
-    border: none;
-    padding: 4px 10px;
-    font-size: 11px;
-    cursor: pointer;
-    &.active {
-      background: var(--jc-color-accent);
-      color: var(--jc-color-white);
-    }
-  }
-}
-.tool-btn {
-  background: var(--jc-bg-btn);
-  color: var(--jc-text-primary);
-  border: none;
-  padding: 4px 12px;
-  font-size: 11px;
-  cursor: pointer;
-  &:hover:not(:disabled) {
-    background: var(--jc-bg-btn-hover);
-  }
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-  &.pri {
-    background: var(--jc-color-accent);
-    color: var(--jc-color-white);
-    &:hover {
-      background: var(--jc-color-accent-hover);
-    }
-  }
-  &.err {
-    &:hover {
-      background: var(--jc-color-error);
-      color: var(--jc-color-white);
-    }
-  }
-}
-.tool-body-split {
-  display: flex;
   flex: 1;
-  gap: 12px;
   min-height: 0;
 }
-.editor-pane {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-width: 0;
-  height: 100%;
-  border: 1px solid var(--jc-border-default);
-  background: var(--jc-bg-panel);
-  padding: 8px;
-}
-.pane-label {
-  font-size: 11px;
-  color: var(--jc-text-secondary);
-  margin-bottom: 6px;
-  text-transform: uppercase;
-}
-textarea {
-  flex: 1;
-  width: 100%;
-  resize: none;
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  font-family: 'Cascadia Code', Consolas, monospace;
-  font-size: 12px;
-  padding: 8px;
-  outline: none;
-  &:focus {
-    border-color: var(--jc-color-accent);
-  }
-}
-.readonly-output {
-  background: var(--jc-bg-app);
-  color: var(--jc-color-success);
-}
-.tool-footer-error {
+.base64-error {
   flex-shrink: 0;
-  margin-top: 8px;
   font-size: 11px;
   color: var(--jc-color-error);
   background: rgba(244, 71, 71, 0.1);

@@ -1,9 +1,28 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import ToolShell from '@/components/ui/ToolShell.vue'
+import JcButton from '@/components/ui/JcButton.vue'
+import JcSelect from '@/components/ui/JcSelect.vue'
+import JcTextarea from '@/components/ui/JcTextarea.vue'
+import JcSegmented from '@/components/ui/JcSegmented.vue'
 
 // 密钥生成配置
 const keySize = ref(2048)
 const keyUsage = ref<'encrypt' | 'sign'>('encrypt')
+
+const keySizeOptions = [
+  { label: '1024 bit (较快/低安全)', value: 1024 },
+  { label: '2048 bit (推荐/标准)', value: 2048 },
+  { label: '4096 bit (安全/慢)', value: 4096 }
+]
+const keyUsageOptions = [
+  { label: '加解密 (RSA-OAEP)', value: 'encrypt' },
+  { label: '签名验签 (RSASSA-PKCS1-v1_5)', value: 'sign' }
+]
+const tabOptions = [
+  { label: '公钥加密 / 私钥解密 (Encryption)', value: 'enc-dec' },
+  { label: '私钥签名 / 公钥验签 (Signature)', value: 'sign-verify' }
+]
 
 // 密钥 PEM
 const publicKeyPem = ref('')
@@ -232,12 +251,7 @@ function clearAll() {
 </script>
 
 <template>
-  <div class="tool-container">
-    <div class="tool-header">
-      <div class="tool-title">RSA 加解密 &amp; 签名工具 (RSA Crypto Tool)</div>
-      <div class="tool-desc-header">RSA 密钥生成、公钥加密、私钥解密、私钥签名与公钥验签 (Web Crypto API)</div>
-    </div>
-
+  <ToolShell title="RSA 加解密 &amp; 签名工具" subtitle="RSA 密钥生成、公钥加密、私钥解密、私钥签名与公钥验签 (Web Crypto API)">
     <div class="tool-body">
       <!-- 左栏：密钥配置与生成 -->
       <div class="left-pane card">
@@ -246,84 +260,74 @@ function clearAll() {
         <div class="config-row">
           <div class="cfg-item">
             <label>密钥长度 (Key Size)</label>
-            <select v-model="keySize" class="tool-select">
-              <option :value="1024">1024 bit (较快/低安全)</option>
-              <option :value="2048">2048 bit (推荐/标准)</option>
-              <option :value="4096">4096 bit (安全/慢)</option>
-            </select>
+            <JcSelect :model-value="keySize" :options="keySizeOptions" style="width: 100%" @update:model-value="(v) => keySize = Number(v)" />
           </div>
           <div class="cfg-item">
             <label>密钥用途 (Usage)</label>
-            <select v-model="keyUsage" class="tool-select">
-              <option value="encrypt">加解密 (RSA-OAEP)</option>
-              <option value="sign">签名验签 (RSASSA-PKCS1-v1_5)</option>
-            </select>
+            <JcSelect v-model="keyUsage" :options="keyUsageOptions" style="width: 100%" />
           </div>
         </div>
 
         <div class="btn-group">
-          <button class="tool-btn pri" @click="generateKeyPair">生成 RSA 密钥对</button>
-          <button class="tool-btn err" @click="clearAll">全部清空</button>
+          <JcButton type="primary" @click="generateKeyPair">生成 RSA 密钥对</JcButton>
+          <JcButton danger @click="clearAll">全部清空</JcButton>
         </div>
 
         <!-- 公钥 PEM 框 -->
         <div class="pem-wrap">
           <div class="pem-header">
             <span>公钥 PEM (Public Key)</span>
-            <button class="btn-copy" @click="copyText(publicKeyPem)">复制</button>
+            <JcButton size="small" @click="copyText(publicKeyPem)">复制</JcButton>
           </div>
-          <textarea v-model="publicKeyPem" placeholder="此处显示生成的公钥，或粘贴您的 RSA 公钥 PEM..." spellcheck="false" class="code-font"></textarea>
+          <JcTextarea v-model="publicKeyPem" mono :rows="5" :spellcheck="false" placeholder="此处显示生成的公钥，或粘贴您的 RSA 公钥 PEM..." />
         </div>
 
         <!-- 私钥 PEM 框 -->
         <div class="pem-wrap">
           <div class="pem-header">
             <span>私钥 PEM (Private Key)</span>
-            <button class="btn-copy" @click="copyText(privateKeyPem)">复制</button>
+            <JcButton size="small" @click="copyText(privateKeyPem)">复制</JcButton>
           </div>
-          <textarea v-model="privateKeyPem" placeholder="此处显示生成的私钥，或粘贴您的 RSA 私钥 PEM..." spellcheck="false" class="code-font"></textarea>
+          <JcTextarea v-model="privateKeyPem" mono :rows="5" :spellcheck="false" placeholder="此处显示生成的私钥，或粘贴您的 RSA 私钥 PEM..." />
         </div>
       </div>
 
       <!-- 右栏：操作区域 -->
       <div class="right-pane">
         <!-- 切换 Tab -->
-        <div class="tab-header card">
-          <div class="tabs">
-            <button :class="{ active: activeTab === 'enc-dec' }" @click="activeTab = 'enc-dec'">
-              公钥加密 / 私钥解密 (Encryption)
-            </button>
-            <button :class="{ active: activeTab === 'sign-verify' }" @click="activeTab = 'sign-verify'">
-              私钥签名 / 公钥验签 (Signature)
-            </button>
-          </div>
+        <div class="card">
+          <JcSegmented
+            :model-value="activeTab"
+            :options="tabOptions"
+            @update:model-value="(v) => activeTab = v as 'enc-dec' | 'sign-verify'"
+          />
         </div>
 
         <!-- 操作面板 -->
         <div class="card op-panel">
           <div class="data-field">
             <label>输入数据 / 明文 (Plain Text)</label>
-            <textarea v-model="inputText" placeholder="输入要加密或签名的文本内容..." spellcheck="false"></textarea>
+            <JcTextarea v-model="inputText" :spellcheck="false" :rows="6" placeholder="输入要加密或签名的文本内容..." />
           </div>
 
           <!-- Tab 1: 加解密 -->
           <div v-if="activeTab === 'enc-dec'" class="tab-content">
             <div class="action-bar">
-              <button class="tool-btn pri" @click="encryptData">▲ 公钥加密 (Encrypt)</button>
-              <button class="tool-btn" @click="decryptData">▼ 私钥解密 (Decrypt)</button>
+              <JcButton type="primary" @click="encryptData">▲ 公钥加密 (Encrypt)</JcButton>
+              <JcButton @click="decryptData">▼ 私钥解密 (Decrypt)</JcButton>
             </div>
             
             <div class="data-field">
               <label>加密结果 / 密文 (Base64 Encrypted String)</label>
-              <textarea v-model="outputText" placeholder="加密后的 Base64 文本..." spellcheck="false" class="code-font"></textarea>
+              <JcTextarea v-model="outputText" mono :spellcheck="false" :rows="6" placeholder="加密后的 Base64 文本..." />
             </div>
           </div>
 
           <!-- Tab 2: 签名验签 -->
           <div v-else class="tab-content">
             <div class="action-bar">
-              <button class="tool-btn pri" @click="signData">🖋 私钥签名 (Sign)</button>
-              <button class="tool-btn" @click="verifyData">🔍 公钥验签 (Verify)</button>
+              <JcButton type="primary" @click="signData">🖋 私钥签名 (Sign)</JcButton>
+              <JcButton @click="verifyData">🔍 公钥验签 (Verify)</JcButton>
               
               <!-- 验签状态指示器 -->
               <span v-if="verifyStatus === 'success'" class="status-tag success">✓ 验签通过 (Signature Valid)</span>
@@ -332,7 +336,7 @@ function clearAll() {
 
             <div class="data-field">
               <label>签名值 (Base64 Signature String)</label>
-              <textarea v-model="signatureText" placeholder="生成的 Base64 签名串..." spellcheck="false" class="code-font"></textarea>
+              <JcTextarea v-model="signatureText" mono :spellcheck="false" :rows="6" placeholder="生成的 Base64 签名串..." />
             </div>
           </div>
         </div>
@@ -344,35 +348,10 @@ function clearAll() {
         </div>
       </div>
     </div>
-  </div>
+  </ToolShell>
 </template>
 
 <style scoped lang="scss">
-.tool-container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 100%;
-  padding: 16px;
-  background: var(--jc-bg-app);
-  overflow-y: auto;
-  gap: 16px;
-}
-.tool-header {
-  flex-shrink: 0;
-  border-left: 3px solid var(--jc-color-accent);
-  padding-left: 10px;
-}
-.tool-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--jc-text-highlight);
-}
-.tool-desc-header {
-  font-size: 12px;
-  color: var(--jc-text-secondary);
-  margin-top: 2px;
-}
 .tool-body {
   display: grid;
   grid-template-columns: 1fr 1.2fr;
@@ -417,48 +396,9 @@ function clearAll() {
     color: var(--jc-text-secondary);
   }
 }
-.tool-select {
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  padding: 6px 10px;
-  font-size: 12px;
-  outline: none;
-  border-radius: 4px;
-  cursor: pointer;
-  &:focus {
-    border-color: var(--jc-color-accent);
-  }
-}
 .btn-group {
   display: flex;
   gap: 8px;
-}
-.tool-btn {
-  background: var(--jc-bg-btn);
-  color: var(--jc-text-primary);
-  border: none;
-  padding: 8px 16px;
-  font-size: 12px;
-  cursor: pointer;
-  border-radius: 4px;
-  transition: all 0.2s;
-  &:hover {
-    background: var(--jc-bg-btn-hover);
-  }
-  &.pri {
-    background: var(--jc-color-accent);
-    color: var(--jc-color-white);
-    &:hover {
-      background: var(--jc-color-accent-hover);
-    }
-  }
-  &.err {
-    &:hover {
-      background: var(--jc-color-error);
-      color: var(--jc-color-white);
-    }
-  }
 }
 
 // PEM 框
@@ -474,68 +414,12 @@ function clearAll() {
   font-size: 11px;
   color: var(--jc-text-secondary);
 }
-.btn-copy {
-  background: none;
-  border: none;
-  color: var(--jc-color-accent);
-  cursor: pointer;
-  font-size: 11px;
-  &:hover {
-    text-decoration: underline;
-  }
-}
-textarea {
-  width: 100%;
-  height: 120px;
-  resize: vertical;
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  border-radius: 4px;
-  color: var(--jc-text-primary);
-  padding: 8px;
-  font-size: 12px;
-  line-height: 1.4;
-  outline: none;
-  &:focus {
-    border-color: var(--jc-color-accent);
-  }
-  &.code-font {
-    font-family: 'Cascadia Code', Consolas, monospace;
-  }
-}
 
 // 右栏操作
 .right-pane {
   display: flex;
   flex-direction: column;
   gap: 16px;
-}
-.tab-header {
-  padding: 0;
-  overflow: hidden;
-}
-.tabs {
-  display: flex;
-  background: var(--jc-bg-elevated);
-  button {
-    flex: 1;
-    background: none;
-    border: none;
-    padding: 10px 16px;
-    font-size: 12px;
-    color: var(--jc-text-secondary);
-    cursor: pointer;
-    transition: all 0.2s;
-    &:hover {
-      background: var(--jc-bg-hover);
-      color: var(--jc-text-primary);
-    }
-    &.active {
-      background: var(--jc-bg-panel);
-      color: var(--jc-color-accent);
-      font-weight: 600;
-    }
-  }
 }
 .op-panel {
   gap: 16px;
@@ -547,9 +431,6 @@ textarea {
   label {
     font-size: 11px;
     color: var(--jc-text-secondary);
-  }
-  textarea {
-    height: 140px;
   }
 }
 .tab-content {

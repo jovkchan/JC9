@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import ToolShell from '@/components/ui/ToolShell.vue'
 
 // 基准设置
 const rootFontSize = ref(16)
@@ -150,12 +151,7 @@ function selectPreset(px: number) {
 </script>
 
 <template>
-  <div class="tool-container">
-    <div class="tool-header">
-      <div class="tool-title">CSS 单位换算器</div>
-      <div class="tool-desc-header">PX、REM、EM、VW、VH 实时联动转换</div>
-    </div>
-
+  <ToolShell title="CSS 单位换算器" subtitle="PX、REM、EM、VW、VH 实时联动转换">
     <div class="tool-body">
       <!-- 顶部基准配置卡片 -->
       <div class="config-section card">
@@ -281,35 +277,10 @@ function selectPreset(px: number) {
         </div>
       </div>
     </div>
-  </div>
+  </ToolShell>
 </template>
 
 <style scoped lang="scss">
-.tool-container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 100%;
-  padding: 16px;
-  background: var(--jc-bg-app);
-  overflow-y: auto;
-  gap: 16px;
-}
-.tool-header {
-  flex-shrink: 0;
-  border-left: 3px solid var(--jc-color-accent);
-  padding-left: 10px;
-}
-.tool-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--jc-text-highlight);
-}
-.tool-desc-header {
-  font-size: 12px;
-  color: var(--jc-text-secondary);
-  margin-top: 2px;
-}
 .tool-body {
   display: flex;
   flex-direction: column;

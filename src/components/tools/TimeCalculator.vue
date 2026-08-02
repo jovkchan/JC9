@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import ToolShell from '@/components/ui/ToolShell.vue'
+import JcButton from '@/components/ui/JcButton.vue'
 
 const activeTab = ref<'business-days' | 'date-diff'>('business-days')
 
@@ -140,20 +142,16 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="tool-container">
-    <div class="tool-header">
-      <div class="tool-title">时间计算器</div>
-      <div class="tool-actions-tabs">
-        <button :class="['tab-btn', { on: activeTab === 'business-days' }]" @click="activeTab = 'business-days'">工作日计算</button>
-        <button :class="['tab-btn', { on: activeTab === 'date-diff' }]" @click="activeTab = 'date-diff'">日期时间相差</button>
-      </div>
-    </div>
+  <ToolShell title="时间计算器">
+    <template #actions>
+      <JcButton size="small" :type="activeTab === 'business-days' ? 'primary' : 'default'" @click="activeTab = 'business-days'">工作日计算</JcButton>
+      <JcButton size="small" :type="activeTab === 'date-diff' ? 'primary' : 'default'" @click="activeTab = 'date-diff'">日期时间相差</JcButton>
+    </template>
 
-    <!-- Tab 1: 工作日计算 -->
     <div v-if="activeTab === 'business-days'" class="tool-body-split">
       <div class="control-pane">
         <div class="pane-label">设定计算参数</div>
-        
+
         <div class="field-group">
           <label class="field-label">起始日期</label>
           <input type="date" v-model="startDate" @change="calculateWorkDays" class="date-input-element" />
@@ -167,14 +165,14 @@ onMounted(() => {
           </div>
         </div>
 
-        <button class="tool-btn pri full-width" @click="calculateWorkDays">立即计算</button>
+        <JcButton type="primary" block @click="calculateWorkDays">立即计算</JcButton>
       </div>
 
       <div class="result-display-pane">
         <div class="pane-label">计算目标日期</div>
         <div class="result-show-box">
           <div class="calculated-date">{{ workDayResult }}</div>
-          <button class="tool-btn small" @click="copyText(workDayResult.split(' ')[0])" :disabled="!workDayResult">复制 YYYY-MM-DD</button>
+          <JcButton size="small" :disabled="!workDayResult" @click="copyText(workDayResult.split(' ')[0])">复制 YYYY-MM-DD</JcButton>
         </div>
         <div class="alert-tip-info">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
@@ -183,11 +181,10 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- Tab 2: 日期差值计算 -->
     <div v-else class="tool-body-split">
       <div class="control-pane">
         <div class="pane-label">输入两个日期时间</div>
-        
+
         <div class="field-group">
           <label class="field-label">起始时间 (Start Time)</label>
           <input type="datetime-local" v-model="diffStart" @change="calculateDiff" class="date-input-element" />
@@ -198,22 +195,22 @@ onMounted(() => {
           <input type="datetime-local" v-model="diffEnd" @change="calculateDiff" class="date-input-element" />
         </div>
 
-        <button class="tool-btn pri full-width" @click="calculateDiff">立即计算差值</button>
+        <JcButton type="primary" block @click="calculateDiff">立即计算差值</JcButton>
       </div>
 
       <div class="result-display-pane">
         <div class="pane-label">时间差值折算</div>
-        
+
         <div class="result-show-box text-left">
           <div class="diff-span-label">相差时长跨度：</div>
           <div class="diff-span-value">{{ diffResultStr }}</div>
-          
+
           <div class="divider-line"></div>
-          
+
           <div class="diff-span-label">总毫秒差 (Milliseconds)：</div>
           <div class="diff-span-value code-font">
             {{ diffMs }} ms
-            <button class="copy-small-btn" @click="copyText(String(diffMs))">复制</button>
+            <JcButton size="small" @click="copyText(String(diffMs))">复制</JcButton>
           </div>
         </div>
 
@@ -237,52 +234,10 @@ onMounted(() => {
         </div>
       </div>
     </div>
-  </div>
+  </ToolShell>
 </template>
 
 <style scoped lang="scss">
-.tool-container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 100%;
-  padding: 12px;
-  background: var(--jc-bg-app);
-  overflow: hidden;
-}
-.tool-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-  flex-shrink: 0;
-}
-.tool-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--jc-text-highlight);
-}
-.tool-actions-tabs {
-  display: flex;
-  background: var(--jc-bg-elevated);
-  border-radius: 4px;
-  padding: 2px;
-  border: 1px solid var(--jc-border-default);
-}
-.tab-btn {
-  background: none;
-  border: none;
-  color: var(--jc-text-secondary);
-  padding: 4px 12px;
-  font-size: 11px;
-  cursor: pointer;
-  border-radius: 3px;
-  transition: all 0.2s;
-  &.on {
-    background: var(--jc-color-accent);
-    color: var(--jc-color-white);
-  }
-}
 .tool-body-split {
   display: flex;
   flex: 1;
@@ -428,21 +383,6 @@ onMounted(() => {
   border-bottom: 1px solid var(--jc-border-default);
   margin: 6px 0 12px 0;
 }
-.copy-small-btn {
-  background: var(--jc-bg-btn);
-  color: var(--jc-text-primary);
-  border: none;
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 2px;
-  cursor: pointer;
-  font-family: inherit;
-  font-weight: 400;
-  &:hover {
-    background: var(--jc-color-accent);
-    color: #fff;
-  }
-}
 
 .stats-grid {
   display: grid;
@@ -468,37 +408,5 @@ onMounted(() => {
   font-size: 10px;
   color: var(--jc-text-secondary);
   margin-top: 4px;
-}
-
-.tool-btn {
-  background: var(--jc-bg-btn);
-  color: var(--jc-text-primary);
-  border: none;
-  padding: 6px 16px;
-  font-size: 11px;
-  cursor: pointer;
-  border-radius: 2px;
-  transition: all 0.2s;
-  &:hover:not(:disabled) {
-    background: var(--jc-bg-btn-hover);
-  }
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-  &.pri {
-    background: var(--jc-color-accent);
-    color: var(--jc-color-white);
-    &:hover {
-      background: var(--jc-color-accent-hover);
-    }
-  }
-  &.small {
-    padding: 3px 10px;
-    font-size: 10px;
-  }
-  &.full-width {
-    width: 100%;
-  }
 }
 </style>

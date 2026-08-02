@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import ToolShell from '@/components/ui/ToolShell.vue'
+import JcButton from '@/components/ui/JcButton.vue'
+import JcInput from '@/components/ui/JcInput.vue'
+import JcTextarea from '@/components/ui/JcTextarea.vue'
+import JcModal from '@/components/ui/JcModal.vue'
 
 const envs = ref<[string, string][]>([])
 const filterText = ref('')
@@ -93,20 +98,13 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="tool-container">
-    <div class="tool-header">
-      <div class="tool-title">系统环境变量 (进程级)</div>
-      <div class="tool-actions">
-        <input v-model="filterText" placeholder="搜索变量名或内容..." class="filter-input" />
-        <button class="tool-btn pri" @click="openAddModal">
-          + 新增变量
-        </button>
-        <button class="tool-btn" @click="fetchEnv" :disabled="loading">
-          {{ loading ? '刷新中...' : '刷新' }}
-        </button>
-      </div>
-    </div>
-    
+  <ToolShell title="系统环境变量" subtitle="进程级">
+    <template #actions>
+      <JcInput v-model="filterText" placeholder="搜索变量名或内容..." style="width: 220px" />
+      <JcButton type="primary" @click="openAddModal">+ 新增变量</JcButton>
+      <JcButton :loading="loading" @click="fetchEnv">{{ loading ? '刷新中...' : '刷新' }}</JcButton>
+    </template>
+
     <div class="tool-body-table">
       <div class="table-header-row">
         <div class="col-key">变量名 (Key)</div>
@@ -118,15 +116,11 @@ onMounted(() => {
           <div class="col-key" :title="k">{{ k }}</div>
           <div class="col-val" :title="v">{{ v }}</div>
           <div class="col-act">
-            <button class="row-btn" @click="copyValue(k, v)">
+            <JcButton size="small" @click="copyValue(k, v)">
               {{ copiedKey === k ? '已复制' : '复制' }}
-            </button>
-            <button class="row-btn" @click="openEditModal(k, v)">
-              编辑
-            </button>
-            <button class="row-btn danger" @click="handleDelete(k)">
-              删除
-            </button>
+            </JcButton>
+            <JcButton size="small" @click="openEditModal(k, v)">编辑</JcButton>
+            <JcButton size="small" danger @click="handleDelete(k)">删除</JcButton>
           </div>
         </div>
         <div v-if="filteredEnvs.length === 0 && !loading" class="empty-tip">
@@ -136,110 +130,35 @@ onMounted(() => {
     </div>
 
     <!-- 新增/编辑模态框 -->
-    <Teleport to="body">
-      <div v-if="showModal" class="mbg" @mousedown.self="showModal = false">
-        <div class="mw">
-          <div class="mt">{{ modalMode === 'add' ? '新增环境变量' : '编辑环境变量' }}</div>
-          <div class="mb">
-            <div class="fld">
-              <label>变量名 (Key)</label>
-              <input 
-                v-model="modalKey" 
-                placeholder="如: NODE_ENV" 
-                :disabled="modalMode === 'edit'" 
-                :class="{ 'readonly-input': modalMode === 'edit' }"
-                @keyup.enter="handleSave"
-                autofocus
-              />
-            </div>
-            <div class="fld">
-              <label>变量值 (Value)</label>
-              <textarea 
-                v-model="modalValue" 
-                placeholder="请输入环境变量的值" 
-                rows="4"
-                class="value-textarea"
-              ></textarea>
-            </div>
-            
-            <div v-if="modalError" class="modal-error">
-              {{ modalError }}
-            </div>
-
-            <div class="acts">
-              <button class="tool-btn" @click="showModal = false">取消</button>
-              <button class="tool-btn pri" @click="handleSave">保存</button>
-            </div>
-          </div>
-        </div>
+    <JcModal v-model:open="showModal" :title="modalMode === 'add' ? '新增环境变量' : '编辑环境变量'" width="440">
+      <div class="fld">
+        <label>变量名 (Key)</label>
+        <JcInput
+          v-model="modalKey"
+          placeholder="如: NODE_ENV"
+          :disabled="modalMode === 'edit'"
+          style="font-family: 'Cascadia Code', Consolas, monospace"
+          @keyup.enter="handleSave"
+        />
       </div>
-    </Teleport>
-  </div>
+      <div class="fld">
+        <label>变量值 (Value)</label>
+        <JcTextarea v-model="modalValue" placeholder="请输入环境变量的值" :rows="4" mono />
+      </div>
+
+      <div v-if="modalError" class="modal-error">
+        {{ modalError }}
+      </div>
+
+      <template #footer>
+        <JcButton @click="showModal = false">取消</JcButton>
+        <JcButton type="primary" @click="handleSave">保存</JcButton>
+      </template>
+    </JcModal>
+  </ToolShell>
 </template>
 
 <style scoped lang="scss">
-.tool-container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 100%;
-  padding: 12px;
-  background: var(--jc-bg-app);
-  overflow: hidden;
-}
-.tool-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-  flex-shrink: 0;
-}
-.tool-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--jc-text-highlight);
-}
-.tool-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.filter-input {
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  padding: 4px 8px;
-  font-size: 12px;
-  width: 220px;
-  outline: none;
-  &:focus {
-    border-color: var(--jc-color-accent);
-  }
-}
-.tool-btn {
-  background: var(--jc-bg-btn);
-  color: var(--jc-text-primary);
-  border: 1px solid var(--jc-border-strong);
-  padding: 4px 12px;
-  font-size: 11px;
-  cursor: pointer;
-  border-radius: 3px;
-  &:hover:not(:disabled) {
-    background: var(--jc-bg-btn-hover);
-  }
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-  &.pri {
-    background: var(--jc-color-accent);
-    color: var(--jc-color-white);
-    border-color: var(--jc-color-accent);
-    &:hover {
-      background: var(--jc-color-accent-hover, #007acc);
-    }
-  }
-}
 .tool-body-table {
   display: flex;
   flex-direction: column;
@@ -299,28 +218,6 @@ onMounted(() => {
   justify-content: flex-end;
   gap: 4px;
 }
-.row-btn {
-  background: var(--jc-bg-btn);
-  color: var(--jc-text-primary);
-  border: 1px solid var(--jc-border-strong);
-  padding: 2px 8px;
-  font-size: 10px;
-  cursor: pointer;
-  border-radius: 3px;
-  transition: all 0.2s;
-  &:hover {
-    background: var(--jc-bg-btn-hover);
-    border-color: var(--jc-color-accent);
-  }
-  
-  &.danger {
-    &:hover {
-      background: var(--jc-color-error);
-      color: var(--jc-color-white);
-      border-color: var(--jc-color-error);
-    }
-  }
-}
 .empty-tip {
   text-align: center;
   padding: 40px;
@@ -329,86 +226,6 @@ onMounted(() => {
 }
 
 // 模态框样式
-.mbg {
-  position: fixed;
-  inset: 0;
-  background: var(--jc-bg-overlay);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 2000;
-}
-.mw {
-  background: var(--jc-bg-elevated);
-  border: 1px solid var(--jc-border-strong);
-  min-width: 450px;
-  max-width: 90%;
-  box-shadow: var(--jc-shadow-modal);
-  border-radius: 4px;
-}
-.mt {
-  background: var(--jc-bg-panel);
-  padding: 12px 16px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--jc-text-highlight);
-  border-bottom: 1px solid var(--jc-border-default);
-}
-.mb {
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.fld {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  
-  label {
-    font-size: 11px;
-    color: var(--jc-text-secondary);
-    font-weight: 600;
-  }
-  
-  input {
-    background: var(--jc-bg-input);
-    border: 1px solid var(--jc-border-strong);
-    color: var(--jc-text-primary);
-    padding: 6px 10px;
-    font-size: 12px;
-    outline: none;
-    border-radius: 3px;
-    font-family: 'Cascadia Code', Consolas, monospace;
-    
-    &:focus {
-      border-color: var(--jc-color-accent);
-    }
-    
-    &.readonly-input {
-      background: var(--jc-bg-app);
-      color: var(--jc-text-secondary);
-      cursor: not-allowed;
-    }
-  }
-}
-
-.value-textarea {
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  padding: 6px 10px;
-  font-size: 12px;
-  outline: none;
-  border-radius: 3px;
-  font-family: 'Cascadia Code', Consolas, monospace;
-  resize: vertical;
-  
-  &:focus {
-    border-color: var(--jc-color-accent);
-  }
-}
-
 .modal-error {
   background: rgba(244, 67, 54, 0.1);
   border: 1px solid var(--jc-color-error);
@@ -418,10 +235,15 @@ onMounted(() => {
   font-size: 11px;
 }
 
-.acts {
+.fld {
   display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 4px;
+  flex-direction: column;
+  gap: 6px;
+
+  label {
+    font-size: 11px;
+    color: var(--jc-text-secondary);
+    font-weight: 600;
+  }
 }
 </style>

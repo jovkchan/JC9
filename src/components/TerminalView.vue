@@ -5,6 +5,8 @@ import { FitAddon } from '@xterm/addon-fit'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useProjectStore } from '@/stores/project'
+import JcContextMenu from '@/components/ui/JcContextMenu.vue'
+import type { JcContextMenuItem } from '@/components/ui'
 import '@xterm/xterm/css/xterm.css'
 
 const props = defineProps<{ processId: string; active: boolean }>()
@@ -23,6 +25,14 @@ function closeCtx() { ctxShow.value = false }
 function doCopy() { closeCtx(); if (term?.hasSelection()) navigator.clipboard.writeText(term.getSelection()) }
 function doPaste() { closeCtx(); navigator.clipboard.readText().then(t => send(t)) }
 function onCtx(e: MouseEvent) { e.preventDefault(); ctxX.value = e.clientX; ctxY.value = e.clientY; ctxShow.value = true }
+const ctxItems: JcContextMenuItem[] = [
+  { label: '复制', icon: '📋', value: 'copy' },
+  { label: '粘贴', icon: '📥', value: 'paste' },
+]
+function onCtxSelect(item: JcContextMenuItem) {
+  if (item.value === 'copy') doCopy()
+  else if (item.value === 'paste') doPaste()
+}
 
 function doFit(){setTimeout(()=>{if(!container.value||container.value.clientWidth===0||container.value.clientHeight===0)return;try{fit?.fit();if(fit && term){const r=term.rows??24;const c=term.cols??80;invoke('pty_resize',{processId:props.processId,rows:r,cols:c}).catch(()=>{})}}catch(e){}},30)}
 function send(d:string){invoke('pty_write',{processId:props.processId,data:Array.from(new TextEncoder().encode(d))}).catch(()=>{})}
@@ -71,14 +81,7 @@ onUnmounted(()=>{ul?.();ro?.disconnect();term?.dispose();})
       <input ref="inputRef" v-model="input" class="ti" placeholder="回车发送 | 点终端区域交互选择 ↑↓" @keyup.enter="sendLine" @keydown="onKd" spellcheck="false" />
     </div>
     <!-- 右键菜单 -->
-    <Teleport to="body">
-      <div v-if="ctxShow" class="ctx-overlay" @mousedown="closeCtx" @contextmenu.prevent="closeCtx">
-        <div class="ctx-menu" :style="{ left: ctxX + 'px', top: ctxY + 'px' }" @mousedown.stop>
-          <div class="ctx-item" @click="doCopy"><span class="ctx-icon"><svg viewBox="0 0 1024 1024" width="14" height="14" fill="currentColor"><path d="M768 832a128 128 0 0 1-128 128H256a128 128 0 0 1-128-128V384a128 128 0 0 1 128-128v576h512z m-128-704c35.346 0 64 28.654 64 64v576a64 64 0 0 1-64 64H320a64 64 0 0 1-64-64V192a64 64 0 0 1 64-64h320z m-64 64H384v512h192V192z"/></svg></span>复制</div>
-          <div class="ctx-item" @click="doPaste"><span class="ctx-icon"><svg viewBox="0 0 1024 1024" width="14" height="14" fill="currentColor"><path d="M704 128h160a32 32 0 0 1 32 32v736a32 32 0 0 1-32 32H160a32 32 0 0 1-32-32V160a32 32 0 0 1 32-32h160a192 192 0 0 1 384 0z m-64 0a128 128 0 0 0-256 0h256zM192 192v640h640V192H704v128H320V192H192z"/></svg></span>粘贴</div>
-        </div>
-      </div>
-    </Teleport>
+    <JcContextMenu :show="ctxShow" :x="ctxX" :y="ctxY" :items="ctxItems" @select="onCtxSelect" @update:show="ctxShow = $event" />
   </div>
 </template>
 
@@ -96,10 +99,3 @@ onUnmounted(()=>{ul?.();ro?.disconnect();term?.dispose();})
 }
 </style>
 
-<!-- 右键菜单样式（Teleport 到 body，不能用 scoped） -->
-<style lang="scss">
-.ctx-overlay { position:fixed; inset:0; z-index:99999; }
-.ctx-menu { position:fixed; z-index:100000; min-width:120px; background:var(--jc-bg-elevated); border:1px solid var(--jc-border-default); border-radius:6px; padding:4px; box-shadow:0 4px 16px rgba(0,0,0,.3); }
-.ctx-item { display:flex; align-items:center; gap:8px; padding:6px 12px; cursor:pointer; font-size:12px; color:var(--jc-text-primary); border-radius:4px; white-space:nowrap; user-select:none; &:hover { background:var(--jc-bg-hover); } }
-.ctx-icon { display:flex; align-items:center; width:16px; justify-content:center; color:var(--jc-text-secondary); }
-</style>

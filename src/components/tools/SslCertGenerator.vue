@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import ToolShell from '@/components/ui/ToolShell.vue'
+import JcButton from '@/components/ui/JcButton.vue'
+import JcInput from '@/components/ui/JcInput.vue'
+import JcSelect from '@/components/ui/JcSelect.vue'
+import JcTextarea from '@/components/ui/JcTextarea.vue'
 
 const mode = ref<'single' | 'chain'>('single')
 const commonName = ref('localhost')
@@ -10,6 +15,16 @@ const days = ref<number>(365)
 const algorithm = ref<'rsa' | 'ecdsa'>('rsa')
 const bits = ref<number>(2048)
 const curve = ref<string>('prime256v1')
+
+const bitsOptions = [
+  { label: '2048 位 (标准)', value: 2048 },
+  { label: '3072 位', value: 3072 },
+  { label: '4096 位 (高度安全)', value: 4096 }
+]
+const curveOptions = [
+  { label: 'prime256v1 (P-256)', value: 'prime256v1' },
+  { label: 'secp384r1 (P-384)', value: 'secp384r1' }
+]
 
 const loading = ref(false)
 const error = ref('')
@@ -117,11 +132,7 @@ function downloadAll() {
 </script>
 
 <template>
-  <div class="tool-container">
-    <div class="tool-header">
-      <div class="tool-title">SSL 自签名证书生成器</div>
-    </div>
-
+  <ToolShell title="SSL 自签名证书生成器">
     <div class="tool-body">
       <!-- 配置面板 -->
       <div class="card config-card">
@@ -154,11 +165,7 @@ function downloadAll() {
           <!-- Common Name -->
           <div class="config-item flex-2">
             <span class="config-label">常用名称 (Common Name / CN)</span>
-            <input 
-              v-model="commonName" 
-              placeholder="e.g. localhost 或 127.0.0.1" 
-              class="config-input"
-            />
+            <JcInput v-model="commonName" placeholder="e.g. localhost 或 127.0.0.1" />
           </div>
 
           <!-- 有效天数 -->
@@ -178,13 +185,8 @@ function downloadAll() {
           <div class="config-item flex-1">
             <span class="config-label">Subject Alternative Names (SAN) - 决定浏览器信任与否的关键</span>
             <div class="san-input-wrapper">
-              <input 
-                v-model="newSan" 
-                placeholder="添加域名或 IP (如 test.local 或 192.168.1.100)，回车确认" 
-                class="config-input" 
-                @keyup.enter="addSanTag"
-              />
-              <button class="tool-btn add-san-btn" @click="addSanTag">添加</button>
+              <JcInput v-model="newSan" placeholder="添加域名或 IP (如 test.local 或 192.168.1.100)，回车确认" @keyup.enter="addSanTag" style="flex: 1; min-width: 0" />
+              <JcButton size="small" @click="addSanTag">添加</JcButton>
             </div>
             <div class="san-tags-container">
               <div v-for="(tag, index) in sans" :key="tag" class="san-tag">
@@ -219,31 +221,19 @@ function downloadAll() {
           <!-- 算法特定参数 -->
           <div v-if="algorithm === 'rsa'" class="config-item flex-1">
             <span class="config-label">密钥长度 (Bits)</span>
-            <select v-model="bits" class="config-select">
-              <option :value="2048">2048 位 (标准)</option>
-              <option :value="3072">3072 位</option>
-              <option :value="4096">4096 位 (高度安全)</option>
-            </select>
+            <JcSelect :model-value="bits" :options="bitsOptions" style="width: 100%" @update:model-value="(v) => bits = Number(v)" />
           </div>
 
           <div v-if="algorithm === 'ecdsa'" class="config-item flex-1">
             <span class="config-label">曲线类型 (Curve)</span>
-            <select v-model="curve" class="config-select">
-              <option value="prime256v1">prime256v1 (P-256)</option>
-              <option value="secp384r1">secp384r1 (P-384)</option>
-            </select>
+            <JcSelect v-model="curve" :options="curveOptions" style="width: 100%" />
           </div>
         </div>
 
         <div class="action-row">
-          <button 
-            class="tool-btn pri generate-btn" 
-            :disabled="loading" 
-            @click="generate"
-          >
-            <span v-if="loading">正在调用系统 OpenSSL 生成证书...</span>
-            <span v-else>立即生成自签名证书</span>
-          </button>
+          <JcButton type="primary" size="large" :loading="loading" @click="generate">
+            {{ loading ? '正在调用系统 OpenSSL 生成证书...' : '立即生成自签名证书' }}
+          </JcButton>
         </div>
       </div>
 
@@ -258,9 +248,7 @@ function downloadAll() {
         <!-- 头部一键操作栏 -->
         <div class="results-actions-bar">
           <span class="status-success-tip">✔ 证书对生成成功！</span>
-          <button class="tool-btn download-all-btn" @click="downloadAll">
-            一键下载全部 PEM 证书文件 (适用于 MySQL / Nginx 配置)
-          </button>
+          <JcButton @click="downloadAll">一键下载全部 PEM 证书文件 (适用于 MySQL / Nginx 配置)</JcButton>
         </div>
 
         <!-- 1. 单证书模式下的布局 (双栏并排) -->
@@ -269,30 +257,18 @@ function downloadAll() {
           <div class="card result-card">
             <div class="result-header">
               <span class="result-title">服务器证书 (server.crt)</span>
-              <button 
-                class="now-copy-btn" 
-                :class="{ success: copySuccessMap['serverCert'] }"
-                @click="copyText('serverCert', serverCert)"
-              >
-                {{ copySuccessMap['serverCert'] ? '已复制 ✔' : '复制证书' }}
-              </button>
+              <JcButton size="small" @click="copyText('serverCert', serverCert)">{{ copySuccessMap['serverCert'] ? '已复制 ✔' : '复制证书' }}</JcButton>
             </div>
-            <textarea readonly class="key-display mono-display" :value="serverCert"></textarea>
+            <JcTextarea :model-value="serverCert" mono readonly class="jc-fill key-display" />
           </div>
 
           <!-- 私钥 (PrivateKey) -->
           <div class="card result-card">
             <div class="result-header">
               <span class="result-title">服务器私钥 (server.key)</span>
-              <button 
-                class="now-copy-btn" 
-                :class="{ success: copySuccessMap['serverKey'] }"
-                @click="copyText('serverKey', serverKey)"
-              >
-                {{ copySuccessMap['serverKey'] ? '已复制 ✔' : '复制私钥' }}
-              </button>
+              <JcButton size="small" @click="copyText('serverKey', serverKey)">{{ copySuccessMap['serverKey'] ? '已复制 ✔' : '复制私钥' }}</JcButton>
             </div>
-            <textarea readonly class="key-display mono-display" :value="serverKey"></textarea>
+            <JcTextarea :model-value="serverKey" mono readonly class="jc-fill key-display" />
           </div>
         </div>
 
@@ -363,119 +339,43 @@ function downloadAll() {
           <div class="chain-viewer">
             <div class="viewer-header" v-if="activeFile === 'ca'">
               <span class="viewer-title">CA 根证书 (ca.crt) <span class="tip-inline">需要配置在 MySQL 的 <code>ssl-ca</code> 或客户端 CA 校验项</span></span>
-              <button 
-                class="now-copy-btn" 
-                :class="{ success: copySuccessMap['ca'] }"
-                @click="copyText('ca', caCert)"
-              >
-                {{ copySuccessMap['ca'] ? '已复制 ✔' : '复制 CA 证书' }}
-              </button>
+              <JcButton size="small" @click="copyText('ca', caCert)">{{ copySuccessMap['ca'] ? '已复制 ✔' : '复制 CA 证书' }}</JcButton>
             </div>
             
             <div class="viewer-header" v-if="activeFile === 'server_cert'">
               <span class="viewer-title">服务端证书 (server.crt) <span class="tip-inline">需要配置在 MySQL 的 <code>ssl-cert</code></span></span>
-              <button 
-                class="now-copy-btn" 
-                :class="{ success: copySuccessMap['server_cert'] }"
-                @click="copyText('server_cert', serverCert)"
-              >
-                {{ copySuccessMap['server_cert'] ? '已复制 ✔' : '复制服务端证书' }}
-              </button>
+              <JcButton size="small" @click="copyText('server_cert', serverCert)">{{ copySuccessMap['server_cert'] ? '已复制 ✔' : '复制服务端证书' }}</JcButton>
             </div>
 
             <div class="viewer-header" v-if="activeFile === 'server_key'">
               <span class="viewer-title">服务端私钥 (server.key) <span class="tip-inline">需要配置在 MySQL 的 <code>ssl-key</code></span></span>
-              <button 
-                class="now-copy-btn" 
-                :class="{ success: copySuccessMap['server_key'] }"
-                @click="copyText('server_key', serverKey)"
-              >
-                {{ copySuccessMap['server_key'] ? '已复制 ✔' : '复制服务端私钥' }}
-              </button>
+              <JcButton size="small" @click="copyText('server_key', serverKey)">{{ copySuccessMap['server_key'] ? '已复制 ✔' : '复制服务端私钥' }}</JcButton>
             </div>
 
             <div class="viewer-header" v-if="activeFile === 'client_cert'">
               <span class="viewer-title">客户端证书 (client.crt) <span class="tip-inline">MySQL 双向认证时供客户端连接校验</span></span>
-              <button 
-                class="now-copy-btn" 
-                :class="{ success: copySuccessMap['client_cert'] }"
-                @click="copyText('client_cert', clientCert)"
-              >
-                {{ copySuccessMap['client_cert'] ? '已复制 ✔' : '复制客户端证书' }}
-              </button>
+              <JcButton size="small" @click="copyText('client_cert', clientCert)">{{ copySuccessMap['client_cert'] ? '已复制 ✔' : '复制客户端证书' }}</JcButton>
             </div>
 
             <div class="viewer-header" v-if="activeFile === 'client_key'">
               <span class="viewer-title">客户端私钥 (client.key) <span class="tip-inline">MySQL 双向认证时客户端持有私钥</span></span>
-              <button 
-                class="now-copy-btn" 
-                :class="{ success: copySuccessMap['client_key'] }"
-                @click="copyText('client_key', clientKey)"
-              >
-                {{ copySuccessMap['client_key'] ? '已复制 ✔' : '复制客户端私钥' }}
-              </button>
+              <JcButton size="small" @click="copyText('client_key', clientKey)">{{ copySuccessMap['client_key'] ? '已复制 ✔' : '复制客户端私钥' }}</JcButton>
             </div>
 
             <!-- 展示窗口 -->
-            <textarea 
-              v-if="activeFile === 'ca'" 
-              readonly 
-              class="key-display mono-display chain-display" 
-              :value="caCert"
-            ></textarea>
-            <textarea 
-              v-else-if="activeFile === 'server_cert'" 
-              readonly 
-              class="key-display mono-display chain-display" 
-              :value="serverCert"
-            ></textarea>
-            <textarea 
-              v-else-if="activeFile === 'server_key'" 
-              readonly 
-              class="key-display mono-display chain-display" 
-              :value="serverKey"
-            ></textarea>
-            <textarea 
-              v-else-if="activeFile === 'client_cert'" 
-              readonly 
-              class="key-display mono-display chain-display" 
-              :value="clientCert"
-            ></textarea>
-            <textarea 
-              v-else-if="activeFile === 'client_key'" 
-              readonly 
-              class="key-display mono-display chain-display" 
-              :value="clientKey"
-            ></textarea>
+            <JcTextarea v-if="activeFile === 'ca'" :model-value="caCert" mono readonly class="jc-fill key-display" />
+            <JcTextarea v-else-if="activeFile === 'server_cert'" :model-value="serverCert" mono readonly class="jc-fill key-display" />
+            <JcTextarea v-else-if="activeFile === 'server_key'" :model-value="serverKey" mono readonly class="jc-fill key-display" />
+            <JcTextarea v-else-if="activeFile === 'client_cert'" :model-value="clientCert" mono readonly class="jc-fill key-display" />
+            <JcTextarea v-else-if="activeFile === 'client_key'" :model-value="clientKey" mono readonly class="jc-fill key-display" />
           </div>
         </div>
       </div>
     </div>
-  </div>
+  </ToolShell>
 </template>
 
 <style scoped lang="scss">
-.tool-container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 100%;
-  padding: 16px;
-  background: var(--jc-bg-app);
-  overflow-y: auto;
-}
-
-.tool-header {
-  margin-bottom: 16px;
-  flex-shrink: 0;
-}
-
-.tool-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--jc-text-highlight);
-}
-
 .tool-body {
   display: flex;
   flex-direction: column;
@@ -595,10 +495,6 @@ function downloadAll() {
   gap: 8px;
 }
 
-.add-san-btn {
-  border: 1px solid var(--jc-border-strong) !important;
-}
-
 .san-tags-container {
   display: flex;
   flex-wrap: wrap;
@@ -670,63 +566,10 @@ function downloadAll() {
   }
 }
 
-.config-select {
-  width: 100%;
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  padding: 7px 10px;
-  font-size: 12px;
-  outline: none;
-  border-radius: 4px;
-  
-  &:focus {
-    border-color: var(--jc-color-accent);
-  }
-}
-
 .action-row {
   margin-top: 8px;
   display: flex;
   justify-content: flex-end;
-}
-
-.generate-btn {
-  min-width: 180px;
-  padding: 10px 20px;
-  font-size: 12px;
-  font-weight: 600;
-  border-radius: 4px;
-}
-
-.tool-btn {
-  background: var(--jc-bg-btn);
-  color: var(--jc-text-primary);
-  border: none;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.2s;
-  padding: 6px 12px;
-  border-radius: 4px;
-  font-size: 11px;
-  
-  &:hover:not(:disabled) {
-    background: var(--jc-bg-btn-hover);
-  }
-  
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-  
-  &.pri {
-    background: var(--jc-color-accent);
-    color: var(--jc-color-white);
-    
-    &:hover:not(:disabled) {
-      background: var(--jc-color-accent-hover, #007acc);
-    }
-  }
 }
 
 .error-banner {
@@ -765,18 +608,6 @@ function downloadAll() {
     font-weight: 600;
     color: var(--jc-color-success);
   }
-  
-  .download-all-btn {
-    background: var(--jc-color-success);
-    color: var(--jc-color-white);
-    font-weight: 600;
-    
-    &:hover {
-      background: var(--jc-bg-btn-hover);
-      color: var(--jc-color-success);
-      border: 1px solid var(--jc-color-success);
-    }
-  }
 }
 
 .results-grid {
@@ -810,48 +641,10 @@ function downloadAll() {
   color: var(--jc-text-highlight);
 }
 
-.now-copy-btn {
-  background: var(--jc-bg-btn);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  padding: 4px 10px;
-  font-size: 11px;
-  cursor: pointer;
-  border-radius: 4px;
-  transition: all 0.2s;
-  
-  &:hover {
-    background: var(--jc-bg-hover);
-    border-color: var(--jc-color-accent);
-  }
-  
-  &.success {
-    background: var(--jc-color-success);
-    color: var(--jc-color-white);
-    border-color: var(--jc-color-success);
-  }
-}
-
 .key-display {
   flex: 1;
   width: 100%;
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  padding: 10px;
-  font-size: 11px;
-  outline: none;
   resize: none;
-  border-radius: 4px;
-  
-  &:focus {
-    border-color: var(--jc-color-accent);
-  }
-}
-
-.mono-display {
-  font-family: 'Cascadia Code', Consolas, monospace;
-  line-height: 1.4;
 }
 
 // 证书链模式的工作区样式

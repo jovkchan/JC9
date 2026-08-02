@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
+import ToolShell from '@/components/ui/ToolShell.vue'
+import JcButton from '@/components/ui/JcButton.vue'
+import JcInput from '@/components/ui/JcInput.vue'
 
 const nowSeconds = ref(Math.floor(Date.now() / 1000))
 const nowMs = ref(Date.now())
@@ -103,10 +106,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="tool-container">
-    <div class="tool-header">
-      <div class="tool-title">时间戳转换器</div>
-    </div>
+  <ToolShell title="时间戳转换器">
     <div class="tool-body">
       <!-- 实时时钟 -->
       <div class="card now-card">
@@ -115,16 +115,16 @@ onUnmounted(() => {
           <div class="now-item">
             <span class="label">秒 (10位)</span>
             <span class="val-mono">{{ nowSeconds }}</span>
-            <button class="now-copy-btn" @click="copyCurrent(nowSeconds)">复制</button>
+            <JcButton size="small" @click="copyCurrent(nowSeconds)">复制</JcButton>
           </div>
           <div class="now-item">
             <span class="label">毫秒 (13位)</span>
             <span class="val-mono">{{ nowMs }}</span>
-            <button class="now-copy-btn" @click="copyCurrent(nowMs)">复制</button>
+            <JcButton size="small" @click="copyCurrent(nowMs)">复制</JcButton>
           </div>
-          <button class="tool-btn" :class="{ err: isTicking }" @click="isTicking ? stopTick() : startTick()">
+          <JcButton size="small" :danger="isTicking" @click="isTicking ? stopTick() : startTick()">
             {{ isTicking ? '暂停' : '启动' }}
-          </button>
+          </JcButton>
         </div>
       </div>
 
@@ -134,13 +134,13 @@ onUnmounted(() => {
         <div class="form-row">
           <div class="fld flex-2">
             <label>Unix 时间戳 (秒或毫秒)</label>
-            <input v-model="inputTimestamp" @input="convertToDate" placeholder="如: 1719385623" />
+            <JcInput v-model="inputTimestamp" @update:model-value="convertToDate" placeholder="如: 1719385623" />
           </div>
           <div class="fld flex-3">
             <label>格式化时间</label>
             <div class="row">
-              <input v-model="outputDate" readonly placeholder="等待转换..." class="readonly-output" />
-              <button class="tool-btn" @click="copyCurrent(parseInt(outputDate))" :disabled="!outputDate || outputDate.includes('失败')">复制</button>
+              <JcInput v-model="outputDate" readonly placeholder="等待转换..." style="flex: 1; min-width: 0" />
+              <JcButton size="small" @click="copyCurrent(parseInt(outputDate))" :disabled="!outputDate || outputDate.includes('失败')">复制</JcButton>
             </div>
           </div>
         </div>
@@ -153,8 +153,8 @@ onUnmounted(() => {
           <div class="fld flex-2">
             <label>本地日期时间字符串</label>
             <div class="row">
-              <input v-model="inputDateStr" @input="convertToTimestamp" placeholder="格式: YYYY-MM-DD HH:mm:ss" />
-              <button class="tool-btn" @click="fillNow">当前时间</button>
+              <JcInput v-model="inputDateStr" @update:model-value="convertToTimestamp" placeholder="格式: YYYY-MM-DD HH:mm:ss" style="flex: 1; min-width: 0" />
+              <JcButton size="small" @click="fillNow">当前时间</JcButton>
             </div>
           </div>
           <div class="fld flex-3">
@@ -162,39 +162,21 @@ onUnmounted(() => {
             <div class="row gap-12">
               <div class="row flex-1">
                 <span class="suffix-label">秒 (10位)：</span>
-                <input v-model="outputTimestampSec" readonly placeholder="秒" class="readonly-output inline-input" />
+                <JcInput v-model="outputTimestampSec" readonly placeholder="秒" style="flex: 1; min-width: 0" />
               </div>
               <div class="row flex-1">
                 <span class="suffix-label">毫秒 (13位)：</span>
-                <input v-model="outputTimestampMs" readonly placeholder="毫秒" class="readonly-output inline-input" />
+                <JcInput v-model="outputTimestampMs" readonly placeholder="毫秒" style="flex: 1; min-width: 0" />
               </div>
             </div>
           </div>
         </div>
       </div>
     </div>
-  </div>
+  </ToolShell>
 </template>
 
 <style scoped lang="scss">
-.tool-container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 100%;
-  padding: 12px;
-  background: var(--jc-bg-app);
-  overflow-y: auto;
-}
-.tool-header {
-  margin-bottom: 15px;
-  flex-shrink: 0;
-}
-.tool-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--jc-text-highlight);
-}
 .tool-body {
   display: flex;
   flex-direction: column;
@@ -238,18 +220,6 @@ onUnmounted(() => {
     min-width: 120px;
   }
 }
-.now-copy-btn {
-  background: none;
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  padding: 2px 8px;
-  font-size: 10px;
-  cursor: pointer;
-  &:hover {
-    background: var(--jc-bg-hover);
-    border-color: var(--jc-color-accent);
-  }
-}
 .form-row {
   display: flex;
   gap: 16px;
@@ -274,51 +244,9 @@ onUnmounted(() => {
 .gap-12 {
   gap: 12px;
 }
-input {
-  width: 100%;
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  padding: 6px 10px;
-  font-size: 12px;
-  outline: none;
-  font-family: 'Cascadia Code', Consolas, monospace;
-  &:focus {
-    border-color: var(--jc-color-accent);
-  }
-}
-.readonly-output {
-  background: var(--jc-bg-app);
-  color: var(--jc-color-success);
-}
-.inline-input {
-  padding: 4px 8px;
-}
 .suffix-label {
   font-size: 11px;
   color: var(--jc-text-secondary);
   white-space: nowrap;
-}
-.tool-btn {
-  background: var(--jc-bg-btn);
-  color: var(--jc-text-primary);
-  border: none;
-  padding: 6px 12px;
-  font-size: 11px;
-  cursor: pointer;
-  white-space: nowrap;
-  &:hover:not(:disabled) {
-    background: var(--jc-bg-btn-hover);
-  }
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-  &.err {
-    &:hover {
-      background: var(--jc-color-error);
-      color: var(--jc-color-white);
-    }
-  }
 }
 </style>

@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
+import ToolShell from '@/components/ui/ToolShell.vue'
+import JcButton from '@/components/ui/JcButton.vue'
+import JcTextarea from '@/components/ui/JcTextarea.vue'
 
 const inputSvg = ref(`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 100 100" width="100" height="100">
   <!-- This is a sample comment to be removed -->
@@ -225,164 +228,108 @@ function formatSize(bytes: number): string {
 </script>
 
 <template>
-  <div class="tool-container">
-    <div class="tool-header">
-      <div class="tool-title">SVG 预览与优化工具</div>
-      <div class="tool-desc-header">粘贴 SVG 代码，实时清理冗余元素和属性并预览</div>
-    </div>
-
-    <div class="tool-body">
-      <!-- 选项配置与输入区 -->
-      <div class="left-pane card">
-        <div class="card-title">优化选项设置 (Optimize Settings)</div>
-        <div class="options-grid">
-          <label class="opt-label">
-            <input type="checkbox" v-model="options.removeComments" />
-            <span>移除注释 (&lt;!-- --&gt;)</span>
-          </label>
-          <label class="opt-label">
-            <input type="checkbox" v-model="options.removeMetadata" />
-            <span>移除 XML 声明 &amp; DOCTYPE</span>
-          </label>
-          <label class="opt-label">
-            <input type="checkbox" v-model="options.removeNamespaces" />
-            <span>移除命名空间 &amp; 编辑器专有属性</span>
-          </label>
-          <label class="opt-label">
-            <input type="checkbox" v-model="options.removeEmptyElems" />
-            <span>移除空元素/空容器</span>
-          </label>
-          <label class="opt-label">
-            <input type="checkbox" v-model="options.precisionLimit" />
-            <span>数字精度限制</span>
-          </label>
-          <div v-if="options.precisionLimit" class="precision-slider-wrap">
-            <span class="p-text">保留小数精度: {{ options.precision }} 位</span>
-            <input type="range" v-model.number="options.precision" min="0" max="6" />
-          </div>
-        </div>
-
-        <div class="editor-wrap">
-          <div class="editor-header">
-            <span>输入原始 SVG 源码:</span>
-            <div class="editor-acts-left">
-              <button class="btn-clear" style="margin-right: 8px;" @click="fileInput?.click()">打开本地文件</button>
-              <button class="btn-clear" @click="clearAll">清空</button>
-            </div>
-          </div>
-          <input 
-            type="file" 
-            ref="fileInput" 
-            accept=".svg" 
-            style="display: none;" 
-            @change="handleFileSelect" 
-          />
-          <textarea v-model="inputSvg" placeholder="在这里粘贴 &lt;svg&gt;...&lt;/svg&gt; 代码..." spellcheck="false" class="code-editor"></textarea>
+  <ToolShell title="SVG 预览与优化工具" subtitle="粘贴 SVG 代码，实时清理冗余元素和属性并预览" split>
+    <template #left-label>优化选项与输入</template>
+    <template #left>
+      <div class="options-grid">
+        <label class="opt-label">
+          <input type="checkbox" v-model="options.removeComments" />
+          <span>移除注释 (&lt;!-- --&gt;)</span>
+        </label>
+        <label class="opt-label">
+          <input type="checkbox" v-model="options.removeMetadata" />
+          <span>移除 XML 声明 &amp; DOCTYPE</span>
+        </label>
+        <label class="opt-label">
+          <input type="checkbox" v-model="options.removeNamespaces" />
+          <span>移除命名空间 &amp; 编辑器专有属性</span>
+        </label>
+        <label class="opt-label">
+          <input type="checkbox" v-model="options.removeEmptyElems" />
+          <span>移除空元素/空容器</span>
+        </label>
+        <label class="opt-label">
+          <input type="checkbox" v-model="options.precisionLimit" />
+          <span>数字精度限制</span>
+        </label>
+        <div v-if="options.precisionLimit" class="precision-slider-wrap">
+          <span class="p-text">保留小数精度: {{ options.precision }} 位</span>
+          <input type="range" v-model.number="options.precision" min="0" max="6" />
         </div>
       </div>
 
-      <!-- 预览与导出结果 -->
-      <div class="right-pane">
-        <!-- 统计面板 -->
-        <div class="stats-panel card" v-if="outputSvg">
-          <div class="stat-item">
-            <span class="label">原始体积:</span>
-            <span class="value">{{ formatSize(inputSize) }}</span>
-          </div>
-          <div class="stat-arrow">➔</div>
-          <div class="stat-item">
-            <span class="label">优化后体积:</span>
-            <span class="value val-success">{{ formatSize(outputSize) }}</span>
-          </div>
-          <div class="stat-badge" :class="{ success: compressionRatio > 0 }">
-            {{ compressionRatio > 0 ? `节省了 ${compressionRatio}%` : '未发生压缩' }}
+      <div class="editor-wrap">
+        <div class="editor-header">
+          <span>输入原始 SVG 源码:</span>
+          <div class="editor-acts-left">
+            <JcButton size="small" @click="fileInput?.click()">打开本地文件</JcButton>
+            <JcButton danger size="small" @click="clearAll">清空</JcButton>
           </div>
         </div>
+        <input type="file" ref="fileInput" accept=".svg" style="display: none" @change="handleFileSelect" />
+        <JcTextarea v-model="inputSvg" mono :spellcheck="false" class="jc-fill" placeholder="在这里粘贴 &lt;svg&gt;...&lt;/svg&gt; 代码..." />
+      </div>
+    </template>
 
-        <!-- 实时预览面板 -->
-        <div class="preview-panel card">
-          <div class="preview-header">
-            <div class="preview-tabs">
-              <button :class="{ active: previewMode === 'after' }" @click="previewMode = 'after'">
-                优化后预览
-              </button>
-              <button :class="{ active: previewMode === 'before' }" @click="previewMode = 'before'">
-                优化前预览
-              </button>
-            </div>
-            <div class="scale-control">
-              <span class="scale-text">缩放: {{ Math.round(previewScale * 100) }}%</span>
-              <button @click="previewScale = Math.max(0.5, previewScale - 0.25)">-</button>
-              <button @click="previewScale = Math.min(4, previewScale + 0.25)">+</button>
-            </div>
-          </div>
-
-          <div class="checkerboard-bg">
-            <div class="preview-render-area" :style="{ transform: `scale(${previewScale})` }">
-              <div v-if="previewMode === 'after' && outputSvg" v-html="outputSvg"></div>
-              <div v-else-if="previewMode === 'before' && inputSvg" v-html="inputSvg"></div>
-              <div v-else class="preview-empty">等待输入有效的 SVG</div>
-            </div>
-          </div>
+    <template #right-label>预览与导出</template>
+    <template #right>
+      <div class="stats-panel card" v-if="outputSvg">
+        <div class="stat-item">
+          <span class="label">原始体积:</span>
+          <span class="value">{{ formatSize(inputSize) }}</span>
         </div>
-
-        <!-- 优化后源码输出 -->
-        <div class="output-panel card" v-if="outputSvg">
-          <div class="output-header">
-            <span>优化后的 SVG 源码:</span>
-            <div class="output-acts">
-              <button class="btn-act pri" @click="copyOutput">复制源码</button>
-              <button class="btn-act" @click="downloadSvg">下载 .svg</button>
-            </div>
-          </div>
-          <textarea readonly class="code-editor code-output" :value="outputSvg" spellcheck="false"></textarea>
+        <div class="stat-arrow">➔</div>
+        <div class="stat-item">
+          <span class="label">优化后体积:</span>
+          <span class="value val-success">{{ formatSize(outputSize) }}</span>
         </div>
-
-        <div v-if="errorMsg" class="error-panel card">
-          <span class="err-title">解析出错:</span>
-          <span class="err-desc">{{ errorMsg }}</span>
+        <div class="stat-badge" :class="{ success: compressionRatio > 0 }">
+          {{ compressionRatio > 0 ? `节省了 ${compressionRatio}%` : '未发生压缩' }}
         </div>
       </div>
-    </div>
-  </div>
+
+      <div class="preview-panel card">
+        <div class="preview-header">
+          <div class="preview-tabs">
+            <JcButton size="small" :type="previewMode === 'after' ? 'primary' : 'default'" @click="previewMode = 'after'">优化后预览</JcButton>
+            <JcButton size="small" :type="previewMode === 'before' ? 'primary' : 'default'" @click="previewMode = 'before'">优化前预览</JcButton>
+          </div>
+          <div class="scale-control">
+            <span class="scale-text">缩放: {{ Math.round(previewScale * 100) }}%</span>
+            <JcButton size="small" @click="previewScale = Math.max(0.5, previewScale - 0.25)">-</JcButton>
+            <JcButton size="small" @click="previewScale = Math.min(4, previewScale + 0.25)">+</JcButton>
+          </div>
+        </div>
+
+        <div class="checkerboard-bg">
+          <div class="preview-render-area" :style="{ transform: `scale(${previewScale})` }">
+            <div v-if="previewMode === 'after' && outputSvg" v-html="outputSvg"></div>
+            <div v-else-if="previewMode === 'before' && inputSvg" v-html="inputSvg"></div>
+            <div v-else class="preview-empty">等待输入有效的 SVG</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="output-panel card" v-if="outputSvg">
+        <div class="output-header">
+          <span>优化后的 SVG 源码:</span>
+          <div class="output-acts">
+            <JcButton type="primary" size="small" @click="copyOutput">复制源码</JcButton>
+            <JcButton size="small" @click="downloadSvg">下载 .svg</JcButton>
+          </div>
+        </div>
+        <JcTextarea mono readonly :spellcheck="false" class="jc-fill code-output" :model-value="outputSvg" />
+      </div>
+
+      <div v-if="errorMsg" class="error-panel card">
+        <span class="err-title">解析出错:</span>
+        <span class="err-desc">{{ errorMsg }}</span>
+      </div>
+    </template>
+  </ToolShell>
 </template>
 
 <style scoped lang="scss">
-.tool-container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 100%;
-  padding: 16px;
-  background: var(--jc-bg-app);
-  overflow-y: auto;
-  gap: 16px;
-}
-.tool-header {
-  flex-shrink: 0;
-  border-left: 3px solid var(--jc-color-accent);
-  padding-left: 10px;
-}
-.tool-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--jc-text-highlight);
-}
-.tool-desc-header {
-  font-size: 12px;
-  color: var(--jc-text-secondary);
-  margin-top: 2px;
-}
-.tool-body {
-  display: grid;
-  grid-template-columns: 1fr 1.2fr;
-  gap: 16px;
-  align-items: start;
-  max-width: 1250px;
-  @media (max-width: 950px) {
-    grid-template-columns: 1fr;
-  }
-}
 .card {
   background: var(--jc-bg-panel);
   border: 1px solid var(--jc-border-default);
@@ -457,33 +404,6 @@ function formatSize(bytes: number): string {
   font-size: 11px;
   color: var(--jc-text-secondary);
 }
-.btn-clear {
-  background: none;
-  border: none;
-  color: var(--jc-color-error);
-  font-size: 11px;
-  cursor: pointer;
-  &:hover {
-    text-decoration: underline;
-  }
-}
-.code-editor {
-  width: 100%;
-  height: 380px;
-  resize: vertical;
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  border-radius: 4px;
-  color: var(--jc-text-primary);
-  font-family: 'Cascadia Code', Consolas, monospace;
-  font-size: 12px;
-  padding: 10px;
-  line-height: 1.5;
-  outline: none;
-  &:focus {
-    border-color: var(--jc-color-accent);
-  }
-}
 
 // 右栏布局
 .right-pane {
@@ -551,24 +471,6 @@ function formatSize(bytes: number): string {
 .preview-tabs {
   display: flex;
   gap: 4px;
-  button {
-    background: none;
-    border: none;
-    padding: 4px 10px;
-    font-size: 11px;
-    color: var(--jc-text-secondary);
-    cursor: pointer;
-    border-radius: 3px;
-    &:hover {
-      background: var(--jc-bg-hover);
-      color: var(--jc-text-primary);
-    }
-    &.active {
-      background: var(--jc-bg-panel);
-      color: var(--jc-color-accent);
-      font-weight: 600;
-    }
-  }
 }
 .scale-control {
   display: flex;
@@ -578,22 +480,6 @@ function formatSize(bytes: number): string {
     font-size: 10px;
     color: var(--jc-text-secondary);
     margin-right: 4px;
-  }
-  button {
-    width: 20px;
-    height: 20px;
-    border: 1px solid var(--jc-border-strong);
-    background: var(--jc-bg-panel);
-    color: var(--jc-text-primary);
-    border-radius: 2px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: bold;
-    &:hover {
-      background: var(--jc-bg-hover);
-    }
   }
 }
 
@@ -646,27 +532,7 @@ function formatSize(bytes: number): string {
   display: flex;
   gap: 6px;
 }
-.btn-act {
-  background: var(--jc-bg-btn);
-  color: var(--jc-text-primary);
-  border: none;
-  padding: 4px 10px;
-  font-size: 11px;
-  cursor: pointer;
-  border-radius: 2px;
-  &:hover {
-    background: var(--jc-bg-btn-hover);
-  }
-  &.pri {
-    background: var(--jc-color-accent);
-    color: var(--jc-color-white);
-    &:hover {
-      background: var(--jc-color-accent-hover);
-    }
-  }
-}
 .code-output {
-  height: 180px;
   color: var(--jc-color-success);
 }
 

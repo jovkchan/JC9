@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { ref, watch, computed, onMounted } from 'vue'
+import ToolShell from '@/components/ui/ToolShell.vue'
+import JcButton from '@/components/ui/JcButton.vue'
+import JcInput from '@/components/ui/JcInput.vue'
 
 const cronDialect = ref<'linux' | 'spring'>('linux') // Linux Crontab (5位) 还是 Java Spring (6位)
 
@@ -307,13 +310,9 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="tool-container">
-    <div class="tool-header">
-      <div class="tool-title">Cron 表达式生成与解析器</div>
-    </div>
-
-    <div class="tool-body-split">
-      <!-- 左侧卡片点选区域 -->
+  <ToolShell title="Cron 表达式生成与解析器" split>
+    <template #left-label>点选生成配置</template>
+    <template #left>
       <div class="control-panel">
         <!-- 头部预置模板 -->
         <div class="setting-section border-b pb-12">
@@ -562,8 +561,10 @@ onMounted(() => {
           </div>
         </div>
       </div>
+    </template>
 
-      <!-- 右侧结果与解析展示栏 -->
+    <template #right-label>结果与解析</template>
+    <template #right>
       <div class="result-panel">
         <!-- 表达式规范选择 -->
         <div class="setting-section border-b pb-12">
@@ -582,14 +583,14 @@ onMounted(() => {
 
         <div class="setting-section">
           <div class="section-subtitle">1. 表达式绑定输出 (Cron Expression)</div>
-          <div class="cron-output-box">
-            <input 
-              v-model="manualCron" 
-              class="cron-expression-input" 
+          <div class="cron-input-row">
+            <JcInput
+              v-model="manualCron"
               @input="parseAndApplyCron"
-              placeholder="请输入 Cron 表达式" 
+              placeholder="请输入 Cron 表达式"
+              style="flex: 1; min-width: 0"
             />
-            <button class="tool-btn pri small copy-btn" @click="copyCron">复制表达式</button>
+            <JcButton type="primary" size="small" @click="copyCron">复制表达式</JcButton>
           </div>
         </div>
 
@@ -600,48 +601,16 @@ onMounted(() => {
           </div>
         </div>
       </div>
-    </div>
-  </div>
+    </template>
+  </ToolShell>
 </template>
 
 <style scoped lang="scss">
-.tool-container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 100%;
-  padding: 12px;
-  background: var(--jc-bg-app);
-  overflow: hidden;
-}
-.tool-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-  flex-shrink: 0;
-}
-.tool-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--jc-text-highlight);
-}
-.tool-body-split {
-  display: flex;
-  flex: 1;
-  gap: 16px;
-  min-height: 0;
-}
-
 /* 左侧配置栏 */
 .control-panel {
   display: flex;
   flex-direction: column;
   flex: 1;
-  background: var(--jc-bg-panel);
-  border: 1px solid var(--jc-border-default);
-  padding: 14px;
-  border-radius: 4px;
   gap: 14px;
   overflow-y: auto;
 }
@@ -840,10 +809,6 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   flex: 0 0 350px;
-  background: var(--jc-bg-panel);
-  border: 1px solid var(--jc-border-default);
-  padding: 14px;
-  border-radius: 4px;
   gap: 16px;
 }
 
@@ -854,28 +819,10 @@ onMounted(() => {
   padding: 2px 0;
 }
 
-.cron-output-box {
+.cron-input-row {
   display: flex;
-  gap: 6px;
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  border-radius: 4px;
-  padding: 4px;
+  gap: 8px;
   align-items: center;
-}
-.cron-expression-input {
-  flex: 1;
-  background: none;
-  border: none;
-  color: var(--jc-color-success);
-  font-family: 'Cascadia Code', Consolas, monospace;
-  font-size: 13px;
-  padding: 4px 8px;
-  outline: none;
-  min-width: 0;
-}
-.copy-btn {
-  flex-shrink: 0;
 }
 
 /* 中文解析框 */
@@ -896,30 +843,6 @@ onMounted(() => {
   line-height: 1.6;
 }
 
-.tool-btn {
-  background: var(--jc-bg-btn);
-  color: var(--jc-text-primary);
-  border: none;
-  padding: 4px 12px;
-  font-size: 11px;
-  cursor: pointer;
-  border-radius: 2px;
-  transition: all 0.2s;
-  &:hover:not(:disabled) {
-    background: var(--jc-bg-btn-hover);
-  }
-  &.pri {
-    background: var(--jc-color-accent);
-    color: var(--jc-color-white);
-    &:hover {
-      background: var(--jc-color-accent-hover);
-    }
-  }
-  &.small {
-    padding: 2px 8px;
-    font-size: 10px;
-  }
-}
 .flex { display: flex; }
 .flex-col { flex-direction: column; }
 .mt-8 { margin-top: 8px; }

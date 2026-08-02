@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import ToolShell from '@/components/ui/ToolShell.vue'
+import JcButton from '@/components/ui/JcButton.vue'
+import JcTextarea from '@/components/ui/JcTextarea.vue'
 
 const language = ref<'cn' | 'en'>('cn')
 const paragraphs = ref(3)
@@ -88,129 +91,56 @@ function copyText() {
 </script>
 
 <template>
-  <div class="tool-container">
-    <div class="tool-header">
-      <div class="tool-title">占位符文本生成器 (Lorem Ipsum)</div>
-      <div class="tool-actions">
-        <button class="tool-btn pri" @click="generateText">重新生成</button>
-        <button class="tool-btn pri" @click="copyText" :disabled="!output">复制文本</button>
-      </div>
-    </div>
+  <ToolShell title="占位符文本生成器" subtitle="Lorem Ipsum" split>
+    <template #actions>
+      <JcButton type="primary" size="small" @click="generateText">重新生成</JcButton>
+      <JcButton type="primary" size="small" :disabled="!output" @click="copyText">复制文本</JcButton>
+    </template>
 
-    <div class="tool-body-split">
-      <div class="control-panel">
-        <div class="setting-section">
-          <div class="section-subtitle">基本配置</div>
-          
-          <div class="config-field">
-            <label>语言模式</label>
-            <div class="radio-group">
-              <label class="radio-label">
-                <input type="radio" value="cn" v-model="language" @change="generateText" />
-                <span>优雅中文</span>
-              </label>
-              <label class="radio-label">
-                <input type="radio" value="en" v-model="language" @change="generateText" />
-                <span>经典英文 (Lorem)</span>
-              </label>
-            </div>
-          </div>
-
-          <div class="config-field mt-10">
-            <label>段落数量 (Paragraphs)</label>
-            <input type="number" v-model.number="paragraphs" min="1" max="50" @change="generateText" class="num-input" />
-          </div>
-
-          <div class="config-field mt-10">
-            <label>{{ language === 'cn' ? '每段大致字数' : '每段大致单词数' }}</label>
-            <input type="number" v-model.number="textLength" min="10" max="1000" @change="generateText" class="num-input" />
-          </div>
-
-          <div class="config-field mt-10">
-            <label class="checkbox-label">
-              <input type="checkbox" v-model="includeHtml" @change="generateText" />
-              <span>包含 HTML &lt;p&gt; 标签</span>
+    <template #left-label>基本配置</template>
+    <template #left>
+      <div class="setting-section">
+        <div class="config-field">
+          <label>语言模式</label>
+          <div class="radio-group">
+            <label class="radio-label">
+              <input type="radio" value="cn" v-model="language" @change="generateText" />
+              <span>优雅中文</span>
+            </label>
+            <label class="radio-label">
+              <input type="radio" value="en" v-model="language" @change="generateText" />
+              <span>经典英文 (Lorem)</span>
             </label>
           </div>
         </div>
-      </div>
 
-      <div class="result-display-panel">
-        <div class="pane-label">生成的占位符文本</div>
-        <textarea v-model="output" readonly placeholder="等待生成..." class="readonly-output text-display-area"></textarea>
+        <div class="config-field mt-10">
+          <label>段落数量 (Paragraphs)</label>
+          <input type="number" v-model.number="paragraphs" min="1" max="50" @change="generateText" class="num-input" />
+        </div>
+
+        <div class="config-field mt-10">
+          <label>{{ language === 'cn' ? '每段大致字数' : '每段大致单词数' }}</label>
+          <input type="number" v-model.number="textLength" min="10" max="1000" @change="generateText" class="num-input" />
+        </div>
+
+        <div class="config-field mt-10">
+          <label class="checkbox-label">
+            <input type="checkbox" v-model="includeHtml" @change="generateText" />
+            <span>包含 HTML &lt;p&gt; 标签</span>
+          </label>
+        </div>
       </div>
-    </div>
-  </div>
+    </template>
+
+    <template #right-label>生成的占位符文本</template>
+    <template #right>
+      <JcTextarea v-model="output" mono readonly :spellcheck="false" class="jc-fill" placeholder="等待生成..." />
+    </template>
+  </ToolShell>
 </template>
 
 <style scoped lang="scss">
-.tool-container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 100%;
-  padding: 12px;
-  background: var(--jc-bg-app);
-  overflow: hidden;
-}
-.tool-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-  flex-shrink: 0;
-}
-.tool-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--jc-text-highlight);
-}
-.tool-actions {
-  display: flex;
-  gap: 8px;
-}
-.tool-btn {
-  background: var(--jc-bg-btn);
-  color: var(--jc-text-primary);
-  border: none;
-  padding: 4px 12px;
-  font-size: 11px;
-  cursor: pointer;
-  border-radius: 2px;
-  transition: all 0.2s;
-  &:hover:not(:disabled) {
-    background: var(--jc-bg-btn-hover);
-  }
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-  &.pri {
-    background: var(--jc-color-accent);
-    color: var(--jc-color-white);
-    &:hover {
-      background: var(--jc-color-accent-hover);
-    }
-  }
-}
-.tool-body-split {
-  display: flex;
-  flex: 1;
-  gap: 16px;
-  min-height: 0;
-}
-
-/* 左侧配置栏 */
-.control-panel {
-  display: flex;
-  flex-direction: column;
-  flex: 0 0 260px;
-  background: var(--jc-bg-panel);
-  border: 1px solid var(--jc-border-default);
-  padding: 14px;
-  border-radius: 4px;
-  gap: 16px;
-}
 .setting-section {
   display: flex;
   flex-direction: column;
@@ -265,40 +195,4 @@ function copyText() {
     border-color: var(--jc-color-accent);
   }
 }
-
-/* 右侧展示栏 */
-.result-display-panel {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  background: var(--jc-bg-panel);
-  border: 1px solid var(--jc-border-default);
-  padding: 14px;
-  border-radius: 4px;
-  min-height: 0;
-}
-.pane-label {
-  font-size: 11px;
-  color: var(--jc-text-secondary);
-  margin-bottom: 8px;
-  text-transform: uppercase;
-}
-.text-display-area {
-  flex: 1;
-  width: 100%;
-  resize: none;
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  font-size: 12px;
-  padding: 10px;
-  outline: none;
-  border-radius: 3px;
-  line-height: 1.6;
-}
-.readonly-output {
-  background: var(--jc-bg-app);
-  color: var(--jc-text-primary);
-}
-.mt-10 { margin-top: 10px; }
 </style>

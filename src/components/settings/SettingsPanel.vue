@@ -7,6 +7,39 @@ import { useAiStore } from '@/stores/ai'
 import { save, open } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
 import { loadAllRoles, saveAllRoles, type AgentRole } from '@/config/roles'
+import JcModal from '@/components/ui/JcModal.vue'
+import JcInput from '@/components/ui/JcInput.vue'
+import JcSelect from '@/components/ui/JcSelect.vue'
+import JcTextarea from '@/components/ui/JcTextarea.vue'
+
+const formatOptions = [
+  { label: 'Markdown (推荐)', value: 'markdown' },
+  { label: '纯文本', value: 'plain' }
+]
+const visibilityOptions = [
+  { label: 'PRIVATE (私有本地)', value: 'PRIVATE' },
+  { label: 'PUBLIC (公开)', value: 'PUBLIC' }
+]
+const providerOptions = [
+  { label: 'DeepSeek', value: 'deepseek' },
+  { label: 'OpenAI', value: 'openai' },
+  { label: 'Ollama (本地)', value: 'ollama' },
+  { label: 'Google Gemini', value: 'gemini' },
+  { label: 'vLLM (自部署)', value: 'vllm' }
+]
+const mcpTransportOptions = [
+  { label: 'SSE', value: 'sse' },
+  { label: 'Stdio', value: 'stdio' }
+]
+const memoryTypeOptions = [
+  { label: '选择类型...', value: '' },
+  { label: 'decision - 架构决策', value: 'decision' },
+  { label: 'bugfix - Bug 修复', value: 'bugfix' },
+  { label: 'architecture - 模块结构', value: 'architecture' },
+  { label: 'pattern - 编码规范', value: 'pattern' },
+  { label: 'config - 配置变更', value: 'config' },
+  { label: 'discovery - 调研发现', value: 'discovery' }
+]
 
 interface Memory {
   id: string; scope: string; topicKey: string; title: string; content: string;
@@ -569,13 +602,6 @@ async function saveSettings() {
   setTimeout(() => { saveFeedback.value = '' }, 2000)
 }
 
-// ── Overlay click guard ──
-let formMousedownTarget: EventTarget | null = null
-function handleFormMousedown(e: MouseEvent) { formMousedownTarget = e.target }
-function handleModelOverlayClick(e: MouseEvent) { if (e.target === e.currentTarget && formMousedownTarget === e.currentTarget) cancelModelForm() }
-function handleRoleOverlayClick(e: MouseEvent) { if (e.target === e.currentTarget && formMousedownTarget === e.currentTarget) cancelRoleForm() }
-function handleMcpOverlayClick(e: MouseEvent) { if (e.target === e.currentTarget && formMousedownTarget === e.currentTarget) showMcpForm.value = false }
-
 onMounted(() => {
   defaultFormat.value = (localStorage.getItem('notes-default-format') as any) || 'markdown'
   defaultVisibility.value = (localStorage.getItem('notes-default-visibility') as any) || 'PRIVATE'
@@ -787,18 +813,12 @@ async function compressMemories() {
           <h3 class="pane-title">偏好设置</h3>
           <div class="form-group">
             <label>默认笔记格式</label>
-            <select v-model="defaultFormat" class="form-select">
-              <option value="markdown">Markdown (推荐)</option>
-              <option value="plain">纯文本</option>
-            </select>
+            <JcSelect :model-value="defaultFormat" :options="formatOptions" style="width: 100%" @update:model-value="(v) => defaultFormat = v as 'markdown' | 'plain'" />
             <span class="help-text">新建备忘时的默认输入解析格式</span>
           </div>
           <div class="form-group">
             <label>新建笔记默认可见性</label>
-            <select v-model="defaultVisibility" class="form-select">
-              <option value="PRIVATE">PRIVATE (私有本地)</option>
-              <option value="PUBLIC">PUBLIC (公开)</option>
-            </select>
+            <JcSelect :model-value="defaultVisibility" :options="visibilityOptions" style="width: 100%" @update:model-value="(v) => defaultVisibility = v as 'PRIVATE' | 'PUBLIC'" />
             <span class="help-text">第一期完全本地化下默认均为 PRIVATE 级别</span>
           </div>
           <div class="form-group">
@@ -834,22 +854,14 @@ async function compressMemories() {
           <button class="add-btn" @click="addModel">+ 添加模型</button>
 
           <!-- Model form overlay -->
-          <div v-if="showModelForm" class="form-overlay" @mousedown="handleFormMousedown" @click="handleModelOverlayClick">
-            <div class="form-card">
-              <h4>{{ newModelForm.id ? '编辑' : '添加' }}模型配置</h4>
-              <div class="form-group"><label>配置名称</label><input v-model="newModelForm.name" class="form-input" placeholder="例如：DeepSeek 主力" /></div>
+          <JcModal v-model:open="showModelForm" :title="(newModelForm.id ? '编辑' : '添加') + '模型配置'" width="480">
+              <div class="form-group"><label>配置名称</label><JcInput v-model="newModelForm.name" placeholder="例如：DeepSeek 主力" /></div>
               <div class="form-group">
                 <label>供应商</label>
-                <select v-model="newModelForm.provider" @change="setProviderDefaults" class="form-select">
-                  <option value="deepseek">DeepSeek</option>
-                  <option value="openai">OpenAI</option>
-                  <option value="ollama">Ollama (本地)</option>
-                  <option value="gemini">Google Gemini</option>
-                  <option value="vllm">vLLM (自部署)</option>
-                </select>
+                <JcSelect :model-value="newModelForm.provider" :options="providerOptions" style="width: 100%" @update:model-value="(v) => { newModelForm.provider = v as 'ollama' | 'deepseek' | 'openai' | 'gemini' | 'vllm'; setProviderDefaults() }" />
               </div>
-              <div class="form-group"><label>Endpoint</label><input v-model="newModelForm.endpoint" class="form-input" @blur="onEndpointBlur" /></div>
-              <div class="form-group" v-if="newModelForm.provider !== 'ollama' && newModelForm.provider !== 'vllm'"><label>API Key</label><input v-model="newModelForm.apiKey" type="password" class="form-input" placeholder="sk-..." /></div>
+              <div class="form-group"><label>Endpoint</label><JcInput v-model="newModelForm.endpoint" @blur="onEndpointBlur" /></div>
+              <div class="form-group" v-if="newModelForm.provider !== 'ollama' && newModelForm.provider !== 'vllm'"><label>API Key</label><JcInput v-model="newModelForm.apiKey" type="password" placeholder="sk-..." /></div>
               <div class="form-group">
                 <label>Model</label>
                 <div v-if="newModelForm.provider === 'vllm'" class="vllm-model-area">
@@ -865,16 +877,18 @@ async function compressMemories() {
                     </label>
                   </div>
                 </div>
-                <input v-else v-model="newModelForm.model" class="form-input" placeholder="多个用英文逗号分隔" />
+                <JcInput v-else v-model="newModelForm.model" placeholder="多个用英文逗号分隔" />
               </div>
               <div class="form-row">
                 <div class="form-group form-half"><label>输入价格 (元/百万)</label><input v-model.number="newModelForm.inputPrice" type="number" step="0.1" class="form-input" /></div>
                 <div class="form-group form-half"><label>输出价格 (元/百万)</label><input v-model.number="newModelForm.outputPrice" type="number" step="0.1" class="form-input" /></div>
               </div>
               <div class="form-group"><label>熔断限额 (元)</label><input v-model.number="newModelForm.costLimit" type="number" step="0.5" class="form-input" /></div>
-              <div class="form-actions"><button class="footer-btn-cancel" @click="cancelModelForm">取消</button><button class="footer-btn-save" @click="saveModelForm">确定</button></div>
-            </div>
-          </div>
+              <template #footer>
+                <button class="footer-btn-cancel" @click="cancelModelForm">取消</button>
+                <button class="footer-btn-save" @click="saveModelForm">确定</button>
+              </template>
+            </JcModal>
         </div>
 
         <!-- AI Roles -->
@@ -899,21 +913,21 @@ async function compressMemories() {
           </div>
           <button class="add-btn" @click="addRole">+ 添加角色</button>
 
-          <div v-if="showRoleForm" class="form-overlay" @mousedown="handleFormMousedown" @click="handleRoleOverlayClick">
-            <div class="form-card">
-              <h4>{{ newRoleForm.id ? '编辑' : '添加' }} AI 角色</h4>
-              <div class="form-group"><label>角色名称</label><input v-model="newRoleForm.name" class="form-input" placeholder="例如：测试工程师" /></div>
-              <div class="form-group"><label>角色介绍</label><input v-model="newRoleForm.description" class="form-input" placeholder="简述该角色的核心职责" /></div>
-              <div class="form-group"><label>专属系统提示词</label><textarea v-model="newRoleForm.systemPrompt" class="form-textarea" rows="6"></textarea></div>
-              <div class="form-actions"><button class="footer-btn-cancel" @click="cancelRoleForm">取消</button><button class="footer-btn-save" @click="saveRoleForm">确定</button></div>
-            </div>
-          </div>
+          <JcModal v-model:open="showRoleForm" :title="(newRoleForm.id ? '编辑' : '添加') + ' AI 角色'" width="440">
+              <div class="form-group"><label>角色名称</label><JcInput v-model="newRoleForm.name" placeholder="例如：测试工程师" /></div>
+              <div class="form-group"><label>角色介绍</label><JcInput v-model="newRoleForm.description" placeholder="简述该角色的核心职责" /></div>
+              <div class="form-group"><label>专属系统提示词</label><JcTextarea v-model="newRoleForm.systemPrompt" :rows="6" /></div>
+              <template #footer>
+                <button class="footer-btn-cancel" @click="cancelRoleForm">取消</button>
+                <button class="footer-btn-save" @click="saveRoleForm">确定</button>
+              </template>
+            </JcModal>
         </div>
 
         <!-- Skills -->
         <div v-if="activeTab === 'skills'" class="settings-pane">
           <div class="skills-toolbar">
-            <input v-model="skillsSearch" class="skills-search-input" placeholder="搜索技能..." />
+            <JcInput v-model="skillsSearch" placeholder="搜索技能..." style="flex: 1; min-width: 0" />
             <button class="skills-refresh-btn" :disabled="skillsLoading" @click="loadSystemSkills">{{ skillsLoading ? '加载中...' : '刷新' }}</button>
             <span class="skills-count" v-if="!skillsLoading">{{ filteredSkills.length }}/{{ systemSkills.length }} 个</span>
           </div>
@@ -994,13 +1008,7 @@ async function compressMemories() {
           </div>
 
           <!-- API Key 管理弹窗 -->
-          <div v-if="showApiKeyManager" class="form-overlay" @mousedown.self="showApiKeyManager = false">
-            <div class="form-card" style="width:520px;max-height:80vh" @click.stop>
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-                <h4 style="margin:0;font-size:14px">🔑 API Key 管理</h4>
-                <button class="footer-btn-cancel" style="font-size:11px;padding:3px 8px" @click="showApiKeyManager = false">✕</button>
-              </div>
-
+          <JcModal v-model:open="showApiKeyManager" title="🔑 API Key 管理" width="520">
               <!-- Key 列表 -->
               <div style="margin-bottom:8px">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
@@ -1028,17 +1036,17 @@ async function compressMemories() {
                 <div class="form-group">
                   <label>Key</label>
                   <div style="display:flex;gap:4px">
-                    <input v-model="newApiKey.key" class="form-input" style="flex:1" :placeholder="editingApiKeyId ? '' : '自动生成'" readonly />
+                    <JcInput v-model="newApiKey.key" style="flex:1;min-width:0" :placeholder="editingApiKeyId ? '' : '自动生成'" readonly />
                     <button class="btn-sm" @click="regenerateKeyInForm">生成</button>
                   </div>
                 </div>
                 <div class="form-group">
                   <label>备注</label>
-                  <input v-model="newApiKey.label" class="form-input" placeholder="如：JCGO 项目" />
+                  <JcInput v-model="newApiKey.label" placeholder="如：JCGO 项目" />
                 </div>
                 <div class="form-group">
                   <label>Scope（项目标识）</label>
-                  <input v-model="newApiKey.scope" class="form-input" placeholder="如：JCGO" />
+                  <JcInput v-model="newApiKey.scope" placeholder="如：JCGO" />
                 </div>
                 <div class="form-group">
                   <label>白名单分组</label>
@@ -1056,8 +1064,7 @@ async function compressMemories() {
                   <button class="footer-btn-save" @click="saveApiKey">{{ editingApiKeyId ? '保存' : '生成并添加' }}</button>
                 </div>
               </div>
-            </div>
-          </div>
+            </JcModal>
 
           <!-- 笔记分享服务器（独立端口配置） -->
           <div class="builtin-mcp-section" style="margin-top:8px">
@@ -1115,19 +1122,19 @@ async function compressMemories() {
               <div v-if="aiStore.mcpServers.length === 0" class="empty-hint">尚未连接任何 MCP 服务器</div>
             </div>
             <button class="add-btn" @click="showMcpForm = true">连接 MCP 服务器</button>
-            <div v-if="showMcpForm" class="form-overlay" @mousedown="handleFormMousedown" @click="handleMcpOverlayClick">
-              <div class="form-card">
-                <h4>连接 MCP 服务器</h4>
-                <div class="form-group"><label>方式</label><select v-model="mcpForm.transport" class="form-select"><option value="sse">SSE</option><option value="stdio">Stdio</option></select></div>
-                <div class="form-group"><label>名称</label><input v-model="mcpForm.name" class="form-input" placeholder="my-server" /></div>
-                <template v-if="mcpForm.transport === 'sse'"><div class="form-group"><label>SSE URL</label><input v-model="mcpForm.url" class="form-input" placeholder="https://example.com/mcp" /></div></template>
+            <JcModal v-model:open="showMcpForm" title="连接 MCP 服务器" width="440">
+                <div class="form-group"><label>方式</label><JcSelect :model-value="mcpForm.transport" :options="mcpTransportOptions" style="width: 100%" @update:model-value="(v) => mcpForm.transport = v as 'sse' | 'stdio'" /></div>
+                <div class="form-group"><label>名称</label><JcInput v-model="mcpForm.name" placeholder="my-server" /></div>
+                <template v-if="mcpForm.transport === 'sse'"><div class="form-group"><label>SSE URL</label><JcInput v-model="mcpForm.url" placeholder="https://example.com/mcp" /></div></template>
                 <template v-if="mcpForm.transport === 'stdio'">
-                  <div class="form-group"><label>命令</label><input v-model="mcpForm.command" class="form-input" placeholder="npx" /></div>
-                  <div class="form-group"><label>参数 (逗号分隔)</label><input v-model="mcpForm.argsText" class="form-input" placeholder="arg1, arg2" /></div>
+                  <div class="form-group"><label>命令</label><JcInput v-model="mcpForm.command" placeholder="npx" /></div>
+                  <div class="form-group"><label>参数 (逗号分隔)</label><JcInput v-model="mcpForm.argsText" placeholder="arg1, arg2" /></div>
                 </template>
-                <div class="form-actions"><button class="footer-btn-cancel" @click="showMcpForm = false">取消</button><button class="footer-btn-save" :disabled="connecting" @click="saveMcpForm">{{ connecting ? '连接中...' : '连接' }}</button></div>
-              </div>
-            </div>
+                <template #footer>
+                  <button class="footer-btn-cancel" @click="showMcpForm = false">取消</button>
+                  <button class="footer-btn-save" :disabled="connecting" @click="saveMcpForm">{{ connecting ? '连接中...' : '连接' }}</button>
+                </template>
+              </JcModal>
           </template>
 
           <template v-if="mcpViewMode === 'json'">
@@ -1166,7 +1173,7 @@ async function compressMemories() {
 
             <!-- 搜索 -->
             <div style="display:flex;gap:6px;margin-top:8px">
-              <input v-model="memorySearch" class="form-input" placeholder="搜索标题或内容..." style="flex:1" @keyup.enter="searchMemory" />
+              <JcInput v-model="memorySearch" placeholder="搜索标题或内容..." style="flex:1;min-width:0" @keyup.enter="searchMemory" />
               <button class="footer-btn-save" style="font-size:11px;padding:4px 10px" @click="searchMemory">搜索</button>
               <button v-if="memorySearch" class="footer-btn-cancel" style="font-size:11px;padding:4px 8px" @click="memorySearch = ''; searchMemory()">清除</button>
             </div>
@@ -1208,17 +1215,13 @@ async function compressMemories() {
           </div>
 
           <!-- 记忆弹窗 -->
-          <div v-if="showMemoryModal" class="form-overlay" @mousedown.self="closeMemoryModal">
-            <div class="form-card" style="width:580px;max-height:85vh" @click.stop>
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-                <h4 style="margin:0;font-size:14px">
-                  {{ memoryModalMode === 'edit' ? (memoryForm.id ? '编辑记忆' : '创建记忆') : '查看记忆' }}
-                </h4>
-                <div style="display:flex;gap:4px">
-                  <button v-if="memoryModalMode === 'view'" class="footer-btn-save" style="font-size:11px;padding:3px 8px" @click="editMemoryFromView">✏️ 编辑</button>
-                  <button class="footer-btn-cancel" style="font-size:11px;padding:3px 8px" @click="closeMemoryModal">✕</button>
-                </div>
-              </div>
+          <JcModal v-model:open="showMemoryModal" :title="memoryModalMode === 'edit' ? (memoryForm.id ? '编辑记忆' : '创建记忆') : '查看记忆'" width="580" @cancel="closeMemoryModal">
+            <template #title>
+              <span style="display:inline-flex;gap:6px">
+                {{ memoryModalMode === 'edit' ? (memoryForm.id ? '编辑记忆' : '创建记忆') : '查看记忆' }}
+                <button v-if="memoryModalMode === 'view'" class="footer-btn-save" style="font-size:11px;padding:3px 8px" @click="editMemoryFromView">✏️ 编辑</button>
+              </span>
+            </template>
 
               <!-- 查看模式 -->
               <template v-if="memoryModalMode === 'view'">
@@ -1251,32 +1254,23 @@ async function compressMemories() {
               <!-- 编辑模式 -->
               <template v-else>
                 <div class="memory-form">
-                  <input v-model="memoryForm.title" class="form-input" placeholder="记忆标题" />
+                  <JcInput v-model="memoryForm.title" placeholder="记忆标题" />
                   <div style="display:flex;gap:6px;margin-top:6px">
-                    <input v-model="memoryForm.scope" class="form-input" placeholder="scope（项目标识）" style="flex:1" />
-                    <select v-model="memoryForm.type" class="form-select" style="flex:1">
-                      <option value="">选择类型...</option>
-                      <option value="decision">decision - 架构决策</option>
-                      <option value="bugfix">bugfix - Bug 修复</option>
-                      <option value="architecture">architecture - 模块结构</option>
-                      <option value="pattern">pattern - 编码规范</option>
-                      <option value="config">config - 配置变更</option>
-                      <option value="discovery">discovery - 调研发现</option>
-                    </select>
+                    <JcInput v-model="memoryForm.scope" placeholder="scope（项目标识）" style="flex:1;min-width:0" />
+                    <JcSelect v-model="memoryForm.type" :options="memoryTypeOptions" style="flex:1;min-width:0" />
                   </div>
-                  <input v-model="memoryForm.topicKey" class="form-input" placeholder="topic_key（去重用）" style="margin-top:6px" />
-                  <textarea v-model="memoryForm.content" class="form-textarea" placeholder="**What**: 做了什么
+                  <JcInput v-model="memoryForm.topicKey" placeholder="topic_key（去重用）" style="margin-top:6px" />
+                  <JcTextarea v-model="memoryForm.content" :rows="10" placeholder="**What**: 做了什么
 **Why**: 为什么
 **Where**: 涉及文件
-**Learned**: 踩坑记录" style="margin-top:6px;min-height:160px"></textarea>
+**Learned**: 踩坑记录" style="margin-top:6px" />
                   <div style="display:flex;gap:6px;margin-top:8px;justify-content:flex-end">
                     <button class="footer-btn-cancel" @click="closeMemoryModal">取消</button>
                     <button class="footer-btn-save" @click="saveMemory">{{ memoryForm.id ? '更新' : '创建' }}</button>
                   </div>
                 </div>
               </template>
-            </div>
-          </div>
+            </JcModal>
         </div>
 
         <!-- Backup -->

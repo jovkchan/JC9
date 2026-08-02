@@ -1,11 +1,24 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import ToolShell from '@/components/ui/ToolShell.vue'
+import JcButton from '@/components/ui/JcButton.vue'
+import JcInput from '@/components/ui/JcInput.vue'
+import JcSelect from '@/components/ui/JcSelect.vue'
 
 const domain = ref('github.com')
 const recordType = ref('A')
 const dohProvider = ref<'cloudflare' | 'alidns'>('cloudflare')
 const loading = ref(false)
 const errorMsg = ref('')
+
+const recordTypeOptions = [
+  { label: 'A 记录', value: 'A' },
+  { label: 'CNAME 记录', value: 'CNAME' },
+  { label: 'AAAA 记录', value: 'AAAA' },
+  { label: 'MX 记录', value: 'MX' },
+  { label: 'TXT 记录', value: 'TXT' },
+  { label: 'NS 记录', value: 'NS' }
+]
 
 interface DnsRecord {
   name: string
@@ -125,32 +138,18 @@ function copyAnswersText() {
 </script>
 
 <template>
-  <div class="tool-container">
-    <div class="tool-header">
-      <div class="tool-title">DNS 解析查询 (dig)</div>
-    </div>
-
-    <div class="tool-body-split">
-      <!-- 左侧输入栏 -->
+  <ToolShell title="DNS 解析查询" subtitle="dig" split>
+    <template #left-label>域名及类型设置</template>
+    <template #left>
       <div class="control-panel">
-        <div class="setting-section">
-          <div class="section-subtitle">域名及类型设置</div>
-          <div class="input-row">
-            <input 
-              v-model="domain" 
-              placeholder="请输入域名，如 github.com" 
-              class="domain-input" 
-              @keyup.enter="resolveDns"
-            />
-            <select v-model="recordType" class="type-select">
-              <option value="A">A 记录</option>
-              <option value="CNAME">CNAME 记录</option>
-              <option value="AAAA">AAAA 记录</option>
-              <option value="MX">MX 记录</option>
-              <option value="TXT">TXT 记录</option>
-              <option value="NS">NS 记录</option>
-            </select>
-          </div>
+        <div class="input-row">
+          <JcInput
+            v-model="domain"
+            placeholder="请输入域名，如 github.com"
+            style="flex: 1; min-width: 0"
+            @keyup.enter="resolveDns"
+          />
+          <JcSelect v-model="recordType" :options="recordTypeOptions" style="width: 110px" />
         </div>
 
         <div class="setting-section">
@@ -167,24 +166,21 @@ function copyAnswersText() {
           </div>
         </div>
 
-        <button 
-          class="tool-btn pri full large" 
-          :disabled="loading" 
-          @click="resolveDns"
-        >
+        <JcButton type="primary" block size="large" :loading="loading" @click="resolveDns">
           {{ loading ? '正在进行 DNS 查询...' : '域名解析查询 (dig)' }}
-        </button>
+        </JcButton>
 
-        <div v-if="errorMsg" class="tool-footer-error style-inline mt-10">{{ errorMsg }}</div>
+        <div v-if="errorMsg" class="tool-footer-error style-inline">{{ errorMsg }}</div>
       </div>
+    </template>
 
-      <!-- 右侧结果展示栏 (模拟终端 dig 输出) -->
+    <template #right-label>终端 dig 输出模拟</template>
+    <template #right>
       <div class="result-display-panel">
         <div class="pane-header-row">
-          <span>终端 dig 输出模拟</span>
           <div class="acts">
-            <button class="tool-btn small" :disabled="!rawJson" @click="copyAnswersText">复制记录</button>
-            <button class="tool-btn small" :disabled="!rawJson" @click="copyJson">复制 JSON</button>
+            <JcButton size="small" :disabled="!rawJson" @click="copyAnswersText">复制记录</JcButton>
+            <JcButton size="small" :disabled="!rawJson" @click="copyJson">复制 JSON</JcButton>
           </div>
         </div>
 
@@ -220,50 +216,16 @@ function copyAnswersText() {
           </template>
         </div>
       </div>
-    </div>
-  </div>
+    </template>
+  </ToolShell>
 </template>
 
 <style scoped lang="scss">
-.tool-container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 100%;
-  padding: 12px;
-  background: var(--jc-bg-app);
-  overflow: hidden;
-}
-.tool-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-  flex-shrink: 0;
-}
-.tool-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--jc-text-highlight);
-}
-.tool-body-split {
-  display: flex;
-  flex: 1;
-  gap: 16px;
-  min-height: 0;
-}
-
 /* 左侧控制栏 */
 .control-panel {
   display: flex;
   flex-direction: column;
-  flex: 0 0 320px;
-  background: var(--jc-bg-panel);
-  border: 1px solid var(--jc-border-default);
-  padding: 14px;
-  border-radius: 4px;
   gap: 16px;
-  overflow-y: auto;
 }
 
 .setting-section {
@@ -285,34 +247,6 @@ function copyAnswersText() {
 .input-row {
   display: flex;
   gap: 8px;
-}
-.domain-input {
-  flex: 1;
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  font-family: inherit;
-  font-size: 12px;
-  padding: 6px 10px;
-  outline: none;
-  border-radius: 3px;
-  height: 30px;
-  min-width: 0;
-  &:focus {
-    border-color: var(--jc-color-accent);
-  }
-}
-.type-select {
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  padding: 0 8px;
-  font-size: 11px;
-  outline: none;
-  border-radius: 3px;
-  height: 30px;
-  cursor: pointer;
-  width: 95px;
 }
 
 .doh-choice-row {
@@ -339,15 +273,11 @@ function copyAnswersText() {
   display: flex;
   flex-direction: column;
   flex: 1;
-  background: var(--jc-bg-panel);
-  border: 1px solid var(--jc-border-default);
-  padding: 14px;
-  border-radius: 4px;
   min-height: 0;
 }
 .pane-header-row {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
   font-size: 11px;
   color: var(--jc-text-secondary);
@@ -406,43 +336,6 @@ function copyAnswersText() {
 .lbl-ttl { color: #abb2bf; }
 .lbl-type { color: #c678dd; font-weight: bold; }
 .lbl-data { color: #98c379; font-weight: bold; }
-
-.tool-btn {
-  background: var(--jc-bg-btn);
-  color: var(--jc-text-primary);
-  border: none;
-  padding: 4px 12px;
-  font-size: 11px;
-  cursor: pointer;
-  border-radius: 2px;
-  transition: all 0.2s;
-  &:hover:not(:disabled) {
-    background: var(--jc-bg-btn-hover);
-  }
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-  &.pri {
-    background: var(--jc-color-accent);
-    color: var(--jc-color-white);
-    &:hover {
-      background: var(--jc-color-accent-hover);
-    }
-  }
-  &.full {
-    width: 100%;
-  }
-  &.large {
-    padding: 8px 12px;
-    font-size: 12px;
-    font-weight: 600;
-  }
-  &.small {
-    padding: 2px 8px;
-    font-size: 10px;
-  }
-}
 
 .tool-footer-error.style-inline {
   font-size: 11px;

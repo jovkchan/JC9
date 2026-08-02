@@ -3,6 +3,8 @@ import { ref, onMounted } from 'vue'
 import { useProjectStore } from '@/stores/project'
 import { open } from '@tauri-apps/plugin-dialog'
 import type { Command } from '@/types'
+import JcInput from '@/components/ui/JcInput.vue'
+import JcButton from '@/components/ui/JcButton.vue'
 
 const props = defineProps<{
   projectId: string
@@ -82,27 +84,24 @@ function cancel() {
 
     <div v-if="showForm || editing" class="cmd-form">
       <div class="form-row">
-        <input v-model="name" placeholder="命令名称 (如: 启动前端)" class="name-input" />
+        <JcInput v-model="name" placeholder="命令名称 (如: 启动前端)" style="flex: 2; min-width: 0" />
         <div class="dir-input-wrap">
-          <input v-model="workingDir" placeholder="工作目录 (如: D:\\code\\my-project)" class="dir-input" />
-          <button type="button" class="btn-secondary btn-sm dir-btn" @click="pickDirectory" title="选择文件夹">
-            📂
-          </button>
+          <JcInput v-model="workingDir" placeholder="工作目录 (如: D:\\code\\my-project)" style="flex: 1; min-width: 0" />
+          <JcButton size="small" @click="pickDirectory" title="选择文件夹">📂</JcButton>
         </div>
       </div>
       <div class="form-row">
-        <input
+        <JcInput
           v-model="command"
           placeholder="启动命令 (如: npm run dev)"
-          class="cmd-input"
           @keyup.enter="handleSubmit"
         />
       </div>
       <div class="form-actions">
-        <button class="btn-primary btn-sm" @click="handleSubmit">
+        <JcButton type="primary" size="small" @click="handleSubmit">
           {{ editing ? '保存' : '添加' }}
-        </button>
-        <button class="btn-secondary btn-sm" @click="cancel">取消</button>
+        </JcButton>
+        <JcButton size="small" @click="cancel">取消</JcButton>
       </div>
     </div>
   </div>
@@ -137,34 +136,10 @@ function cancel() {
   gap: 8px;
 }
 
-.name-input {
-  flex: 2;
-}
-
-.dir-input {
-  flex: 3;
-}
-
 .dir-input-wrap {
   flex: 3;
   display: flex;
   gap: 4px;
-}
-
-.dir-input-wrap .dir-input {
-  flex: 1;
-  min-width: 0;
-}
-
-.dir-btn {
-  flex-shrink: 0;
-  padding: 4px 8px;
-  font-size: 14px;
-}
-
-.cmd-input {
-  width: 100%;
-  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
 }
 
 .form-actions {

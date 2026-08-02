@@ -1,5 +1,10 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import ToolShell from '@/components/ui/ToolShell.vue'
+import JcButton from '@/components/ui/JcButton.vue'
+import JcSelect from '@/components/ui/JcSelect.vue'
+import JcTextarea from '@/components/ui/JcTextarea.vue'
+import JcSegmented from '@/components/ui/JcSegmented.vue'
 
 const activeTab = ref<'text' | 'file'>('text')
 const mode = ref<'md5' | 'sha1' | 'sha256' | 'sha512' | 'sm3'>('sha256')
@@ -22,6 +27,12 @@ const algorithms: Record<string, string> = {
   sha512: 'SHA-512',
   sm3: 'SM3 (国密)'
 }
+
+const algoOptions = Object.entries(algorithms).map(([value, label]) => ({ value, label }))
+const tabOptions = [
+  { label: '文本哈希计算', value: 'text' },
+  { label: '大文件校验和 (防 OOM)', value: 'file' }
+]
 
 // ==========================================
 // 1. 增量 MD5 纯 JS 实现
@@ -612,38 +623,31 @@ function formatFileSize(bytes: number): string {
 </script>
 
 <template>
-  <div class="tool-container">
-    <div class="tool-header">
-      <div class="tool-title">哈希/校验和计算器</div>
-      <div class="tool-actions">
-        <label>计算算法：</label>
-        <select v-model="mode" class="tool-select" :disabled="isCalculating">
-          <option v-for="(label, key) in algorithms" :key="key" :value="key">{{ label }}</option>
-        </select>
-        <button class="tool-btn pri" @click="copyResult" :disabled="!outputHash">复制哈希</button>
-        <button class="tool-btn err" @click="clearAll" :disabled="isCalculating">清空</button>
-      </div>
-    </div>
+  <ToolShell title="哈希/校验和计算器">
+    <template #actions>
+      <label style="font-size: 11px; color: var(--jc-text-secondary)">计算算法：</label>
+      <JcSelect v-model="mode" :options="algoOptions" size="small" :disabled="isCalculating" style="width: 150px" />
+      <JcButton type="primary" size="small" @click="copyResult" :disabled="!outputHash">复制哈希</JcButton>
+      <JcButton size="small" danger ghost @click="clearAll" :disabled="isCalculating">清空</JcButton>
+    </template>
 
-    <!-- 模式 Tab -->
-    <div class="tab-header">
-      <button :class="{ active: activeTab === 'text' }" @click="activeTab = 'text'" :disabled="isCalculating">
-        文本哈希计算
-      </button>
-      <button :class="{ active: activeTab === 'file' }" @click="activeTab = 'file'" :disabled="isCalculating">
-        大文件校验和 (防 OOM)
-      </button>
-    </div>
+    <JcSegmented
+      :model-value="activeTab"
+      :options="tabOptions"
+      size="small"
+      :disabled="isCalculating"
+      @update:model-value="(v) => { if (!isCalculating) activeTab = v as 'text' | 'file' }"
+    />
 
     <!-- 文本哈希主内容 -->
     <div v-show="activeTab === 'text'" class="tool-body-split">
       <div class="editor-pane">
         <div class="pane-label">输入文本内容</div>
-        <textarea v-model="inputText" placeholder="在此输入需要计算哈希的字符串文本..." spellcheck="false"></textarea>
+        <JcTextarea v-model="inputText" mono :spellcheck="false" class="jc-fill" placeholder="在此输入需要计算哈希的字符串文本..." />
       </div>
       <div class="editor-pane">
         <div class="pane-label">哈希输出 (HEX 结果)</div>
-        <textarea v-model="outputHash" readonly placeholder="计算出的哈希值会在这里显示..." spellcheck="false" class="readonly-output code-font"></textarea>
+        <JcTextarea :model-value="outputHash" mono readonly :spellcheck="false" class="jc-fill hash-output" placeholder="计算出的哈希值会在这里显示..." />
       </div>
     </div>
 
@@ -694,14 +698,14 @@ function formatFileSize(bytes: number): string {
           <div class="progress-bar-bg">
             <div class="progress-bar-fill" :style="{ width: calculateProgress + '%' }"></div>
           </div>
-          <button class="btn-cancel" @click="cancelRequested = true">取消计算</button>
+          <JcButton size="small" @click="cancelRequested = true">取消计算</JcButton>
         </div>
 
         <div class="result-wrap" v-if="outputHash && !isCalculating">
           <div class="pane-label">计算出的文件哈希值 ({{ mode.toUpperCase() }}):</div>
           <div class="hash-result-box code-font">
             <span>{{ outputHash }}</span>
-            <button class="btn-copy-mini" @click="copyResult">复制</button>
+            <JcButton size="small" @click="copyResult">复制</JcButton>
           </div>
         </div>
       </div>
@@ -709,110 +713,10 @@ function formatFileSize(bytes: number): string {
 
     <!-- 错误输出 -->
     <div v-if="errorMsg" class="tool-footer-error">{{ errorMsg }}</div>
-  </div>
+  </ToolShell>
 </template>
 
 <style scoped lang="scss">
-.tool-container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 100%;
-  padding: 12px;
-  background: var(--jc-bg-app);
-  overflow: hidden;
-  gap: 10px;
-}
-.tool-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-shrink: 0;
-}
-.tool-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--jc-text-highlight);
-}
-.tool-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  label {
-    font-size: 11px;
-    color: var(--jc-text-secondary);
-  }
-}
-.tool-select {
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  padding: 3px 6px;
-  font-size: 11px;
-  outline: none;
-  border-radius: 2px;
-}
-.tool-btn {
-  background: var(--jc-bg-btn);
-  color: var(--jc-text-primary);
-  border: none;
-  padding: 4px 12px;
-  font-size: 11px;
-  cursor: pointer;
-  border-radius: 2px;
-  transition: all 0.2s;
-  &:hover:not(:disabled) {
-    background: var(--jc-bg-btn-hover);
-  }
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-  &.pri {
-    background: var(--jc-color-accent);
-    color: var(--jc-color-white);
-    &:hover {
-      background: var(--jc-color-accent-hover);
-    }
-  }
-  &.err {
-    &:hover {
-      background: var(--jc-color-error);
-      color: var(--jc-color-white);
-    }
-  }
-}
-
-// Tabs
-.tab-header {
-  display: flex;
-  border-bottom: 1px solid var(--jc-border-default);
-  flex-shrink: 0;
-  gap: 4px;
-  button {
-    background: none;
-    border: none;
-    padding: 6px 12px;
-    font-size: 12px;
-    color: var(--jc-text-secondary);
-    cursor: pointer;
-    border-bottom: 2px solid transparent;
-    transition: all 0.2s;
-    &:hover:not(:disabled) {
-      color: var(--jc-text-primary);
-    }
-    &.active {
-      color: var(--jc-color-accent);
-      border-bottom-color: var(--jc-color-accent);
-      font-weight: 600;
-    }
-    &:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-  }
-}
-
 // 文本哈希
 .tool-body-split {
   display: flex;
@@ -837,27 +741,10 @@ function formatFileSize(bytes: number): string {
   margin-bottom: 6px;
   text-transform: uppercase;
 }
-textarea {
-  flex: 1;
-  width: 100%;
-  resize: none;
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  font-size: 12px;
-  padding: 8px;
-  outline: none;
-  border-radius: 2px;
-  &:focus {
-    border-color: var(--jc-color-accent);
-  }
-  &.code-font {
-    font-family: 'Cascadia Code', Consolas, monospace;
-    font-size: 11px;
-  }
+.code-font {
+  font-family: 'Cascadia Code', Consolas, monospace;
 }
-.readonly-output {
-  background: var(--jc-bg-app);
+.hash-output {
   color: var(--jc-color-success);
 }
 
@@ -955,17 +842,6 @@ textarea {
   background: var(--jc-color-accent);
   transition: width 0.1s ease-out;
 }
-.btn-cancel {
-  align-self: flex-end;
-  background: none;
-  border: none;
-  color: var(--jc-color-error);
-  font-size: 11px;
-  cursor: pointer;
-  &:hover {
-    text-decoration: underline;
-  }
-}
 .hash-result-box {
   display: flex;
   justify-content: space-between;
@@ -978,19 +854,6 @@ textarea {
   font-size: 12px;
   word-break: break-all;
   gap: 10px;
-}
-.btn-copy-mini {
-  background: var(--jc-bg-btn);
-  border: none;
-  color: var(--jc-text-primary);
-  padding: 2px 8px;
-  font-size: 10px;
-  cursor: pointer;
-  border-radius: 2px;
-  white-space: nowrap;
-  &:hover {
-    background: var(--jc-bg-btn-hover);
-  }
 }
 
 .tool-footer-error {

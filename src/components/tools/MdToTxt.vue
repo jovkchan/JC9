@@ -1,5 +1,9 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import ToolShell from '@/components/ui/ToolShell.vue'
+import JcButton from '@/components/ui/JcButton.vue'
+import JcCheckbox from '@/components/ui/JcCheckbox.vue'
+import JcTextarea from '@/components/ui/JcTextarea.vue'
 
 const input = ref('')
 const output = ref('')
@@ -182,161 +186,33 @@ function clearAll() {
 </script>
 
 <template>
-  <div class="tool-container">
-    <div class="tool-header">
-      <div class="tool-title">MD 转 TXT（Markdown 净化 → 纯文本）</div>
-      <div class="tool-actions">
-        <button class="tool-btn" @click="loadSample">示例</button>
-        <button class="tool-btn pri" @click="copyResult" :disabled="!output">复制结果</button>
-        <button class="tool-btn err" @click="clearAll">清空</button>
+  <ToolShell title="MD 转 TXT" subtitle="Markdown 净化 → 纯文本" split>
+    <template #actions>
+      <JcButton size="small" @click="loadSample">示例</JcButton>
+      <JcButton type="primary" size="small" :disabled="!output" @click="copyResult">复制结果</JcButton>
+      <JcButton size="small" danger ghost @click="clearAll">清空</JcButton>
+    </template>
+    <template #left-label>输入（被污染的 Markdown / 笔记内容）</template>
+    <template #left>
+      <div class="mdt-left">
+        <div class="mdt-options">
+          <JcCheckbox v-model:checked="unescapeChars">还原转义（\* → *）</JcCheckbox>
+          <JcCheckbox v-model:checked="stripMarkdown">去除 Markdown 标记</JcCheckbox>
+          <JcCheckbox v-model:checked="keepCodeBlock">保留代码块</JcCheckbox>
+          <span class="mdt-stats">输入 {{ input.length }} 字符 · 输出 {{ output.length }} 字符</span>
+        </div>
+        <JcTextarea v-model="input" mono :spellcheck="false" class="jc-fill" placeholder="请粘贴被污染的 Markdown 或笔记原文..." />
       </div>
-    </div>
-
-    <div class="tool-options">
-      <label class="opt">
-        <input type="checkbox" v-model="unescapeChars" /> 还原被污染的转义（\* → *）
-      </label>
-      <label class="opt">
-        <input type="checkbox" v-model="stripMarkdown" /> 去除 Markdown 标记
-      </label>
-      <label class="opt">
-        <input type="checkbox" v-model="keepCodeBlock" /> 保留代码块内容
-      </label>
-      <span class="opt-stats">输入 {{ input.length }} 字符 · 输出 {{ output.length }} 字符</span>
-    </div>
-
-    <div class="tool-body-split">
-      <div class="editor-pane">
-        <div class="pane-label">输入（被污染的 Markdown / 笔记内容）</div>
-        <textarea v-model="input" placeholder="请粘贴被污染的 Markdown 或笔记原文..." spellcheck="false"></textarea>
-      </div>
-      <div class="editor-pane">
-        <div class="pane-label">输出（纯净 TXT）</div>
-        <textarea v-model="output" readonly placeholder="转换结果将显示在这里..." spellcheck="false" class="readonly-output"></textarea>
-      </div>
-    </div>
-  </div>
+    </template>
+    <template #right-label>输出（纯净 TXT）</template>
+    <template #right>
+      <JcTextarea v-model="output" mono readonly :spellcheck="false" class="jc-fill" placeholder="转换结果将显示在这里..." />
+    </template>
+  </ToolShell>
 </template>
 
-<style scoped lang="scss">
-.tool-container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 100%;
-  padding: 12px;
-  background: var(--jc-bg-app);
-  overflow: hidden;
-}
-.tool-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-  flex-shrink: 0;
-}
-.tool-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--jc-text-highlight);
-}
-.tool-actions {
-  display: flex;
-  gap: 8px;
-}
-.tool-btn {
-  background: var(--jc-bg-btn);
-  color: var(--jc-text-primary);
-  border: none;
-  padding: 4px 12px;
-  font-size: 11px;
-  cursor: pointer;
-  border-radius: 2px;
-  transition: all 0.2s;
-  &:hover:not(:disabled) {
-    background: var(--jc-bg-btn-hover);
-  }
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-  &.pri {
-    background: var(--jc-color-accent);
-    color: var(--jc-color-white);
-    &:hover {
-      background: var(--jc-color-accent-hover);
-    }
-  }
-  &.err {
-    &:hover {
-      background: var(--jc-color-error);
-      color: var(--jc-color-white);
-    }
-  }
-}
-.tool-options {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  margin-bottom: 8px;
-  flex-shrink: 0;
-  font-size: 11px;
-  color: var(--jc-text-secondary);
-  .opt {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    cursor: pointer;
-    input {
-      accent-color: var(--jc-color-accent);
-    }
-  }
-  .opt-stats {
-    margin-left: auto;
-    opacity: 0.8;
-  }
-}
-.tool-body-split {
-  display: flex;
-  flex: 1;
-  gap: 12px;
-  min-height: 0;
-}
-.editor-pane {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-width: 0;
-  height: 100%;
-  border: 1px solid var(--jc-border-default);
-  background: var(--jc-bg-panel);
-  padding: 8px;
-  border-radius: 4px;
-}
-.pane-label {
-  font-size: 11px;
-  color: var(--jc-text-secondary);
-  margin-bottom: 6px;
-  text-transform: uppercase;
-}
-textarea {
-  flex: 1;
-  width: 100%;
-  resize: none;
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  font-family: 'Cascadia Code', Consolas, monospace;
-  font-size: 12px;
-  padding: 8px;
-  outline: none;
-  border-radius: 2px;
-  &:focus {
-    border-color: var(--jc-color-accent);
-  }
-}
-.readonly-output {
-  background: var(--jc-bg-app);
-  color: var(--jc-color-success);
-}
+<style scoped>
+.mdt-left { display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0; }
+.mdt-options { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 11px; color: var(--jc-text-secondary); flex-shrink: 0; }
+.mdt-stats { margin-left: auto; opacity: 0.8; }
 </style>

@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import ToolShell from '@/components/ui/ToolShell.vue'
+import JcButton from '@/components/ui/JcButton.vue'
+import JcInput from '@/components/ui/JcInput.vue'
+import JcSelect from '@/components/ui/JcSelect.vue'
+import JcTextarea from '@/components/ui/JcTextarea.vue'
 
 const algorithm = ref<'ed25519' | 'rsa' | 'ecdsa'>('ed25519')
 const bits = ref<number>(4096)
@@ -12,6 +17,17 @@ const error = ref('')
 const privateKey = ref('')
 const publicKey = ref('')
 const showPassphrase = ref(false)
+
+const bitsOptions = [
+  { label: '2048 位', value: 2048 },
+  { label: '3072 位', value: 3072 },
+  { label: '4096 位 (安全)', value: 4096 }
+]
+const curveOptions = [
+  { label: 'nistp256 (256 位)', value: 256 },
+  { label: 'nistp384 (384 位)', value: 384 },
+  { label: 'nistp521 (521 位)', value: 521 }
+]
 
 const copyPrivateSuccess = ref(false)
 const copyPublicSuccess = ref(false)
@@ -65,11 +81,7 @@ function copyPublic() {
 </script>
 
 <template>
-  <div class="tool-container">
-    <div class="tool-header">
-      <div class="tool-title">SSH 密钥生成器</div>
-    </div>
-    
+  <ToolShell title="SSH 密钥生成器">
     <div class="tool-body">
       <!-- 配置面板 -->
       <div class="card config-card">
@@ -105,20 +117,12 @@ function copyPublic() {
           <!-- 动态参数选项 (RSA位数/ECDSA曲线) -->
           <div v-if="algorithm === 'rsa'" class="config-item flex-1">
             <span class="config-label">密钥长度 (Bits)</span>
-            <select v-model="bits" class="config-select">
-              <option :value="2048">2048 位</option>
-              <option :value="3072">3072 位</option>
-              <option :value="4096">4096 位 (安全)</option>
-            </select>
+            <JcSelect :model-value="bits" :options="bitsOptions" style="width: 100%" @update:model-value="(v) => bits = Number(v)" />
           </div>
 
           <div v-if="algorithm === 'ecdsa'" class="config-item flex-1">
             <span class="config-label">曲线类型 (Curve)</span>
-            <select v-model="curve" class="config-select">
-              <option :value="256">nistp256 (256 位)</option>
-              <option :value="384">nistp384 (384 位)</option>
-              <option :value="521">nistp521 (521 位)</option>
-            </select>
+            <JcSelect :model-value="curve" :options="curveOptions" style="width: 100%" @update:model-value="(v) => curve = Number(v)" />
           </div>
         </div>
 
@@ -126,11 +130,7 @@ function copyPublic() {
           <!-- 注释 (Comment) -->
           <div class="config-item flex-1">
             <span class="config-label">注释 (Comment - 比如邮箱)</span>
-            <input 
-              v-model="comment" 
-              placeholder="e.g. your-email@example.com (留空则不加)" 
-              class="config-input"
-            />
+            <JcInput v-model="comment" placeholder="e.g. your-email@example.com (留空则不加)" />
           </div>
 
           <!-- 保护密码 (Passphrase) -->
@@ -157,14 +157,9 @@ function copyPublic() {
         </div>
 
         <div class="action-row">
-          <button 
-            class="tool-btn pri generate-btn" 
-            :disabled="loading" 
-            @click="generate"
-          >
-            <span v-if="loading">正在调用系统生成密钥对...</span>
-            <span v-else>立即生成密钥对</span>
-          </button>
+          <JcButton type="primary" size="large" :loading="loading" @click="generate">
+            {{ loading ? '正在调用系统生成密钥对...' : '立即生成密钥对' }}
+          </JcButton>
         </div>
       </div>
 
@@ -180,20 +175,9 @@ function copyPublic() {
         <div class="card result-card">
           <div class="result-header">
             <span class="result-title">私钥 (Private Key)</span>
-            <button 
-              class="now-copy-btn" 
-              :class="{ success: copyPrivateSuccess }"
-              @click="copyPrivate"
-            >
-              {{ copyPrivateSuccess ? '已复制 ✔' : '复制私钥' }}
-            </button>
+            <JcButton size="small" @click="copyPrivate">{{ copyPrivateSuccess ? '已复制 ✔' : '复制私钥' }}</JcButton>
           </div>
-          <textarea 
-            readonly 
-            class="key-display mono-display" 
-            :value="privateKey"
-            placeholder="尚未生成私钥"
-          ></textarea>
+          <JcTextarea :model-value="privateKey" mono readonly class="jc-fill key-display" placeholder="尚未生成私钥" />
           <span class="security-tip">提示：私钥必须严密保管，绝对不能泄露给任何人。</span>
         </div>
 
@@ -201,49 +185,17 @@ function copyPublic() {
         <div class="card result-card">
           <div class="result-header">
             <span class="result-title">公钥 (Public Key)</span>
-            <button 
-              class="now-copy-btn" 
-              :class="{ success: copyPublicSuccess }"
-              @click="copyPublic"
-            >
-              {{ copyPublicSuccess ? '已复制 ✔' : '复制公钥' }}
-            </button>
+            <JcButton size="small" @click="copyPublic">{{ copyPublicSuccess ? '已复制 ✔' : '复制公钥' }}</JcButton>
           </div>
-          <textarea 
-            readonly 
-            class="key-display mono-display" 
-            :value="publicKey"
-            placeholder="尚未生成公钥"
-          ></textarea>
+          <JcTextarea :model-value="publicKey" mono readonly class="jc-fill key-display" placeholder="尚未生成公钥" />
           <span class="security-tip">提示：公钥可以安全地共享、或配置在服务器的 <code>~/.ssh/authorized_keys</code> 中。</span>
         </div>
       </div>
     </div>
-  </div>
+  </ToolShell>
 </template>
 
 <style scoped lang="scss">
-.tool-container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 100%;
-  padding: 16px;
-  background: var(--jc-bg-app);
-  overflow-y: auto;
-}
-
-.tool-header {
-  margin-bottom: 16px;
-  flex-shrink: 0;
-}
-
-.tool-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--jc-text-highlight);
-}
-
 .tool-body {
   display: flex;
   flex-direction: column;
@@ -414,41 +366,6 @@ function copyPublic() {
   justify-content: flex-end;
 }
 
-.generate-btn {
-  min-width: 180px;
-  padding: 10px 20px;
-  font-size: 12px;
-  font-weight: 600;
-  border-radius: 4px;
-}
-
-.tool-btn {
-  background: var(--jc-bg-btn);
-  color: var(--jc-text-primary);
-  border: none;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.2s;
-  
-  &:hover:not(:disabled) {
-    background: var(--jc-bg-btn-hover);
-  }
-  
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-  
-  &.pri {
-    background: var(--jc-color-accent);
-    color: var(--jc-color-white);
-    
-    &:hover:not(:disabled) {
-      background: var(--jc-color-accent-hover, #007acc);
-    }
-  }
-}
-
 .error-banner {
   background: rgba(244, 67, 54, 0.1);
   border: 1px solid var(--jc-color-error);
@@ -496,43 +413,10 @@ function copyPublic() {
   color: var(--jc-text-highlight);
 }
 
-.now-copy-btn {
-  background: var(--jc-bg-btn);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  padding: 4px 10px;
-  font-size: 11px;
-  cursor: pointer;
-  border-radius: 4px;
-  transition: all 0.2s;
-  
-  &:hover {
-    background: var(--jc-bg-hover);
-    border-color: var(--jc-color-accent);
-  }
-  
-  &.success {
-    background: var(--jc-color-success);
-    color: var(--jc-color-white);
-    border-color: var(--jc-color-success);
-  }
-}
-
 .key-display {
   flex: 1;
   width: 100%;
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  padding: 10px;
-  font-size: 11px;
-  outline: none;
   resize: none;
-  border-radius: 4px;
-  
-  &:focus {
-    border-color: var(--jc-color-accent);
-  }
 }
 
 .mono-display {

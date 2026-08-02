@@ -2,62 +2,30 @@
 import { ref, computed, nextTick } from 'vue'
 import { useNotesStore } from '@/stores/notes'
 import { invoke } from '@tauri-apps/api/core'
-import type { Note } from '@/types/notes'
+import type { Note, NoteGroup } from '@/types/notes'
+import JcContextMenu from '@/components/ui/JcContextMenu.vue'
+import type { JcContextMenuItem } from '@/components/ui/JcContextMenu.vue'
+import JcInput from '@/components/ui/JcInput.vue'
+import JcTextarea from '@/components/ui/JcTextarea.vue'
 
 const store = useNotesStore()
 
-// 右键菜单状态
+// 右键菜单状态（JcContextMenu 负责定位 / 全局关闭 / 嵌套子菜单）
 const ctxMenu = ref({ show: false, x: 0, y: 0, noteId: '' })
-const moveSubShow = ref(false)
-const moveHoverGroupId = ref<string | null>(null)
-const moveHoverChildId = ref<string | null>(null)
-let moveCloseTimer: ReturnType<typeof setTimeout> | null = null
 
-// 级联分组
-const moveRootGroups = computed(() => store.groups.filter(g => !g.parentId).sort((a, b) => a.sortOrder - b.sortOrder))
+// 分组 → 菜单树（递归构造 children，交给 JcMenuList 多级嵌套渲染）
 function getMoveChildren(parentId: string) { return store.groups.filter(g => g.parentId === parentId).sort((a, b) => a.sortOrder - b.sortOrder) }
-const moveChildren = computed(() => moveHoverGroupId.value ? getMoveChildren(moveHoverGroupId.value) : [])
-const moveGrandchildren = computed(() => moveHoverChildId.value ? getMoveChildren(moveHoverChildId.value) : [])
-
-function scheduleCloseMove() {
-  moveCloseTimer = setTimeout(() => {
-    moveSubShow.value = false; moveHoverGroupId.value = null; moveHoverChildId.value = null
-  }, 200)
+function buildGroupMenu(groups: NoteGroup[]): JcContextMenuItem[] {
+  return groups.map(g => {
+    const children = buildGroupMenu(getMoveChildren(g.id))
+    return { label: g.name, icon: '📁', value: g.id, children: children.length ? children : undefined }
+  })
 }
-function cancelCloseMove() { if (moveCloseTimer) { clearTimeout(moveCloseTimer); moveCloseTimer = null } }
-
-// 级联菜单定位
-function calcMovePos(parentLeft: number, parentTop: number, parentWidth: number, hoverIdx: number, itemCount: number) {
-  const vw = window.innerWidth; const vh = window.innerHeight; const itemH = 25; const padTop = 4; const gap = 2
-  const menuW = 140; const menuH = Math.min(itemCount * itemH + padTop * 2, 280)
-  const rightSpace = vw - parentLeft - parentWidth
-  const left = rightSpace >= menuW ? parentLeft + parentWidth + gap : parentLeft - menuW - gap
-  const itemTop = parentTop + padTop + hoverIdx * itemH
-  const below = vh - itemTop - menuH
-  const top = below < 0 ? Math.max(4, itemTop - menuH + itemH) : itemTop
-  return { left: `${Math.max(4, left)}px`, top: `${top}px` }
-}
-
-const moveSubStyle = computed(() => {
-  const x = ctxMenu.value.x + 140; const y = ctxMenu.value.y
-  const vw = window.innerWidth; const vh = window.innerHeight; const menuW = 140
-  const count = moveRootGroups.value.length; const menuH = Math.min(count * 25 + 8, 280)
-  const rightSpace = vw - x
-  const left = rightSpace < menuW ? (ctxMenu.value.x - menuW - 2) : x
-  const below = vh - y
-  const top = below < menuH && y > menuH ? Math.max(4, y - menuH + 4) : Math.min(y, vh - menuH - 4)
-  return { left: `${Math.max(4, left)}px`, top: `${top}px` }
-})
-
-const moveSub2Style = computed(() => {
-  const idx = moveRootGroups.value.findIndex(g => g.id === moveHoverGroupId.value)
-  return calcMovePos(parseInt(moveSubStyle.value.left) || 0, parseInt(moveSubStyle.value.top) || 0, 130, idx >= 0 ? idx : 0, moveChildren.value.length)
-})
-
-const moveSub3Style = computed(() => {
-  const idx = moveChildren.value.findIndex(g => g.id === moveHoverChildId.value)
-  return calcMovePos(parseInt(moveSub2Style.value.left) || 0, parseInt(moveSub2Style.value.top) || 0, 130, idx >= 0 ? idx : 0, moveGrandchildren.value.length)
-})
+const moveMenuItems = computed<JcContextMenuItem[]>(() => [
+  { label: '根目录', icon: '📁', value: '' },
+  { divider: true },
+  ...buildGroupMenu(store.groups.filter(g => !g.parentId).sort((a, b) => a.sortOrder - b.sortOrder)),
+])
 
 // 快速发布
 const newContent = ref('')
@@ -172,6 +140,11 @@ function hideCtxMenu() {
   ctxMenu.value.show = false
 }
 
+function onCtxSelect(item: JcContextMenuItem) {
+  // 根目录 value 为空字符串 → 移动到 null；分组 value 为分组 id
+  void moveNoteToGroup(item.value ? String(item.value) : null)
+}
+
 async function moveNoteToGroup(groupId: string | null) {
   try {
     await invoke('move_note', { noteId: ctxMenu.value.noteId, groupId })
@@ -218,15 +191,15 @@ const activeFilterSummary = computed(() => {
     <!-- Memos 快速发布框 -->
     <div class="memo-creator">
       <div class="creator-title" v-if="showTitleInput">
-        <input v-model="newTitle" placeholder="输入备忘标题（可选）..." class="title-input-field" />
+        <JcInput v-model="newTitle" placeholder="输入备忘标题（可选）..." />
       </div>
-      <textarea
+      <JcTextarea
         ref="textareaRef"
         v-model="newContent"
         placeholder="写点什么... 支持 Markdown 语法与 #标签 (Ctrl+Enter 发布)"
         class="memo-textarea"
         @keydown="handleKeydown"
-      ></textarea>
+      />
       <div class="creator-actions">
         <div class="toolbar">
           <button class="tb-btn" :class="{active: showTitleInput}" @click="showTitleInput = !showTitleInput" title="标题">T</button>
@@ -290,57 +263,14 @@ const activeFilterSummary = computed(() => {
     </div>
   </div>
 
-  <!-- 右键菜单：移动笔记到分组（级联 3 级） -->
-  <Teleport to="body">
-    <div v-if="ctxMenu.show" class="ctx-overlay" @click="hideCtxMenu" @contextmenu.prevent="hideCtxMenu">
-      <div class="ctx-menu" :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }" @click.stop>
-        <div class="ctx-menu-item" @click="moveNoteToGroup(null)">📁 根目录</div>
-        <div class="ctx-menu-item" style="display:flex;justify-content:space-between" @mouseenter="moveSubShow = true">
-          移动到分组 <span style="font-size:10px">▸</span>
-        </div>
-      </div>
-    </div>
-  </Teleport>
-
-  <!-- 一级子菜单 -->
-  <Teleport to="body">
-    <div v-if="ctxMenu.show && moveSubShow" class="ctx-menu" :style="moveSubStyle"
-      @mouseleave="scheduleCloseMove" @mouseenter="cancelCloseMove">
-      <div v-for="g in moveRootGroups" :key="g.id" class="ctx-menu-item"
-        style="display:flex;justify-content:space-between"
-        @click="moveNoteToGroup(g.id)"
-        @mouseenter="cancelCloseMove(); moveHoverGroupId = getMoveChildren(g.id).length > 0 ? g.id : null; moveHoverChildId = null">
-        📁 {{ g.name }}
-        <span v-if="getMoveChildren(g.id).length > 0" style="font-size:10px">▸</span>
-      </div>
-    </div>
-  </Teleport>
-
-  <!-- 二级子菜单 -->
-  <Teleport to="body">
-    <div v-if="ctxMenu.show && moveSubShow && moveHoverGroupId && moveChildren.length > 0"
-      class="ctx-menu" :style="moveSub2Style"
-      @mouseleave="moveHoverChildId = null; moveHoverGroupId = null"
-      @mouseenter="cancelCloseMove">
-      <div v-for="child in moveChildren" :key="child.id" class="ctx-menu-item"
-        style="display:flex;justify-content:space-between"
-        @click="moveNoteToGroup(child.id)"
-        @mouseenter="cancelCloseMove(); moveHoverChildId = getMoveChildren(child.id).length > 0 ? child.id : null">
-        📁 {{ child.name }}
-        <span v-if="getMoveChildren(child.id).length > 0" style="font-size:10px">▸</span>
-      </div>
-    </div>
-  </Teleport>
-
-  <!-- 三级子菜单 -->
-  <Teleport to="body">
-    <div v-if="ctxMenu.show && moveSubShow && moveHoverChildId && moveGrandchildren.length > 0"
-      class="ctx-menu" :style="moveSub3Style" @mouseenter="cancelCloseMove">
-      <div v-for="gc in moveGrandchildren" :key="gc.id" class="ctx-menu-item" @click="moveNoteToGroup(gc.id)">
-        📁 {{ gc.name }}
-      </div>
-    </div>
-  </Teleport>
+  <!-- 右键菜单：移动笔记到分组（JcContextMenu + JcMenuList 递归嵌套子菜单） -->
+  <JcContextMenu
+    v-model:show="ctxMenu.show"
+    :x="ctxMenu.x"
+    :y="ctxMenu.y"
+    :items="moveMenuItems"
+    @select="onCtxSelect"
+  />
 </template>
 
 <style lang="scss">
@@ -663,34 +593,5 @@ const activeFilterSummary = computed(() => {
   &:hover {
     background: color-mix(in srgb, var(--jc-color-accent) 25%, transparent);
   }
-}
-
-.ctx-overlay {
-  position: fixed; inset: 0; z-index: 10000;
-}
-.ctx-menu {
-  position: fixed;
-  background: var(--jc-bg-elevated);
-  border: 1px solid var(--jc-border-default);
-  border-radius: 8px;
-  padding: 4px 0;
-  min-width: 160px;
-  box-shadow: 0 4px 16px rgba(0,0,0,.3);
-}
-.ctx-menu-title {
-  padding: 6px 12px;
-  font-size: 11px;
-  color: var(--jc-text-secondary);
-  border-bottom: 1px solid var(--jc-border-default);
-  margin-bottom: 2px;
-}
-.ctx-menu-item {
-  display: block; width: 100%;
-  padding: 6px 12px;
-  border: none; background: none;
-  font-size: 13px; text-align: left;
-  cursor: pointer;
-  color: var(--jc-text-primary);
-  &:hover { background: var(--jc-bg-selected); }
 }
 </style>

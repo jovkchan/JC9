@@ -6,6 +6,22 @@ import { useNotesStore } from '@/stores/notes'
 import { useStatusStore } from '@/stores/status'
 import TerminalView from '@/components/TerminalView.vue'
 import LogPanel from '@/components/LogPanel.vue'
+import JcModal from '@/components/ui/JcModal.vue'
+import JcContextMenu from '@/components/ui/JcContextMenu.vue'
+import JcButton from '@/components/ui/JcButton.vue'
+import JcInput from '@/components/ui/JcInput.vue'
+import JcSelect from '@/components/ui/JcSelect.vue'
+import JcTextarea from '@/components/ui/JcTextarea.vue'
+import type { JcContextMenuItem } from '@/components/ui'
+
+const memTypeOptions = [
+  { label: 'decision', value: 'decision' },
+  { label: 'bugfix', value: 'bugfix' },
+  { label: 'architecture', value: 'architecture' },
+  { label: 'pattern', value: 'pattern' },
+  { label: 'config', value: 'config' },
+  { label: 'discovery', value: 'discovery' }
+]
 
 // 异步载入编辑器和工具组件
 const NoteEditor = defineAsyncComponent(() => import('@/components/notes/NoteEditor.vue'))
@@ -202,6 +218,34 @@ function toggleLog(pid: string) {
 function closeCtx() {
   ctxShow.value = false
 }
+const ctxItems: JcContextMenuItem[] = [
+  { label: '重启', value: 'restart' },
+  { label: '重命名', value: 'rename' },
+  { label: '停止并关闭', value: 'stop', danger: true },
+]
+function onCtxSelect(item: JcContextMenuItem) {
+  if (item.value === 'restart') ctxRestart()
+  else if (item.value === 'rename') ctxRename()
+  else if (item.value === 'stop') ctxStop()
+}
+const noteCtxItems: JcContextMenuItem[] = [
+  { label: '刷新', value: 'refresh' },
+  { label: '关闭', value: 'close' },
+  { label: '关闭其他', value: 'closeOthers' },
+  { label: '关闭右侧标签页', value: 'closeRight' },
+  { label: '关闭左侧标签页', value: 'closeLeft' },
+  { label: '全部关闭', value: 'closeAll' },
+]
+function onNoteCtxSelect(item: JcContextMenuItem) {
+  switch (item.value) {
+    case 'refresh': return noteCtxRefresh()
+    case 'close': return noteCtxClose()
+    case 'closeOthers': return noteCtxCloseOthers()
+    case 'closeRight': return noteCtxCloseRight()
+    case 'closeLeft': return noteCtxCloseLeft()
+    case 'closeAll': return noteCtxCloseAll()
+  }
+}
 
 function ctxRestart() {
   const t = store.runningTabs[ctxIdx.value]
@@ -361,11 +405,11 @@ onUnmounted(() => {
       <div class="bar">
         <code class="cmdtext">{{ t.command }}</code>
         <div class="acts">
-          <button v-if="store.runningMap[store.cmdKey(t.projectId,t.commandId)]!=='running'" class="btn pri" @click="()=>{const c=store.projects.find(p=>p.id===t.projectId)?.commands.find(c=>c.id===t.commandId);if(c)store.startCommand(t.projectId,c)}">启动</button>
-          <button v-if="store.runningMap[store.cmdKey(t.projectId,t.commandId)]==='running'" class="btn" @click="store.stopCommand(t.projectId,t.commandId)">停止</button>
-          <button v-if="store.runningMap[store.cmdKey(t.projectId,t.commandId)]==='running'" class="btn" @click="()=>{const c=store.projects.find(p=>p.id===t.projectId)?.commands.find(c=>c.id===t.commandId);if(c)store.restartCommand(t.projectId,c)}">重启</button>
-          <button class="btn" @click="store.clearOutput(t.projectId,t.commandId)">清屏</button>
-          <button class="btn" :class="{on:showLogPid===store.cmdKey(t.projectId,t.commandId)}" @click="toggleLog(store.cmdKey(t.projectId,t.commandId))">日志</button>
+          <JcButton v-if="store.runningMap[store.cmdKey(t.projectId,t.commandId)]!=='running'" size="small" type="primary" @click="()=>{const c=store.projects.find(p=>p.id===t.projectId)?.commands.find(c=>c.id===t.commandId);if(c)store.startCommand(t.projectId,c)}">启动</JcButton>
+          <JcButton v-if="store.runningMap[store.cmdKey(t.projectId,t.commandId)]==='running'" size="small" @click="store.stopCommand(t.projectId,t.commandId)">停止</JcButton>
+          <JcButton v-if="store.runningMap[store.cmdKey(t.projectId,t.commandId)]==='running'" size="small" @click="()=>{const c=store.projects.find(p=>p.id===t.projectId)?.commands.find(c=>c.id===t.commandId);if(c)store.restartCommand(t.projectId,c)}">重启</JcButton>
+          <JcButton size="small" @click="store.clearOutput(t.projectId,t.commandId)">清屏</JcButton>
+          <JcButton size="small" :type="showLogPid===store.cmdKey(t.projectId,t.commandId)?'primary':'default'" @click="toggleLog(store.cmdKey(t.projectId,t.commandId))">日志</JcButton>
         </div>
       </div>
       <div class="term-area">
@@ -467,30 +511,23 @@ onUnmounted(() => {
       <div v-else class="memory-edit-view">
         <div class="mem-edit-field">
           <label>标题</label>
-          <input v-model="t.title" class="mem-edit-input" />
+          <JcInput v-model="t.title" />
         </div>
         <div class="mem-edit-field">
           <label>类型</label>
-          <select v-model="t.type" class="mem-edit-input">
-            <option value="decision">decision</option>
-            <option value="bugfix">bugfix</option>
-            <option value="architecture">architecture</option>
-            <option value="pattern">pattern</option>
-            <option value="config">config</option>
-            <option value="discovery">discovery</option>
-          </select>
+          <JcSelect :model-value="t.type" :options="memTypeOptions" style="width: 100%" @update:model-value="(v) => t.type = v as string" />
         </div>
         <div class="mem-edit-field">
           <label>Scope</label>
-          <input v-model="t.scope" class="mem-edit-input" placeholder="项目标识" />
+          <JcInput v-model="t.scope" placeholder="项目标识" />
         </div>
         <div class="mem-edit-field">
           <label>Topic Key</label>
-          <input v-model="t.topicKey" class="mem-edit-input" placeholder="去重键" />
+          <JcInput v-model="t.topicKey" placeholder="去重键" />
         </div>
         <div class="mem-edit-field content-field">
           <label>内容</label>
-          <textarea v-model="t.content" class="mem-edit-textarea"></textarea>
+          <JcTextarea v-model="t.content" class="jc-fill" />
         </div>
       </div>
     </div>
@@ -499,43 +536,21 @@ onUnmounted(() => {
       <div class="empty">从左侧面板选择功能开始使用</div>
     </div>
 
-    <Teleport to="body">
-      <div v-if="ctxShow" class="ctx" :style="{left:ctxPos.x+'px',top:ctxPos.y+'px'}" @click.stop>
-        <div class="ci" @click="ctxRestart">重启</div>
-        <div class="ci" @click="ctxRename">重命名</div>
-        <div class="ci" @click="ctxStop">停止并关闭</div>
-      </div>
-    </Teleport>
+    <JcContextMenu :show="ctxShow" :x="ctxPos.x" :y="ctxPos.y" :items="ctxItems" @select="onCtxSelect" @update:show="ctxShow = $event" />
 
-    <Teleport to="body">
-      <div v-if="renameShow" class="mbg" @mousedown.self="renameShow=false">
-        <div class="mw" style="min-width:360px">
-          <div class="mt">命令重命名</div>
-          <div class="mb">
+    <JcModal v-model:open="renameShow" title="命令重命名" width="360">
             <div class="fld">
               <label>新名称</label>
               <input v-model="renameValue" placeholder="请输入新名称" @keyup.enter="confirmRename" autofocus />
             </div>
-            <div class="acts">
-              <button class="btn" @click="renameShow=false">取消</button>
-              <button class="btn pri" @click="confirmRename">保存</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </Teleport>
+      <template #footer>
+        <JcButton @click="renameShow=false">取消</JcButton>
+        <JcButton type="primary" @click="confirmRename">保存</JcButton>
+      </template>
+    </JcModal>
 
     <!-- 笔记标签页右键菜单 -->
-    <Teleport to="body">
-      <div v-if="noteCtxShow" class="ctx" :style="{left:noteCtxPos.x+'px',top:noteCtxPos.y+'px'}" @click.stop>
-        <div class="ci" @click="noteCtxRefresh">刷新</div>
-        <div class="ci" @click="noteCtxClose">关闭</div>
-        <div class="ci" @click="noteCtxCloseOthers">关闭其他</div>
-        <div class="ci" @click="noteCtxCloseRight">关闭右侧标签页</div>
-        <div class="ci" @click="noteCtxCloseLeft">关闭左侧标签页</div>
-        <div class="ci" @click="noteCtxCloseAll">全部关闭</div>
-      </div>
-    </Teleport>
+    <JcContextMenu :show="noteCtxShow" :x="noteCtxPos.x" :y="noteCtxPos.y" :items="noteCtxItems" @select="onNoteCtxSelect" @update:show="noteCtxShow = $event" />
 
     <!-- 笔记设置面板 -->
     <!-- 全局浮动搜索面板 -->

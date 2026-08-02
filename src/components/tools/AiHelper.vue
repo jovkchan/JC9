@@ -4,6 +4,9 @@ import { useNotesStore } from '@/stores/notes'
 import { useAiStore } from '@/stores/ai'
 import { useAiHelper } from './composables/useAiHelper'
 import { deleteChatMessages } from '@/utils/chatStorage'
+import JcModal from '@/components/ui/JcModal.vue'
+import JcInput from '@/components/ui/JcInput.vue'
+import JcButton from '@/components/ui/JcButton.vue'
 
 const notesStore = useNotesStore()
 const ai = useAiStore()
@@ -195,8 +198,8 @@ onUnmounted(() => { destroy() })
             <div class="console-section" v-if="ai.workers.length > 0">
               <div class="console-section-title">🔍 知识库</div>
               <div class="kb-search-compact">
-                <input v-model="kbSearchQuery" class="kb-search-input" placeholder="搜索知识库..." @keyup.enter="searchKnowledgeBase" />
-                <button class="kb-search-btn" @click="searchKnowledgeBase">搜索</button>
+                <JcInput v-model="kbSearchQuery" placeholder="搜索知识库..." style="flex:1;min-width:0" @keyup.enter="searchKnowledgeBase" />
+                <JcButton size="small" @click="searchKnowledgeBase">搜索</JcButton>
               </div>
               <div v-for="entry in kbSearchResults" :key="entry.id" class="kb-result-item">
                 <div class="kb-result-title">{{ entry.title }}</div>
@@ -353,31 +356,21 @@ onUnmounted(() => { destroy() })
     </div>
 
     <!-- ═══ Delete Confirm Dialog ═══ -->
-    <div v-if="confirmDelete.show" class="session-overlay" @mousedown.self="confirmDelete.show = false">
-      <div class="confirm-modal" @click.stop>
-        <div class="confirm-icon">🗑️</div>
-        <div class="confirm-title">删除对话</div>
-        <div class="confirm-desc">确定要删除对话「<strong>{{ confirmDelete.title }}</strong>」吗？此操作不可撤销，对话消息将从本地永久删除。</div>
-        <div class="confirm-actions">
-          <button class="confirm-btn cancel" @click="confirmDelete.show = false">取消</button>
-          <button class="confirm-btn delete" @click="executeDeleteSession">删除</button>
-        </div>
-      </div>
-    </div>
+    <JcModal v-model:open="confirmDelete.show" title="删除对话" width="420">
+      <div class="confirm-desc">确定要删除对话「<strong>{{ confirmDelete.title }}</strong>」吗？此操作不可撤销，对话消息将从本地永久删除。</div>
+      <template #footer>
+        <button class="confirm-btn cancel" @click="confirmDelete.show = false">取消</button>
+        <button class="confirm-btn delete" @click="executeDeleteSession">删除</button>
+      </template>
+    </JcModal>
 
     <!-- ═══ Browser Dialog ═══ -->
-    <div v-if="showBrowserDialog" class="session-overlay" @mousedown.self="showBrowserDialog = false">
-      <div class="browser-modal" @click.stop>
-        <div class="session-modal-header">
-          <span>🌐 打开浏览器</span>
-          <button class="session-modal-close" @click="showBrowserDialog = false">✕</button>
-        </div>
-        <div class="browser-modal-body">
-          <input v-model="browserUrlInput" class="browser-url-input" placeholder="输入 URL..." @keyup.enter="handleBrowserConfirm" @click.stop />
-          <button class="browser-go-btn" @click="handleBrowserConfirm">打开</button>
-        </div>
+    <JcModal v-model:open="showBrowserDialog" title="🌐 打开浏览器" width="440">
+      <div class="browser-modal-body">
+        <input v-model="browserUrlInput" class="browser-url-input" placeholder="输入 URL..." @keyup.enter="handleBrowserConfirm" @click.stop />
+        <button class="browser-go-btn" @click="handleBrowserConfirm">打开</button>
       </div>
-    </div>
+    </JcModal>
 
     <!-- ═══ Approval Overlay ═══ -->
     <div class="overlay-backdrop" v-if="ai.pendingApprovals.length > 0">

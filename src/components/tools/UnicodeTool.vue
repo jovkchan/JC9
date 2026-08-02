@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import ToolShell from '@/components/ui/ToolShell.vue'
+import JcButton from '@/components/ui/JcButton.vue'
+import JcTextarea from '@/components/ui/JcTextarea.vue'
 
 const activeTab = ref<'encode' | 'decode'>('encode')
 const inputText = ref('')
@@ -88,115 +91,68 @@ function clearAll() {
 </script>
 
 <template>
-  <div class="tool-container">
-    <div class="tool-header">
-      <div class="tool-title">Unicode / ASCII 转换</div>
-      <div class="tool-actions-tabs">
-        <button :class="['tab-btn', { on: activeTab === 'encode' }]" @click="activeTab = 'encode'">转为编码 (Encode)</button>
-        <button :class="['tab-btn', { on: activeTab === 'decode' }]" @click="activeTab = 'decode'">还原解码 (Decode)</button>
-      </div>
-    </div>
+  <ToolShell title="Unicode / ASCII 转换">
+    <template #actions>
+      <JcButton size="small" :type="activeTab === 'encode' ? 'primary' : 'default'" @click="activeTab = 'encode'">转为编码 (Encode)</JcButton>
+      <JcButton size="small" :type="activeTab === 'decode' ? 'primary' : 'default'" @click="activeTab = 'decode'">还原解码 (Decode)</JcButton>
+    </template>
 
-    <!-- Tab 1: 转为 Unicode 编码 -->
     <div v-if="activeTab === 'encode'" class="tool-body-split">
       <div class="editor-pane">
         <div class="pane-label-row">
           <span>原始中文/字符文本</span>
-          <button class="tool-btn err small" @click="clearAll">清空</button>
+          <JcButton danger size="small" @click="clearAll">清空</JcButton>
         </div>
-        <textarea v-model="inputText" placeholder="输入任意中文字符、特殊符号或 Emoji 图像..." spellcheck="false"></textarea>
+        <JcTextarea v-model="inputText" mono :spellcheck="false" class="jc-fill" placeholder="输入任意中文字符、特殊符号或 Emoji 图像..." />
       </div>
 
       <div class="results-display-pane">
         <div class="result-item-group">
           <div class="result-lbl-bar">
             <span>Unicode 逃逸串 (\uXXXX)</span>
-            <button class="tool-btn pri small" @click="copyResult(unicodeEscapeResult)" :disabled="!unicodeEscapeResult">复制</button>
+            <JcButton type="primary" size="small" :disabled="!unicodeEscapeResult" @click="copyResult(unicodeEscapeResult)">复制</JcButton>
           </div>
-          <textarea readonly class="readonly-output-box" :value="unicodeEscapeResult" placeholder="转换结果..."></textarea>
+          <JcTextarea mono readonly :spellcheck="false" :model-value="unicodeEscapeResult" :rows="3" placeholder="转换结果..." />
         </div>
 
         <div class="result-item-group">
           <div class="result-lbl-bar">
             <span>HTML 十六进制实体 (&#xXXXX;)</span>
-            <button class="tool-btn pri small" @click="copyResult(htmlHexResult)" :disabled="!htmlHexResult">复制</button>
+            <JcButton type="primary" size="small" :disabled="!htmlHexResult" @click="copyResult(htmlHexResult)">复制</JcButton>
           </div>
-          <textarea readonly class="readonly-output-box" :value="htmlHexResult" placeholder="转换结果..."></textarea>
+          <JcTextarea mono readonly :spellcheck="false" :model-value="htmlHexResult" :rows="3" placeholder="转换结果..." />
         </div>
 
         <div class="result-item-group">
           <div class="result-lbl-bar">
             <span>HTML 十进制实体 (&#DDDD;)</span>
-            <button class="tool-btn pri small" @click="copyResult(htmlDecimalResult)" :disabled="!htmlDecimalResult">复制</button>
+            <JcButton type="primary" size="small" :disabled="!htmlDecimalResult" @click="copyResult(htmlDecimalResult)">复制</JcButton>
           </div>
-          <textarea readonly class="readonly-output-box" :value="htmlDecimalResult" placeholder="转换结果..."></textarea>
+          <JcTextarea mono readonly :spellcheck="false" :model-value="htmlDecimalResult" :rows="3" placeholder="转换结果..." />
         </div>
       </div>
     </div>
 
-    <!-- Tab 2: 还原解码 -->
     <div v-else class="tool-body-split">
       <div class="editor-pane">
         <div class="pane-label-row">
           <span>转义编码输入</span>
-          <button class="tool-btn err small" @click="clearAll">清空</button>
+          <JcButton danger size="small" @click="clearAll">清空</JcButton>
         </div>
-        <textarea v-model="inputText" placeholder="粘贴含有 \u4f60\u597d 或 &#30028; 等转义格式的字符串..." spellcheck="false"></textarea>
+        <JcTextarea v-model="inputText" mono :spellcheck="false" class="jc-fill" placeholder="粘贴含有 \u4f60\u597d 或 &#30028; 等转义格式的字符串..." />
       </div>
       <div class="editor-pane">
         <div class="pane-label-row">
           <span>还原文本结果</span>
-          <button class="tool-btn pri small" @click="copyResult(decodedResult)" :disabled="!decodedResult">复制结果</button>
+          <JcButton type="primary" size="small" :disabled="!decodedResult" @click="copyResult(decodedResult)">复制结果</JcButton>
         </div>
-        <textarea v-model="decodedResult" readonly placeholder="解码还原内容..." spellcheck="false" class="readonly-output"></textarea>
+        <JcTextarea v-model="decodedResult" mono readonly :spellcheck="false" class="jc-fill" placeholder="解码还原内容..." />
       </div>
     </div>
-  </div>
+  </ToolShell>
 </template>
 
 <style scoped lang="scss">
-.tool-container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 100%;
-  padding: 12px;
-  background: var(--jc-bg-app);
-  overflow: hidden;
-}
-.tool-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-  flex-shrink: 0;
-}
-.tool-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--jc-text-highlight);
-}
-.tool-actions-tabs {
-  display: flex;
-  background: var(--jc-bg-elevated);
-  border-radius: 4px;
-  padding: 2px;
-  border: 1px solid var(--jc-border-default);
-}
-.tab-btn {
-  background: none;
-  border: none;
-  color: var(--jc-text-secondary);
-  padding: 4px 12px;
-  font-size: 11px;
-  cursor: pointer;
-  border-radius: 3px;
-  transition: all 0.2s;
-  &.on {
-    background: var(--jc-color-accent);
-    color: var(--jc-color-white);
-  }
-}
 .tool-body-split {
   display: flex;
   flex: 1;
@@ -223,26 +179,6 @@ function clearAll() {
   margin-bottom: 6px;
   text-transform: uppercase;
 }
-textarea {
-  flex: 1;
-  width: 100%;
-  resize: none;
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  font-family: 'Cascadia Code', Consolas, monospace;
-  font-size: 12px;
-  padding: 8px;
-  outline: none;
-  border-radius: 2px;
-  &:focus {
-    border-color: var(--jc-color-accent);
-  }
-}
-.readonly-output {
-  background: var(--jc-bg-app);
-  color: var(--jc-color-success);
-}
 .results-display-pane {
   flex: 1;
   display: flex;
@@ -261,51 +197,5 @@ textarea {
   align-items: center;
   font-size: 11px;
   color: var(--jc-text-secondary);
-}
-.readonly-output-box {
-  background: var(--jc-bg-panel);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  font-family: 'Cascadia Code', Consolas, monospace;
-  font-size: 11px;
-  height: 60px;
-  resize: none;
-  padding: 6px;
-  outline: none;
-  border-radius: 3px;
-}
-.tool-btn {
-  background: var(--jc-bg-btn);
-  color: var(--jc-text-primary);
-  border: none;
-  padding: 4px 12px;
-  font-size: 11px;
-  cursor: pointer;
-  border-radius: 2px;
-  transition: all 0.2s;
-  &:hover:not(:disabled) {
-    background: var(--jc-bg-btn-hover);
-  }
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-  &.pri {
-    background: var(--jc-color-accent);
-    color: var(--jc-color-white);
-    &:hover {
-      background: var(--jc-color-accent-hover);
-    }
-  }
-  &.err {
-    &:hover {
-      background: var(--jc-color-error);
-      color: var(--jc-color-white);
-    }
-  }
-  &.small {
-    padding: 2px 8px;
-    font-size: 10px;
-  }
 }
 </style>

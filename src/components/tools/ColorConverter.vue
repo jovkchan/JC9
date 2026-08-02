@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import ToolShell from '@/components/ui/ToolShell.vue'
+import JcButton from '@/components/ui/JcButton.vue'
+import JcInput from '@/components/ui/JcInput.vue'
 
 // 核心单一数据源：RGB + Alpha
 const r = ref(138)
@@ -262,12 +265,9 @@ const cmykString = computed(() => `cmyk(${cmykC.value}%, ${cmykM.value}%, ${cmyk
 </script>
 
 <template>
-  <div class="tool-container">
-    <div class="tool-header">
-      <div class="tool-title">颜色转换器</div>
-    </div>
-    <div class="tool-body-split flex-row">
-      <!-- 左侧：颜色预览（棋盘底）与文本输出 -->
+  <ToolShell title="颜色转换器" split>
+    <template #left-label>颜色预览与格式输出</template>
+    <template #left>
       <div class="color-preview-pane">
         <!-- 棋盘格效果的透明盒底，套用 RGBA 背景层 -->
         <div class="preview-box-chessboard">
@@ -278,37 +278,39 @@ const cmykString = computed(() => `cmyk(${cmykC.value}%, ${cmykM.value}%, ${cmyk
             点击取色盘
           </label>
         </div>
-        
+
         <div class="color-text-display">
           <div class="text-row">
             <span class="format-label">HEX</span>
             <span class="value-text">{{ hexString }}</span>
-            <button class="copy-btn" @click="copyText(hexString)" title="复制 HEX">复制</button>
+            <JcButton size="small" @click="copyText(hexString)" title="复制 HEX">复制</JcButton>
           </div>
           <div class="text-row">
             <span class="format-label">RGBA</span>
             <span class="value-text">{{ rgbaString }}</span>
-            <button class="copy-btn" @click="copyText(rgbaString)" title="复制 RGBA">复制</button>
+            <JcButton size="small" @click="copyText(rgbaString)" title="复制 RGBA">复制</JcButton>
           </div>
           <div class="text-row">
             <span class="format-label">HSLA</span>
             <span class="value-text">{{ hslaString }}</span>
-            <button class="copy-btn" @click="copyText(hslaString)" title="复制 HSLA">复制</button>
+            <JcButton size="small" @click="copyText(hslaString)" title="复制 HSLA">复制</JcButton>
           </div>
           <div class="text-row">
             <span class="format-label">CMYK</span>
             <span class="value-text">{{ cmykString }}</span>
-            <button class="copy-btn" @click="copyText(cmykString)" title="复制 CMYK">复制</button>
+            <JcButton size="small" @click="copyText(cmykString)" title="复制 CMYK">复制</JcButton>
           </div>
         </div>
       </div>
+    </template>
 
-      <!-- 右侧：控制条 -->
+    <template #right-label>调色控制 (RGB / HSL / CMYK)</template>
+    <template #right>
       <div class="color-sliders-pane">
         <!-- HEX 文本输入 -->
         <div class="slider-group">
           <div class="slider-header">HEX 值</div>
-          <input type="text" v-model="hexInput" @input="handleHexInput" class="hex-text-input" placeholder="#FFFFFF" />
+          <JcInput v-model="hexInput" @input="handleHexInput" placeholder="#FFFFFF" style="width: 150px; font-family: 'Cascadia Code', Consolas, monospace" />
         </div>
 
         <!-- RGB + Alpha 调节 -->
@@ -388,41 +390,11 @@ const cmykString = computed(() => `cmyk(${cmykC.value}%, ${cmykM.value}%, ${cmyk
           </div>
         </div>
       </div>
-    </div>
-  </div>
+    </template>
+  </ToolShell>
 </template>
 
 <style scoped lang="scss">
-.tool-container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 100%;
-  padding: 12px;
-  background: var(--jc-bg-app);
-  overflow: hidden;
-}
-.tool-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-  flex-shrink: 0;
-}
-.tool-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--jc-text-highlight);
-}
-.tool-body-split {
-  display: flex;
-  flex: 1;
-  gap: 20px;
-  min-height: 0;
-  &.flex-row {
-    flex-direction: row;
-  }
-}
 .color-preview-pane {
   display: flex;
   flex-direction: column;
@@ -519,30 +491,12 @@ const cmykString = computed(() => `cmyk(${cmykC.value}%, ${cmykM.value}%, ${cmyk
   white-space: nowrap;
   padding-right: 4px;
 }
-.copy-btn {
-  background: var(--jc-bg-btn);
-  color: var(--jc-text-primary);
-  border: none;
-  padding: 2px 8px;
-  font-size: 10px;
-  cursor: pointer;
-  border-radius: 2px;
-  flex-shrink: 0;
-  &:hover {
-    background: var(--jc-color-accent);
-    color: #fff;
-  }
-}
 
 .color-sliders-pane {
   flex: 1;
   display: flex;
   flex-direction: column;
   gap: 16px;
-  background: var(--jc-bg-panel);
-  border: 1px solid var(--jc-border-default);
-  padding: 16px;
-  border-radius: 6px;
   overflow-y: auto;
 }
 .slider-group {
@@ -558,20 +512,6 @@ const cmykString = computed(() => `cmyk(${cmykC.value}%, ${cmykM.value}%, ${cmyk
   letter-spacing: 0.5px;
   border-bottom: 1px solid var(--jc-border-default);
   padding-bottom: 4px;
-}
-.hex-text-input {
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  font-family: 'Cascadia Code', Consolas, monospace;
-  font-size: 13px;
-  padding: 6px 10px;
-  outline: none;
-  border-radius: 3px;
-  width: 150px;
-  &:focus {
-    border-color: var(--jc-color-accent);
-  }
 }
 .slider-row {
   display: flex;

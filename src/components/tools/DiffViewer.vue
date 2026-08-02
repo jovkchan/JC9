@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import ToolShell from '@/components/ui/ToolShell.vue'
+import JcButton from '@/components/ui/JcButton.vue'
+import JcTextarea from '@/components/ui/JcTextarea.vue'
 
 const originalText = ref('')
 const modifiedText = ref('')
@@ -191,27 +194,36 @@ function clearAll() {
 </script>
 
 <template>
-  <div class="tool-container">
-    <div class="tool-header">
-      <div class="tool-title">代码差异对比 (Diff)</div>
-      <div class="tool-actions">
-        <span v-if="hasCompared" class="time-stat">
-          对比完成，最大行数 {{ totalLinesCount }}，耗时 {{ compareTime }} ms
-        </span>
-        <button class="tool-btn pri" @click="runDiff" :disabled="!originalText.trim() && !modifiedText.trim()">开始对比</button>
-        <button class="tool-btn err" @click="clearAll">清空</button>
-      </div>
-    </div>
+  <ToolShell title="代码差异对比" subtitle="Diff">
+    <template #actions>
+      <span v-if="hasCompared" class="time-stat">
+        对比完成，最大行数 {{ totalLinesCount }}，耗时 {{ compareTime }} ms
+      </span>
+      <JcButton type="primary" size="small" @click="runDiff" :disabled="!originalText.trim() && !modifiedText.trim()">开始对比</JcButton>
+      <JcButton size="small" danger ghost @click="clearAll">清空</JcButton>
+    </template>
 
     <!-- 输入对比文本区域 -->
     <div v-if="!hasCompared" class="tool-body-split">
       <div class="editor-pane">
         <div class="pane-label">原始文本 (Original)</div>
-        <textarea v-model="originalText" placeholder="在此粘贴原始的文本、代码或配置文件..." spellcheck="false"></textarea>
+        <JcTextarea
+          v-model="originalText"
+          mono
+          :spellcheck="false"
+          class="jc-fill"
+          placeholder="在此粘贴原始的文本、代码或配置文件..."
+        />
       </div>
       <div class="editor-pane">
         <div class="pane-label">修改后文本 (Modified)</div>
-        <textarea v-model="modifiedText" placeholder="在此粘贴修改后的文本、代码或配置文件..." spellcheck="false"></textarea>
+        <JcTextarea
+          v-model="modifiedText"
+          mono
+          :spellcheck="false"
+          class="jc-fill"
+          placeholder="在此粘贴修改后的文本、代码或配置文件..."
+        />
       </div>
     </div>
 
@@ -246,72 +258,16 @@ function clearAll() {
         </table>
       </div>
       <div class="diff-footer">
-        <button class="tool-btn" @click="hasCompared = false">返回编辑</button>
+        <JcButton size="small" @click="hasCompared = false">返回编辑</JcButton>
       </div>
     </div>
-  </div>
+  </ToolShell>
 </template>
 
 <style scoped lang="scss">
-.tool-container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 100%;
-  padding: 12px;
-  background: var(--jc-bg-app);
-  overflow: hidden;
-}
-.tool-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-  flex-shrink: 0;
-}
-.tool-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--jc-text-highlight);
-}
-.tool-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
 .time-stat {
   font-size: 11px;
   color: var(--jc-text-secondary);
-}
-.tool-btn {
-  background: var(--jc-bg-btn);
-  color: var(--jc-text-primary);
-  border: none;
-  padding: 4px 12px;
-  font-size: 11px;
-  cursor: pointer;
-  border-radius: 2px;
-  transition: all 0.2s;
-  &:hover:not(:disabled) {
-    background: var(--jc-bg-btn-hover);
-  }
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-  &.pri {
-    background: var(--jc-color-accent);
-    color: var(--jc-color-white);
-    &:hover {
-      background: var(--jc-color-accent-hover);
-    }
-  }
-  &.err {
-    &:hover {
-      background: var(--jc-color-error);
-      color: var(--jc-color-white);
-    }
-  }
 }
 .tool-body-split {
   display: flex;
@@ -335,22 +291,6 @@ function clearAll() {
   color: var(--jc-text-secondary);
   margin-bottom: 6px;
   text-transform: uppercase;
-}
-textarea {
-  flex: 1;
-  width: 100%;
-  resize: none;
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  font-family: 'Cascadia Code', Consolas, monospace;
-  font-size: 12px;
-  padding: 8px;
-  outline: none;
-  border-radius: 2px;
-  &:focus {
-    border-color: var(--jc-color-accent);
-  }
 }
 
 // Diff viewer layout

@@ -7,6 +7,13 @@ import { open } from '@tauri-apps/plugin-dialog'
 import CommandDialog from '@/components/CommandDialog.vue'
 import NoteSidebar from '@/components/notes/NoteSidebar.vue'
 import type { Command } from '@/types'
+import JcContextMenu from '@/components/ui/JcContextMenu.vue'
+import JcModal from '@/components/ui/JcModal.vue'
+import JcButton from '@/components/ui/JcButton.vue'
+import JcInput from '@/components/ui/JcInput.vue'
+import JcSelect from '@/components/ui/JcSelect.vue'
+import JcTextarea from '@/components/ui/JcTextarea.vue'
+import type { JcContextMenuItem } from '@/components/ui'
 
 const props = withDefaults(defineProps<{
   /** 如果设置，强制只显示该面板，隐藏 tab 栏 */
@@ -154,6 +161,36 @@ function openCmdCtx(e: MouseEvent, pid: string, cmd: Command) {
 function closeCmdCtx() {
   cmdCtxShow.value = false
 }
+const projCtxItems: JcContextMenuItem[] = [
+  { label: '重命名', value: 'renameProj' },
+  { label: '新增命令', value: 'addCmd' },
+  { label: '删除项目', value: 'delProj', danger: true },
+]
+function onProjCtxSelect(item: JcContextMenuItem) {
+  if (item.value === 'renameProj') ctxRenameProj()
+  else if (item.value === 'addCmd') ctxAddCmd()
+  else if (item.value === 'delProj') ctxDelProj()
+}
+const cmdCtxItems: JcContextMenuItem[] = [
+  { label: '编辑', value: 'editCmd' },
+  { label: '重命名', value: 'renameCmd' },
+  { label: '删除', value: 'delCmd', danger: true },
+]
+function onCmdCtxSelect(item: JcContextMenuItem) {
+  if (item.value === 'editCmd') ctxEditCmd()
+  else if (item.value === 'renameCmd') ctxRenameCmd()
+  else if (item.value === 'delCmd') ctxDelCmd()
+}
+const wfCtxItems = computed<JcContextMenuItem[]>(() => [
+  { label: '编辑', value: 'edit' },
+  { label: wfCtxItem.value?.favorite ? '取消收藏' : '收藏', value: 'fav' },
+  { label: '删除', value: 'del', danger: true },
+])
+function onWfCtxSelect(item: JcContextMenuItem) {
+  if (item.value === 'edit') wfCtxEdit()
+  else if (item.value === 'fav') wfCtxFav()
+  else if (item.value === 'del') wfCtxDel()
+}
 
 function ctxEditCmd() {
   if (cmdCtxCmd.value) {
@@ -226,6 +263,8 @@ const wfAiKey = ref('')
 const wfAiModel = ref('')
 const wfModelList = ref<string[]>([])
 const wfModelMap = ref<Record<string, { provider: string; endpoint: string; apiKey: string; model: string }>>({})
+/** 模型列表已加载（缓存，避免每次打开工作流对话框重复读配置） */
+const wfModelsLoaded = ref(false)
 const wfAiMsg = ref('')
 const stepAiIdx = ref(-1)
 const stepAiInput = ref('')
@@ -308,6 +347,7 @@ async function pickWfDir(step: { workingDir: string }) {
 }
 
 async function loadWfModels() {
+  if (wfModelsLoaded.value) return
   try {
     const json = await invoke<string>('get_ai_config')
     const cfg = JSON.parse(json)
@@ -342,6 +382,7 @@ async function loadWfModels() {
       wfAiKey.value = k
       wfAiModel.value = `${p} ${mo}`
     }
+    wfModelsLoaded.value = true
   } catch { /* ignore */ }
 }
 
@@ -673,6 +714,8 @@ function handleGlobalClick() {
 
 onMounted(() => {
   document.addEventListener('click', handleGlobalClick)
+  // 预加载工作流 AI 模型列表（打开对话框时直接命中缓存，响应更快）
+  loadWfModels()
 })
 
 onUnmounted(() => {
@@ -692,18 +735,18 @@ onUnmounted(() => {
 
     <!-- Projects -->
     <div v-show="effectiveTab==='projects'" class="panel">
-      <div class="bar"><button class="btn" @click="showAdd=!showAdd">{{ showAdd?'收起':'+ 添加项目' }}</button></div>
+      <div class="bar"><JcButton size="small" @click="showAdd=!showAdd">{{ showAdd?'收起':'+ 添加项目' }}</JcButton></div>
       <div v-if="showAdd" class="add-panel">
-        <input v-model="newName" placeholder="项目名称" @keyup.enter="handleAdd" />
-        <div class="row"><input v-model="newDir" placeholder="项目目录" style="flex:1;min-width:0" /><button class="btn" @click="pickDir">...</button></div>
+        <JcInput v-model="newName" placeholder="项目名称" @keyup.enter="handleAdd" />
+        <div class="row"><JcInput v-model="newDir" placeholder="项目目录" style="flex:1;min-width:0" @keyup.enter="handleAdd" /><JcButton @click="pickDir">...</JcButton></div>
         <div v-if="detectedLang" style="font-size:11px;color:var(--jc-color-success)">识别: {{ detectedLang }} · {{ detectedCmds.length }} 命令</div>
-        <button class="btn pri" @click="handleAdd">添加</button>
+        <JcButton type="primary" block @click="handleAdd">添加</JcButton>
       </div>
       <div class="tree">
         <div v-for="p in store.projects" :key="p.id">
           <div class="proj" :class="{sel:store.selectedProjectId===p.id}" @click="toggleExpand(p.id);store.selectedProjectId=p.id" @contextmenu="openProjCtx($event,p.id)">
             <template v-if="editingProjId===p.id">
-              <input class="proj-edit-input" v-model="editProjName" @keyup.enter="confirmRenameProj" @keyup.escape="editingProjId=''" @blur="confirmRenameProj" @click.stop />
+              <JcInput class="proj-edit-input" v-model="editProjName" @keyup.enter="confirmRenameProj" @keyup.escape="editingProjId=''" @blur="confirmRenameProj" @click.stop />
             </template>
             <template v-else>
             <span class="arrow">{{ expandedProjects.has(p.id)?'▾':'▸' }}</span><span class="pn">{{ p.name }}</span><span class="pc">{{ p.commands.length }}</span>
@@ -713,7 +756,7 @@ onUnmounted(() => {
           <div v-if="expandedProjects.has(p.id)" class="cmds">
             <div v-for="cmd in p.commands" :key="cmd.id" class="cmd" :class="{on:isRunning(p.id,cmd.id)}" @contextmenu="openCmdCtx($event,p.id,cmd)">
               <template v-if="editingCmdId===p.id+'::'+cmd.id">
-                <input class="cmd-edit-input" v-model="editCmdName" @keyup.enter="confirmRenameCmd" @keyup.escape="editingCmdId=''" @blur="confirmRenameCmd" @click.stop />
+                <JcInput class="cmd-edit-input" v-model="editCmdName" @keyup.enter="confirmRenameCmd" @keyup.escape="editingCmdId=''" @blur="confirmRenameCmd" @click.stop />
               </template>
               <template v-else>
               <span class="dot" :class="{live:isRunning(p.id,cmd.id)}"></span>
@@ -722,7 +765,7 @@ onUnmounted(() => {
               <button class="del" @click.stop="store.removeCommand(p.id,cmd.id)">✕</button>
               </template>
             </div>
-            <button class="addc" @click="addQuickCmd(p.id)">+ 命令</button>
+            <JcButton size="small" class="addc" @click="addQuickCmd(p.id)">+ 命令</JcButton>
           </div>
         </div>
         <div v-if="store.projects.length===0&&!showAdd" class="empty">点击 + 添加项目</div>
@@ -733,7 +776,7 @@ onUnmounted(() => {
     <!-- Workflows (多命令顺序执行) -->
     <div v-show="effectiveTab==='workflows'" class="panel" style="display:flex;flex-direction:column">
       <div class="bar">
-        <button class="btn" @click="openWfDlg()">+ 新建工作流</button>
+        <JcButton size="small" @click="openWfDlg()">+ 新建工作流</JcButton>
         <span v-if="store.workflowRunning" class="wf-badge">运行中...</span>
       </div>
       <div class="tabs">
@@ -768,7 +811,7 @@ onUnmounted(() => {
         </template>
       </div>
       <div style="padding:4px 6px;border-top:1px solid var(--jc-border-default);flex-shrink:0">
-        <input v-model="wfSearch" placeholder="搜索工作流..." style="width:100%;font-size:11px;padding:3px 6px" />
+        <JcInput v-model="wfSearch" placeholder="搜索工作流..." size="small" />
       </div>
     </div>
 
@@ -776,7 +819,7 @@ onUnmounted(() => {
     <div v-show="effectiveTab==='tools'" class="panel" style="display:flex;flex-direction:column">
       <!-- 搜索过滤 -->
       <div class="search-bar">
-        <input v-model="toolSearchQuery" placeholder="搜索实用工具..." class="tool-search-input" />
+        <JcInput v-model="toolSearchQuery" placeholder="搜索实用工具..." />
       </div>
 
       <div class="tools-list-container">
@@ -885,46 +928,31 @@ onUnmounted(() => {
       <NoteSidebar />
     </div>
 
-    <Teleport to="body">
-      <div v-if="projCtxShow" class="ctx" :style="{left:projCtxPos.x+'px',top:projCtxPos.y+'px'}" @click.stop>
-        <div class="ci" @click="ctxRenameProj">重命名</div>
-        <div class="ci" @click="ctxAddCmd">新增命令</div>
-        <div class="ci" style="color:var(--jc-color-error)" @click="ctxDelProj">删除项目</div>
-      </div>
-    </Teleport>
-    <Teleport to="body">
-      <div v-if="cmdCtxShow" class="ctx" :style="{left:cmdCtxPos.x+'px',top:cmdCtxPos.y+'px'}" @click.stop>
-        <div class="ci" @click="ctxEditCmd">编辑</div>
-        <div class="ci" @click="ctxRenameCmd">重命名</div>
-        <div class="ci" style="color:var(--jc-color-error)" @click="ctxDelCmd">删除</div>
-      </div>
-    </Teleport>
+    <JcContextMenu :show="projCtxShow" :x="projCtxPos.x" :y="projCtxPos.y" :items="projCtxItems" @select="onProjCtxSelect" @update:show="projCtxShow = $event" />
+    <JcContextMenu :show="cmdCtxShow" :x="cmdCtxPos.x" :y="cmdCtxPos.y" :items="cmdCtxItems" @select="onCmdCtxSelect" @update:show="cmdCtxShow = $event" />
     <!-- 工作流编辑对话框 -->
-    <Teleport to="body">
-      <div v-if="showWfDlg" class="mbg" @mousedown.self="showWfDlg=false">
-        <div class="mw" style="width:560px">
-          <div class="mt" style="display:flex;align-items:center;justify-content:space-between">
-            <span>{{ wfEditId ? '编辑工作流' : '新建工作流' }}</span>
-            <button class="btn" style="font-size:10px;padding:2px 8px" @click="wfJsonMode ? applyJsonToForm() : syncFormToJson()">
-              {{ wfJsonMode ? '📋 应用 JSON' : '✏ JSON 编辑' }}
-            </button>
-          </div>
-          <div class="mb">
+    <JcModal v-model:open="showWfDlg" width="560" :title="wfEditId ? '编辑工作流' : '新建工作流'">
+      <template #title>
+        <span style="display:inline-flex;gap:8px">
+          {{ wfEditId ? '编辑工作流' : '新建工作流' }}
+          <JcButton size="small" @click="wfJsonMode ? applyJsonToForm() : syncFormToJson()">
+            {{ wfJsonMode ? '📋 应用 JSON' : '✏ JSON 编辑' }}
+          </JcButton>
+        </span>
+      </template>
             <template v-if="!wfJsonMode">
-              <div class="fld"><label>名称</label><input v-model="wfName" class="wf-input" placeholder="如: 编译并运行" autofocus /></div>
-              <div class="fld"><label>分类</label><input v-model="wfCat" class="wf-input" placeholder="如: Go / Tauri" /></div>
+              <div class="fld"><label>名称</label><JcInput v-model="wfName" placeholder="如: 编译并运行" autofocus /></div>
+              <div class="fld"><label>分类</label><JcInput v-model="wfCat" placeholder="如: Go / Tauri" /></div>
               <div class="fld">
                 <label>说明</label>
                 <div style="display:flex;gap:4px">
-                  <input v-model="wfDesc" class="wf-input" placeholder="描述需求，让 AI 生成工作流" style="flex:1" />
-                  <button class="btn" style="font-size:11px;white-space:nowrap;padding:2px 10px" @click="aiGenerateWorkflow" :disabled="aiGenerating">
+                  <JcInput v-model="wfDesc" placeholder="描述需求，让 AI 生成工作流" style="flex:1;min-width:0" />
+                  <JcButton size="small" @click="aiGenerateWorkflow" :disabled="aiGenerating" style="white-space:nowrap">
                     {{ aiGenerating ? '⏳...' : '🤖 AI 生成' }}
-                  </button>
+                  </JcButton>
                 </div>
                 <div style="display:flex;gap:4px;margin-top:4px;align-items:center">
-                  <select v-if="wfModelList.length > 0" v-model="wfAiModel" style="flex:1;background:var(--jc-bg-input);color:var(--jc-text-primary);border:1px solid var(--jc-border-strong);font-size:11px;padding:3px 4px" @change="selectWfModel(wfAiModel)">
-                    <option v-for="l in wfModelList" :key="l" :value="l">{{ l }}</option>
-                  </select>
+                  <JcSelect v-if="wfModelList.length > 0" v-model="wfAiModel" :options="wfModelList.map((l) => ({ label: l, value: l }))" size="small" style="flex:1;min-width:0" @change="selectWfModel(wfAiModel)" />
                   <span v-else style="font-size:10px;color:var(--jc-text-secondary)">未找到模型配置，请先在设置中添加</span>
                 </div>
                 <div v-if="wfAiMsg" style="margin-top:4px;font-size:11px;color:var(--jc-text-highlight)">{{ wfAiMsg }}</div>
@@ -933,50 +961,41 @@ onUnmounted(() => {
               <div v-for="(step, idx) in wfSteps" :key="idx" class="wf-step-card">
                 <div class="wf-step-header">
                   <span class="wf-step-num">#{{ idx+1 }}</span>
-                  <input v-model="step.name" class="wf-input wf-step-name" placeholder="步骤名称" />
-                  <button class="wf-step-del" @click="removeStep(idx)">✕</button>
+                  <JcInput v-model="step.name" placeholder="步骤名称" style="flex:1;min-width:0" />
+                  <JcButton size="small" danger @click="removeStep(idx)">✕</JcButton>
                 </div>
-                <textarea v-model="step.command" class="wf-textarea" placeholder="命令（如 go build -o app.exe .）" rows="2" />
-                <button class="wf-step-ai" @click="stepAiIdx = idx; stepAiInput = step.command">🤖 AI</button>
+                <JcTextarea v-model="step.command" :rows="2" placeholder="命令（如 go build -o app.exe .）" />
+                <JcButton size="small" @click="stepAiIdx = idx; stepAiInput = step.command">🤖 AI</JcButton>
                 <div class="wf-step-footer">
-                  <input v-model="step.workingDir" class="wf-input wf-dir" placeholder="工作目录（点击📁选择）" />
-                  <button class="wf-dir-pick" @click="pickWfDir(step)">📁</button>
+                  <JcInput v-model="step.workingDir" placeholder="工作目录（点击📁选择）" style="flex:1;min-width:0" />
+                  <JcButton size="small" @click="pickWfDir(step)">📁</JcButton>
                 </div>
                 <div v-if="stepAiIdx === idx" class="wf-step-ai-box">
-                  <input v-model="stepAiInput" placeholder="描述需要的命令" class="wf-input" style="flex:1;font-size:11px" />
-                  <button class="btn" style="font-size:10px;padding:2px 6px" @click="aiGenStep(step)">生成</button>
-                  <button class="btn" style="font-size:10px;padding:2px 6px" @click="stepAiIdx = -1">✕</button>
+                  <JcInput v-model="stepAiInput" placeholder="描述需要的命令" style="flex:1;min-width:0;font-size:11px" />
+                  <JcButton size="small" @click="aiGenStep(step)">生成</JcButton>
+                  <JcButton size="small" @click="stepAiIdx = -1">✕</JcButton>
                 </div>
               </div>
-              <button class="btn wf-add-step" @click="addStep">+ 添加步骤</button>
+              <JcButton block @click="addStep">+ 添加步骤</JcButton>
             </template>
             <template v-else>
-              <div class="fld"><label>名称</label><input v-model="wfName" class="wf-input" placeholder="工作流名称" /></div>
-              <div class="fld"><label>说明</label><input v-model="wfDesc" class="wf-input" placeholder="描述需求，让 AI 生成 JSON" /></div>
+              <div class="fld"><label>名称</label><JcInput v-model="wfName" placeholder="工作流名称" /></div>
+              <div class="fld"><label>说明</label><JcInput v-model="wfDesc" placeholder="描述需求，让 AI 生成 JSON" /></div>
               <div style="margin-top:6px">
                 <div class="wf-section-label">JSON 定义</div>
-                <textarea v-model="wfJsonText" class="wf-textarea wf-json-editor" rows="12" spellcheck="false" />
-                <button class="btn" style="width:100%;margin-top:4px;font-size:11px" @click="aiGenerateWorkflow" :disabled="aiGenerating">
+                <JcTextarea v-model="wfJsonText" mono :rows="12" :spellcheck="false" />
+                <JcButton block style="margin-top:4px" @click="aiGenerateWorkflow" :disabled="aiGenerating">
                   {{ aiGenerating ? '⏳ 生成中...' : 'AI 按描述生成' }}
-                </button>
+                </JcButton>
               </div>
             </template>
-            <div class="acts wf-acts">
-              <button class="btn" @click="showWfDlg=false">取消</button>
-              <button class="btn pri" @click="saveWf">{{ wfEditId ? '保存' : '创建' }}</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </Teleport>
+      <template #footer>
+        <JcButton @click="showWfDlg=false">取消</JcButton>
+        <JcButton type="primary" @click="saveWf">{{ wfEditId ? '保存' : '创建' }}</JcButton>
+      </template>
+    </JcModal>
     <!-- 工作流右键菜单 -->
-    <Teleport to="body">
-      <div v-if="wfCtxShow" class="ctx" :style="{left:wfCtxPos.x+'px',top:wfCtxPos.y+'px'}" @click.stop>
-        <div class="ci" @click="wfCtxEdit">编辑</div>
-        <div class="ci" @click="wfCtxFav">{{ wfCtxItem?.favorite?'取消收藏':'收藏' }}</div>
-        <div class="ci" style="color:var(--jc-color-error)" @click="wfCtxDel">删除</div>
-      </div>
-    </Teleport>
+    <JcContextMenu :show="wfCtxShow" :x="wfCtxPos.x" :y="wfCtxPos.y" :items="wfCtxItems" @select="onWfCtxSelect" @update:show="wfCtxShow = $event" />
   </aside>
 </template>
 
@@ -1046,22 +1065,12 @@ input { @include input-base; }
 }
 
 // ── 工作流对话框（Teleport 到 body，用 :global 确保样式穿透）──
-:global(.wf-input) { @include input-base; }
-:global(.wf-textarea) { @include input-base; font-family:'Cascadia Code',Consolas,monospace; resize:vertical; width:100%; font-size:11px; }
-:global(.wf-json-editor) { margin-top:4px; }
 :global(.wf-step-card) { border:1px solid var(--jc-border-default); border-radius:4px; padding:6px; margin-bottom:4px; }
 :global(.wf-step-header) { display:flex; gap:4px; align-items:center; margin-bottom:4px; }
 :global(.wf-step-num) { font-size:10px; color:var(--jc-text-secondary); }
-:global(.wf-step-name) { flex:1; }
-:global(.wf-step-del) { background:none; border:none; font-size:12px; color:var(--jc-color-error); cursor:pointer; padding:2px 6px; }
 :global(.wf-step-footer) { margin-top:4px; display:flex; gap:4px; align-items:center; }
-:global(.wf-dir) { flex:1; font-size:10px; }
-:global(.wf-dir-pick) { background:none; border:none; cursor:pointer; font-size:13px; padding:2px 4px; flex-shrink:0; }
-:global(.wf-step-ai) { background:none; border:none; color:var(--jc-color-accent); cursor:pointer; font-size:11px; padding:2px 6px; margin-top:2px; width:100%; text-align:left; }
-:global(.wf-step-ai):hover { background:var(--jc-bg-hover); }
 :global(.wf-step-ai-box) { display:flex; gap:4px; align-items:center; margin-top:4px; }
 :global(.wf-section-label) { font-size:11px; font-weight:600; color:var(--jc-text-highlight); margin:8px 0 4px; }
-:global(.wf-add-step) { width:100%; margin-top:4px; }
 :global(.wf-acts) { margin-top:8px; }
 
 .acts { display:flex; justify-content:flex-end; gap:8px; margin-top:4px; }

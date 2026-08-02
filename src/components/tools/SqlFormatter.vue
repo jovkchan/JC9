@@ -1,11 +1,25 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import ToolShell from '@/components/ui/ToolShell.vue'
+import JcButton from '@/components/ui/JcButton.vue'
+import JcSelect from '@/components/ui/JcSelect.vue'
+import JcTextarea from '@/components/ui/JcTextarea.vue'
 
 const input = ref('')
 const output = ref('')
 const errorMsg = ref('')
 const indentSize = ref(2)
 const caseOption = ref<'uppercase' | 'lowercase' | 'preserve'>('uppercase')
+
+const caseOptions = [
+  { label: '关键字大写', value: 'uppercase' },
+  { label: '关键字小写', value: 'lowercase' },
+  { label: '保持原样', value: 'preserve' },
+]
+const indentOptions = [
+  { label: '2 空格', value: 2 },
+  { label: '4 空格', value: 4 },
+]
 
 const mainKeywords = [
   'SELECT', 'FROM', 'WHERE', 'GROUP BY', 'HAVING', 'ORDER BY', 
@@ -239,157 +253,33 @@ function clearAll() {
 </script>
 
 <template>
-  <div class="tool-container">
-    <div class="tool-header">
-      <div class="tool-title">SQL 格式化 / 压缩</div>
-      <div class="tool-actions">
-        <label>大小写：</label>
-        <select v-model="caseOption" @change="formatSql" class="tool-select">
-          <option value="uppercase">关键字大写</option>
-          <option value="lowercase">关键字小写</option>
-          <option value="preserve">保持原样</option>
-        </select>
-        <label>缩进：</label>
-        <select v-model="indentSize" @change="formatSql" class="tool-select">
-          <option :value="2">2 空格</option>
-          <option :value="4">4 空格</option>
-        </select>
-        <button class="tool-btn pri" @click="formatSql">格式化</button>
-        <button class="tool-btn" @click="minifySql">一键压缩</button>
-        <button class="tool-btn" @click="copyResult" :disabled="!output">复制结果</button>
-        <button class="tool-btn err" @click="clearAll">清空</button>
+  <ToolShell title="SQL 格式化 / 压缩" subtitle="Format / Minify" split>
+    <template #actions>
+      <JcSelect v-model="caseOption" :options="caseOptions" size="small" @change="formatSql" />
+      <JcSelect v-model="indentSize" :options="indentOptions" size="small" @change="formatSql" />
+      <JcButton type="primary" size="small" @click="formatSql">格式化</JcButton>
+      <JcButton size="small" @click="minifySql">一键压缩</JcButton>
+      <JcButton size="small" :disabled="!output" @click="copyResult">复制结果</JcButton>
+      <JcButton size="small" danger ghost @click="clearAll">清空</JcButton>
+    </template>
+    <template #left-label>输入 SQL 语句</template>
+    <template #left>
+      <JcTextarea v-model="input" mono :spellcheck="false" class="jc-fill" placeholder="在此粘贴需要美化或压缩的一长串 SQL..." @input="formatSql" />
+    </template>
+    <template #right-label>处理结果</template>
+    <template #right>
+      <div class="sql-right">
+        <JcTextarea v-model="output" mono readonly :spellcheck="false" class="jc-fill" placeholder="等待处理..." />
+        <div v-if="errorMsg" class="sql-error">{{ errorMsg }}</div>
       </div>
-    </div>
-    <div class="tool-body-split">
-      <div class="editor-pane">
-        <div class="pane-label">输入 SQL 语句</div>
-        <textarea v-model="input" @input="formatSql" placeholder="在此粘贴需要美化或压缩的一长串 SQL..." spellcheck="false"></textarea>
-      </div>
-      <div class="editor-pane">
-        <div class="pane-label">处理结果</div>
-        <textarea v-model="output" readonly placeholder="等待处理..." spellcheck="false" class="readonly-output"></textarea>
-      </div>
-    </div>
-    <div v-if="errorMsg" class="tool-footer-error">{{ errorMsg }}</div>
-  </div>
+    </template>
+  </ToolShell>
 </template>
 
-<style scoped lang="scss">
-.tool-container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 100%;
-  padding: 12px;
-  background: var(--jc-bg-app);
-  overflow: hidden;
-}
-.tool-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
+<style scoped>
+.sql-right { display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0; }
+.sql-error {
   flex-shrink: 0;
-}
-.tool-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--jc-text-highlight);
-}
-.tool-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  label {
-    font-size: 11px;
-    color: var(--jc-text-secondary);
-  }
-}
-.tool-select {
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  padding: 3px 6px;
-  font-size: 11px;
-  outline: none;
-  border-radius: 2px;
-}
-.tool-btn {
-  background: var(--jc-bg-btn);
-  color: var(--jc-text-primary);
-  border: none;
-  padding: 4px 12px;
-  font-size: 11px;
-  cursor: pointer;
-  border-radius: 2px;
-  transition: all 0.2s;
-  &:hover:not(:disabled) {
-    background: var(--jc-bg-btn-hover);
-  }
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-  &.pri {
-    background: var(--jc-color-accent);
-    color: var(--jc-color-white);
-    &:hover {
-      background: var(--jc-color-accent-hover);
-    }
-  }
-  &.err {
-    &:hover {
-      background: var(--jc-color-error);
-      color: var(--jc-color-white);
-    }
-  }
-}
-.tool-body-split {
-  display: flex;
-  flex: 1;
-  gap: 12px;
-  min-height: 0;
-}
-.editor-pane {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-width: 0;
-  height: 100%;
-  border: 1px solid var(--jc-border-default);
-  background: var(--jc-bg-panel);
-  padding: 8px;
-  border-radius: 4px;
-}
-.pane-label {
-  font-size: 11px;
-  color: var(--jc-text-secondary);
-  margin-bottom: 6px;
-  text-transform: uppercase;
-}
-textarea {
-  flex: 1;
-  width: 100%;
-  resize: none;
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  font-family: 'Cascadia Code', Consolas, monospace;
-  font-size: 12px;
-  padding: 8px;
-  outline: none;
-  border-radius: 2px;
-  &:focus {
-    border-color: var(--jc-color-accent);
-  }
-}
-.readonly-output {
-  background: var(--jc-bg-app);
-  color: var(--jc-color-success);
-}
-.tool-footer-error {
-  flex-shrink: 0;
-  margin-top: 8px;
   font-size: 11px;
   color: var(--jc-color-error);
   background: rgba(244, 71, 71, 0.1);

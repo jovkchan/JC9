@@ -1,0 +1,162 @@
+// ═══════════════════════════════════════════════════════════════
+// JC9 UI 可移植设计 Token —— 对齐 Ant Design 设计规范
+// 参考: ant.design/docs/spec/{colors,font,layout,shadow,dark}-cn
+//
+// 结构参照 antd Design Token 三层模型：
+//   Seed  : 品牌/功能色、字阶、间距、圆角、控件高度、阴影 —— 改这里即可换肤
+//   Map   : 背景/文本/边框层级（由 Seed 派生）
+//   Alias : 组件实际消费的 --jc-* 语义变量
+//
+// 主题切换：暗色为默认（:root），亮色用 <html data-theme="light"> 覆盖，
+//   并支持 prefers-color-scheme 系统偏好自动跟随。
+//
+// 移植到其他 Vue3 项目：
+//   import '@/components/ui/tokens.scss'   // 获得默认暗色主题
+//   宿主已定义同名 --jc-* 变量时宿主值优先（本文件后加载则覆盖，值一致无冲突）。
+// ═══════════════════════════════════════════════════════════════
+
+:root {
+  // ── Seed · 品牌/功能色（对应 antd colorPrimary / colorSuccess…） ──
+  --jc-color-accent: #8a58ff;
+  --jc-color-accent-hover: #a070ff;
+  --jc-color-accent-active: #6f35e8;
+  --jc-color-white: #ffffff;
+  --jc-color-black: #000000;
+  --jc-color-success: #4ec9b0;
+  --jc-color-warning: #d7ba7d;
+  --jc-color-error: #f44747;
+  --jc-color-info: #5aa2ff;
+
+  // ── Seed · 字体家族（antd 规范：系统字体优先 + 屏显备用） ──
+  --jc-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, 'Noto Sans', sans-serif,
+    'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+  --jc-font-family-code: 'SF Mono', 'Cascadia Code', Consolas, 'Liberation Mono',
+    Menlo, Courier, monospace;
+
+  // ── Seed · 字阶（主字体 13，行高 1.6；antd 主字 14/行高 22） ──
+  --jc-font-size-xs: 11px;
+  --jc-font-size-sm: 12px;
+  --jc-font-size: 13px;
+  --jc-font-size-control: 12px; // 控件字号（对齐 JC9 按钮/输入框 12px）
+  --jc-font-size-lg: 16px;
+  --jc-font-size-xl: 20px;
+  --jc-font-size-2xl: 24px;
+  --jc-font-size-3xl: 30px;
+  --jc-font-size-4xl: 38px;
+  --jc-line-height: 1.6;
+  --jc-font-weight-regular: 400;
+  --jc-font-weight-medium: 500;
+  --jc-font-weight-semibold: 600;
+  --jc-font-variant-numeric: tabular-nums; // 数字等宽（antd 规范）
+
+  // ── Seed · 间距（antd 8px 网格模度） ──
+  --jc-space-xxs: 4px;
+  --jc-space-xs: 8px;
+  --jc-space-sm: 12px;
+  --jc-space: 16px;
+  --jc-space-lg: 24px;
+  --jc-space-xl: 32px;
+  --jc-space-xxl: 48px;
+
+  // ── Seed · 圆角（JC9 紧凑风格：按钮/输入框 2px，面板 4px） ──
+  --jc-radius-sm: 2px;
+  --jc-radius: 4px;
+  --jc-radius-lg: 6px;
+
+  // ── Seed · 控件高度（antd controlHeightSM / controlHeight / controlHeightLG） ──
+  --jc-control-height-sm: 24px;
+  --jc-control-height: 28px;
+  --jc-control-height-lg: 36px;
+
+  // ── Seed · 阴影三层表达（antd shadow-1/2/3，暗色） ──
+  --jc-shadow-1: 0 1px 2px -2px rgba(0, 0, 0, 0.16), 0 3px 6px 0 rgba(0, 0, 0, 0.12), 0 5px 12px 4px rgba(0, 0, 0, 0.09);
+  --jc-shadow-2: 0 3px 6px -4px rgba(0, 0, 0, 0.12), 0 6px 16px 0 rgba(0, 0, 0, 0.08), 0 9px 28px 8px rgba(0, 0, 0, 0.05);
+  --jc-shadow-3: 0 6px 16px -8px rgba(0, 0, 0, 0.08), 0 9px 28px 0 rgba(0, 0, 0, 0.05), 0 12px 48px 16px rgba(0, 0, 0, 0.03);
+
+  // ── Seed · 动效（antd motionDurationFast/Mid/Slow + ease，原则：自然/高效/克制） ──
+  --jc-motion-duration-fast: 0.1s;
+  --jc-motion-duration-mid: 0.2s;
+  --jc-motion-duration-slow: 0.3s;
+  --jc-motion-ease: cubic-bezier(0.645, 0.045, 0.355, 1);        // 进场/常规（antd motionEaseInOut）
+  --jc-motion-ease-out: cubic-bezier(0.215, 0.61, 0.355, 1);     // 出场更快（antd motionEaseOut）
+
+  // ── Seed · 层级（antd zIndexPopupBase） ──
+  --jc-z-index-popup: 1000;   // 浮层：菜单/下拉/弹窗
+  --jc-z-index-modal: 1000;
+  --jc-z-index-toast: 2000;
+
+
+  // ── Map · 背景层级（暗色默认；≈antd colorBgLayout/Container/Elevated/Mask） ──
+  --jc-bg-app: #1e1e1e;
+  --jc-bg-panel: #252526;
+  --jc-bg-elevated: #2d2d30;
+  --jc-bg-hover: #2a2d2e;
+  --jc-bg-selected: #37373d;
+  --jc-bg-input: #3c3c3c;
+  --jc-bg-btn: #3c3c3c;
+  --jc-bg-btn-hover: #4c4c4c;
+  --jc-bg-overlay: rgba(0, 0, 0, 0.5);
+
+  // ── Map · 文本层级（≈antd colorText/Secondary/Tertiary/Heading/Disabled） ──
+  --jc-text-primary: #ccc;
+  --jc-text-secondary: #858585;
+  --jc-text-tertiary: #6b6b6b;
+  --jc-text-highlight: #e0e0e0;
+  --jc-text-disabled: rgba(255, 255, 255, 0.25);
+
+  // ── Map · 边框/分割线（≈antd colorBorder / colorSplit） ──
+  --jc-border-default: #3e3e42;
+  --jc-border-strong: #555;
+
+  // ── Alias · 阴影语义（对齐 JC9 原值：菜单/下拉 2 层、弹窗 3 层） ──
+  --jc-shadow-menu: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --jc-shadow-modal: 0 8px 24px rgba(0, 0, 0, 0.6);
+}
+
+@mixin jc-light-theme {
+  --jc-color-accent: #8a58ff;   // JC9 深浅色同主色（紫）
+  --jc-color-accent-hover: #a070ff;
+  --jc-color-accent-active: #6f35e8;
+  --jc-color-success: #0f9960;
+  --jc-color-warning: #b8860b;
+  --jc-color-error: #d93025;
+  --jc-color-info: #1a73e8;
+
+  --jc-bg-app: #f3f3f3;
+  --jc-bg-panel: #ececec;
+  --jc-bg-elevated: #e0e0e0;
+  --jc-bg-hover: #dcdcdc;
+  --jc-bg-selected: #d0d0d0;
+  --jc-bg-input: #ffffff;
+  --jc-bg-btn: #e0e0e0;
+  --jc-bg-btn-hover: #d0d0d0;
+  --jc-bg-overlay: rgba(0, 0, 0, 0.2);
+
+  --jc-text-primary: #333;
+  --jc-text-secondary: #888;
+  --jc-text-tertiary: #aaa;
+  --jc-text-highlight: #1a1a1a;
+  --jc-text-disabled: rgba(0, 0, 0, 0.25);
+
+  --jc-border-default: #d4d4d4;
+  --jc-border-strong: #b0b0b0;
+
+  --jc-shadow-1: 0 1px 2px -2px rgba(0, 0, 0, 0.16), 0 3px 6px 0 rgba(0, 0, 0, 0.12), 0 5px 12px 4px rgba(0, 0, 0, 0.09);
+  --jc-shadow-2: 0 3px 6px -4px rgba(0, 0, 0, 0.12), 0 6px 16px 0 rgba(0, 0, 0, 0.08), 0 9px 28px 8px rgba(0, 0, 0, 0.05);
+  --jc-shadow-3: 0 6px 16px -8px rgba(0, 0, 0, 0.08), 0 9px 28px 0 rgba(0, 0, 0, 0.05), 0 12px 48px 16px rgba(0, 0, 0, 0.03);
+  --jc-shadow-menu: 0 4px 12px rgba(0, 0, 0, 0.15);
+  --jc-shadow-modal: 0 8px 24px rgba(0, 0, 0, 0.2);
+}
+
+// 亮色主题
+[data-theme='light'] {
+  @include jc-light-theme;
+}
+
+// 系统偏好自动跟随（未显式指定主题时）
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']):not([data-theme='light']) {
+    @include jc-light-theme;
+  }
+}

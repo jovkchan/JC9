@@ -1,5 +1,9 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import ToolShell from '@/components/ui/ToolShell.vue'
+import JcButton from '@/components/ui/JcButton.vue'
+import JcInput from '@/components/ui/JcInput.vue'
+import JcTextarea from '@/components/ui/JcTextarea.vue'
 
 const input = ref('data_10\ndata_2\ndata_1\ndata_2\n   \ndata_5')
 const output = ref('')
@@ -108,157 +112,87 @@ function clearAll() {
 </script>
 
 <template>
-  <div class="tool-container">
-    <div class="tool-header">
-      <div class="tool-title">文本行操作器 (Text Lines Editor)</div>
-      <div class="tool-actions">
-        <button class="tool-btn pri" @click="copyResult" :disabled="!output">复制结果</button>
-        <button class="tool-btn err" @click="clearAll">清空</button>
-      </div>
-    </div>
+  <ToolShell title="文本行操作器" subtitle="Text Lines Editor" split>
+    <template #actions>
+      <JcButton type="primary" size="small" :disabled="!output" @click="copyResult">复制结果</JcButton>
+      <JcButton danger size="small" @click="clearAll">清空</JcButton>
+    </template>
 
-    <div class="tool-body-split">
-      <!-- 左侧输入与快捷操作栏 -->
-      <div class="editor-pane flex-fill">
-        <div class="pane-label-row">
-          <span>输入源文本 (每行一条数据)</span>
-          <div class="quick-actions">
-            <button class="action-btn" @click="trimLines">修剪首尾</button>
-            <button class="action-btn" @click="removeEmptyLines">去空行</button>
-            <button class="action-btn" @click="removeDuplicateLines">去重复</button>
-            <button class="action-btn" @click="sortLines('asc')">升序</button>
-            <button class="action-btn" @click="sortLines('desc')">降序</button>
-            <button class="action-btn" @click="sortLines('natural')">自然序</button>
-            <button class="action-btn" @click="sortLines('shuffle')">打乱</button>
-          </div>
+    <template #left-label>
+      <div class="pane-label-row">
+        <span>输入源文本 (每行一条数据)</span>
+        <div class="quick-actions">
+          <JcButton size="small" @click="trimLines">修剪首尾</JcButton>
+          <JcButton size="small" @click="removeEmptyLines">去空行</JcButton>
+          <JcButton size="small" @click="removeDuplicateLines">去重复</JcButton>
+          <JcButton size="small" @click="sortLines('asc')">升序</JcButton>
+          <JcButton size="small" @click="sortLines('desc')">降序</JcButton>
+          <JcButton size="small" @click="sortLines('natural')">自然序</JcButton>
+          <JcButton size="small" @click="sortLines('shuffle')">打乱</JcButton>
         </div>
-        <textarea v-model="input" placeholder="请在此粘贴或输入需要操作的多行数据..." spellcheck="false" class="flex-grow"></textarea>
       </div>
+    </template>
+    <template #left>
+      <JcTextarea v-model="input" mono :spellcheck="false" class="jc-fill" placeholder="请在此粘贴或输入需要操作的多行数据..." />
+    </template>
 
-      <!-- 右侧转换与输出控制栏 -->
-      <div class="control-and-result-pane">
-        <!-- 转换规则设置 -->
-        <div class="setting-section">
-          <div class="section-subtitle">拆分与合并转换</div>
-          <div class="tab-choice-row">
-            <label class="radio-label">
-              <input type="radio" value="join" v-model="delimiterMode" />
-              <span>多行合并为单行</span>
-            </label>
-            <label class="radio-label">
-              <input type="radio" value="split" v-model="delimiterMode" />
-              <span>单行拆分为多行</span>
-            </label>
+    <template #right-label>输出处理结果</template>
+    <template #right>
+      <div class="setting-section">
+        <div class="section-subtitle">拆分与合并转换</div>
+        <div class="tab-choice-row">
+          <label class="radio-label">
+            <input type="radio" value="join" v-model="delimiterMode" />
+            <span>多行合并为单行</span>
+          </label>
+          <label class="radio-label">
+            <input type="radio" value="split" v-model="delimiterMode" />
+            <span>单行拆分为多行</span>
+          </label>
+        </div>
+
+        <div v-if="delimiterMode === 'join'" class="sub-config-grid">
+          <div class="field">
+            <label>前缀 (如 ')</label>
+            <JcInput v-model="prefixChar" size="small" />
           </div>
-
-          <!-- 合并模式选项 -->
-          <div v-if="delimiterMode === 'join'" class="sub-config-grid">
-            <div class="field">
-              <label>前缀 (如 ')</label>
-              <input v-model="prefixChar" class="char-input" />
-            </div>
-            <div class="field">
-              <label>后缀 (如 ')</label>
-              <input v-model="suffixChar" class="char-input" />
-            </div>
-            <div class="field">
-              <label>连接符</label>
-              <input v-model="joinChar" class="char-input" placeholder="例如 , 或 \n" />
-            </div>
+          <div class="field">
+            <label>后缀 (如 ')</label>
+            <JcInput v-model="suffixChar" size="small" />
           </div>
-
-          <!-- 拆分模式选项 -->
-          <div v-else class="sub-config-grid">
-            <div class="field full-width">
-              <label>拆分分隔符</label>
-              <input v-model="splitChar" class="char-input full" placeholder="例如 , 或 \t" />
-            </div>
+          <div class="field">
+            <label>连接符</label>
+            <JcInput v-model="joinChar" size="small" placeholder="例如 , 或 \n" />
           </div>
         </div>
 
-        <div class="setting-section flex-fill flex flex-col mt-10">
-          <div class="section-subtitle">输出处理结果</div>
-          <textarea v-model="output" readonly placeholder="等待处理..." spellcheck="false" class="readonly-output result-area code-font"></textarea>
+        <div v-else class="sub-config-grid">
+          <div class="field full-width">
+            <label>拆分分隔符</label>
+            <JcInput v-model="splitChar" size="small" placeholder="例如 , 或 \t" />
+          </div>
         </div>
       </div>
-    </div>
-  </div>
+      <JcTextarea v-model="output" mono readonly :spellcheck="false" class="jc-fill" placeholder="等待处理..." />
+    </template>
+  </ToolShell>
 </template>
 
 <style scoped lang="scss">
-.tool-container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 100%;
-  padding: 12px;
-  background: var(--jc-bg-app);
-  overflow: hidden;
-}
-.tool-header {
+.pane-label-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 10px;
-  flex-shrink: 0;
-}
-.tool-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--jc-text-highlight);
-}
-.tool-actions {
-  display: flex;
   gap: 8px;
-}
-.tool-btn {
-  background: var(--jc-bg-btn);
-  color: var(--jc-text-primary);
-  border: none;
-  padding: 4px 12px;
+  flex-wrap: wrap;
   font-size: 11px;
-  cursor: pointer;
-  border-radius: 2px;
-  transition: all 0.2s;
-  &:hover:not(:disabled) {
-    background: var(--jc-bg-btn-hover);
-  }
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-  &.pri {
-    background: var(--jc-color-accent);
-    color: var(--jc-color-white);
-    &:hover {
-      background: var(--jc-color-accent-hover);
-    }
-  }
-  &.err {
-    &:hover {
-      background: var(--jc-color-error);
-      color: var(--jc-color-white);
-    }
-  }
+  color: var(--jc-text-secondary);
+  text-transform: uppercase;
 }
-.tool-body-split {
+.quick-actions {
   display: flex;
-  flex: 1;
-  gap: 16px;
-  min-height: 0;
-}
-
-/* 左侧输入 */
-.editor-pane {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-width: 0;
-  height: 100%;
-  border: 1px solid var(--jc-border-default);
-  background: var(--jc-bg-panel);
-  padding: 10px;
-  border-radius: 4px;
+  gap: 4px;
+  flex-wrap: wrap;
 }
 .pane-label-row {
   display: flex;
@@ -273,44 +207,11 @@ function clearAll() {
   display: flex;
   gap: 4px;
 }
-.action-btn {
-  background: var(--jc-bg-btn);
-  color: var(--jc-text-primary);
-  border: 1px solid var(--jc-border-strong);
-  padding: 1px 6px;
-  font-size: 10px;
-  border-radius: 2px;
-  cursor: pointer;
-  transition: all 0.15s;
-  &:hover {
-    background: var(--jc-bg-btn-hover);
-    border-color: var(--jc-color-accent);
-  }
-}
-.flex-grow {
-  flex: 1;
-}
-
-/* 右侧面板 */
-.control-and-result-pane {
-  display: flex;
-  flex-direction: column;
-  flex: 0 0 340px;
-  background: var(--jc-bg-panel);
-  border: 1px solid var(--jc-border-default);
-  padding: 14px;
-  border-radius: 4px;
-  gap: 12px;
-}
-
 .setting-section {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  &.flex-fill {
-    flex: 1;
-    min-height: 0;
-  }
+  flex-shrink: 0;
 }
 .section-subtitle {
   font-size: 11px;
@@ -345,7 +246,6 @@ function clearAll() {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 8px;
-  
   .field {
     display: flex;
     flex-direction: column;
@@ -359,50 +259,4 @@ function clearAll() {
     }
   }
 }
-
-.char-input {
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  padding: 3px 6px;
-  font-size: 11px;
-  outline: none;
-  border-radius: 2px;
-  text-align: center;
-  height: 24px;
-  
-  &.full {
-    text-align: left;
-    width: 100%;
-  }
-}
-
-textarea {
-  width: 100%;
-  resize: none;
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  font-size: 12px;
-  padding: 8px;
-  outline: none;
-  border-radius: 2px;
-  &:focus {
-    border-color: var(--jc-color-accent);
-  }
-  &.code-font {
-    font-family: 'Cascadia Code', Consolas, monospace;
-    font-size: 11px;
-  }
-}
-.readonly-output {
-  background: var(--jc-bg-app);
-  color: var(--jc-color-success);
-}
-.result-area {
-  flex: 1;
-}
-.flex { display: flex; }
-.flex-col { flex-direction: column; }
-.mt-10 { margin-top: 10px; }
 </style>

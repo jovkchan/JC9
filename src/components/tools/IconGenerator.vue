@@ -3,6 +3,15 @@ import { ref, reactive, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import JSZip from 'jszip'
 import { invoke } from '@tauri-apps/api/core'
 import { save } from '@tauri-apps/plugin-dialog'
+import ToolShell from '@/components/ui/ToolShell.vue'
+import JcButton from '@/components/ui/JcButton.vue'
+import JcSelect from '@/components/ui/JcSelect.vue'
+
+const customFormatOptions = [
+  { label: 'PNG 格式 (.png)', value: 'png' },
+  { label: 'JPEG 格式 (.jpg)', value: 'jpg' },
+  { label: 'Windows 图标 (.ico)', value: 'ico' }
+]
 
 // 支持的上传图片格式
 const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/bmp', 'image/svg+xml']
@@ -840,8 +849,9 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="tool-container">
-    <div class="tool-body-split">
+  <ToolShell title="图标生成器" split>
+    <template #left-label>上传与画布裁剪编辑</template>
+    <template #left>
       <!-- 左栏：上传区与画布裁剪编辑 -->
       <div class="edit-pane">
         <!-- 未上传状态 -->
@@ -867,7 +877,7 @@ onUnmounted(() => {
           <div class="workspace-header">
             <span class="meta-name" :title="imgMeta.name">{{ imgMeta.name }}</span>
             <span class="meta-specs">{{ imgMeta.width }} x {{ imgMeta.height }} Px</span>
-            <button class="tool-btn small err" @click="uploadedImage = null; uploadedFile = null; imgMeta.src = ''; resetAdjustments()">清除</button>
+            <JcButton size="small" danger @click="uploadedImage = null; uploadedFile = null; imgMeta.src = ''; resetAdjustments()">清除</JcButton>
           </div>
 
           <!-- 鼠标与滚轮操控画布 -->
@@ -903,7 +913,10 @@ onUnmounted(() => {
           </div>
         </div>
       </div>
+    </template>
 
+    <template #right-label>安全区与平台属性配置</template>
+    <template #right>
       <!-- 右栏：安全区与平台属性配置 -->
       <div class="config-pane">
         <!-- 裁剪区域蒙版与底色 -->
@@ -946,7 +959,7 @@ onUnmounted(() => {
               <input type="range" v-model.number="options.contrast" min="50" max="150" step="1" />
               <span class="adj-value">{{ options.contrast }}%</span>
             </div>
-            <button class="tool-btn small reset-adj-btn" @click="resetAdjustments">重置所有调整</button>
+            <JcButton size="small" block @click="resetAdjustments">重置所有调整</JcButton>
           </div>
         </div>
 
@@ -1032,11 +1045,7 @@ onUnmounted(() => {
               <div class="custom-row">
                 <div class="custom-col">
                   <label>导出文件格式</label>
-                  <select v-model="customSettings.format">
-                    <option value="png">PNG 格式 (.png)</option>
-                    <option value="jpg">JPEG 格式 (.jpg)</option>
-                    <option value="ico">Windows 图标 (.ico)</option>
-                  </select>
+                  <JcSelect v-model="customSettings.format" :options="customFormatOptions" style="width: 100%" />
                 </div>
               </div>
               <div v-if="customSettings.format === 'ico'" class="custom-row">
@@ -1065,57 +1074,29 @@ onUnmounted(() => {
               <div class="progress-fill" :style="{ width: genProgress + '%' }"></div>
             </div>
           </div>
-          <button 
+          <JcButton
             v-else
-            class="tool-btn pri big-action" 
+            type="primary"
+            block
+            size="large"
             :disabled="!uploadedImage || (!platforms.web && !platforms.tauri && !platforms.ios && !platforms.android && !platforms.custom)"
             @click="generateAllIcons"
           >
             一键生成并打包 ZIP
-          </button>
+          </JcButton>
         </div>
       </div>
-    </div>
-  </div>
+    </template>
+  </ToolShell>
 </template>
 
 <style scoped lang="scss">
-.tool-container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 100%;
-  padding: 12px;
-  background: var(--jc-bg-app);
-  overflow: hidden;
-}
-.tool-header {
-  margin-bottom: 12px;
-  flex-shrink: 0;
-}
-.tool-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--jc-text-highlight);
-}
-.tool-subtitle {
-  font-size: 11px;
-  color: var(--jc-text-secondary);
-  margin-top: 2px;
-}
 .file-input-hidden {
   position: absolute;
   width: 0;
   height: 0;
   opacity: 0;
   pointer-events: none;
-}
-
-.tool-body-split {
-  display: flex;
-  flex: 1;
-  gap: 16px;
-  min-height: 0;
 }
 
 /* ================= 左栏：编辑工作区 ================= */
@@ -1125,10 +1106,6 @@ onUnmounted(() => {
   flex: 1;
   min-width: 0;
   height: 100%;
-  background: var(--jc-bg-panel);
-  border: 1px solid var(--jc-border-default);
-  border-radius: 6px;
-  padding: 12px;
   justify-content: center;
 }
 
@@ -1302,11 +1279,8 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   flex: 0 0 320px;
-  background: var(--jc-bg-panel);
-  border: 1px solid var(--jc-border-default);
-  padding: 12px;
-  border-radius: 6px;
   height: 100%;
+  overflow-y: auto;
 }
 
 .config-group {
@@ -1669,40 +1643,5 @@ onUnmounted(() => {
   height: 100%;
   background: var(--jc-color-accent);
   transition: width 0.15s ease-out;
-}
-
-.tool-btn {
-  background: var(--jc-bg-btn);
-  color: var(--jc-text-primary);
-  border: none;
-  padding: 4px 12px;
-  font-size: 11px;
-  cursor: pointer;
-  border-radius: 3px;
-  transition: all 0.2s;
-  &:hover:not(:disabled) {
-    background: var(--jc-bg-btn-hover);
-  }
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-  &.pri {
-    background: var(--jc-color-accent);
-    color: var(--jc-color-white);
-    &:hover {
-      background: var(--jc-color-accent-hover);
-    }
-  }
-  &.err {
-    &:hover {
-      background: var(--jc-color-error);
-      color: var(--jc-color-white);
-    }
-  }
-  &.small {
-    padding: 2px 6px;
-    font-size: 10px;
-  }
 }
 </style>

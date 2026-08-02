@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import ToolShell from '@/components/ui/ToolShell.vue'
+import JcInput from '@/components/ui/JcInput.vue'
+import JcTextarea from '@/components/ui/JcTextarea.vue'
 
 const regexStr = ref('')
 const flags = ref('g')
@@ -102,106 +105,61 @@ function escapeHtml(text: string) {
 </script>
 
 <template>
-  <div class="tool-container">
-    <div class="tool-header">
-      <div class="tool-title">正则表达式测试器</div>
-    </div>
-    <div class="tool-body-split">
-      <div class="left-panel">
-        <!-- 正则输入 -->
-        <div class="card regex-input-card">
-          <div class="fld-row">
-            <span class="regex-slash">/</span>
-            <input v-model="regexStr" placeholder="在此输入正则表达式，如: [a-zA-Z]+" class="regex-main-input" />
-            <span class="regex-slash">/</span>
-            <input v-model="flags" placeholder="gim" class="regex-flags-input" title="修饰符：g=全局, i=忽略大小写, m=多行" />
-          </div>
-        </div>
-
-        <!-- 测试文本 -->
-        <div class="editor-pane flex-1">
-          <div class="pane-label">测试文本</div>
-          <textarea v-model="testText" placeholder="在此粘贴待匹配的测试文本..."></textarea>
-        </div>
-
-        <!-- 高亮预览 -->
-        <div class="editor-pane flex-1">
-          <div class="pane-label">实时匹配高亮预览</div>
-          <div class="highlight-preview" v-html="highlightedHtml"></div>
+  <ToolShell title="正则表达式测试器" split>
+    <template #left-label>正则输入与测试</template>
+    <template #left>
+      <div class="regex-input-card">
+        <div class="fld-row">
+          <span class="regex-slash">/</span>
+          <JcInput v-model="regexStr" placeholder="在此输入正则表达式，如: [a-zA-Z]+" style="flex: 1; min-width: 0; font-family: 'Cascadia Code', Consolas, monospace" />
+          <span class="regex-slash">/</span>
+          <JcInput v-model="flags" title="修饰符：g=全局, i=忽略大小写, m=多行" style="width: 64px; font-family: 'Cascadia Code', Consolas, monospace; font-weight: 700" />
         </div>
       </div>
 
-      <div class="right-panel">
-        <div class="editor-pane height-100">
-          <div class="pane-label">匹配结果 (共 {{ matches.filter(m => m.index !== -1).length }} 处)</div>
-          <div class="results-list">
-            <div v-for="(m, idx) in matches" :key="idx" class="match-item" :class="{ error: m.index === -1 }">
-              <template v-if="m.index === -1">
-                <div class="match-error-text">{{ m.text }}</div>
-              </template>
-              <template v-else>
-                <div class="match-meta">
-                  <span class="match-index">匹配 #{{ idx + 1 }}</span>
-                  <span class="match-pos">位置: {{ m.index }}..{{ m.index + m.text.length }}</span>
+      <div class="editor-pane flex-1">
+        <div class="pane-label">测试文本</div>
+        <JcTextarea v-model="testText" mono :spellcheck="false" class="jc-fill" placeholder="在此粘贴待匹配的测试文本..." />
+      </div>
+
+      <div class="editor-pane flex-1">
+        <div class="pane-label">实时匹配高亮预览</div>
+        <div class="highlight-preview jc-fill" v-html="highlightedHtml"></div>
+      </div>
+    </template>
+
+    <template #right-label>匹配结果 (共 {{ matches.filter(m => m.index !== -1).length }} 处)</template>
+    <template #right>
+      <div class="editor-pane height-100">
+        <div class="results-list">
+          <div v-for="(m, idx) in matches" :key="idx" class="match-item" :class="{ error: m.index === -1 }">
+            <template v-if="m.index === -1">
+              <div class="match-error-text">{{ m.text }}</div>
+            </template>
+            <template v-else>
+              <div class="match-meta">
+                <span class="match-index">匹配 #{{ idx + 1 }}</span>
+                <span class="match-pos">位置: {{ m.index }}..{{ m.index + m.text.length }}</span>
+              </div>
+              <div class="match-text">{{ m.text }}</div>
+              <div v-if="m.groups.length > 0" class="match-groups">
+                <div v-for="(g, gIdx) in m.groups" :key="gIdx" class="group-row">
+                  <span class="group-label">捕获组 ${{ gIdx + 1 }}:</span>
+                  <span class="group-val">{{ g }}</span>
                 </div>
-                <div class="match-text">{{ m.text }}</div>
-                <div v-if="m.groups.length > 0" class="match-groups">
-                  <div v-for="(g, gIdx) in m.groups" :key="gIdx" class="group-row">
-                    <span class="group-label">捕获组 ${{ gIdx + 1 }}:</span>
-                    <span class="group-val">{{ g }}</span>
-                  </div>
-                </div>
-              </template>
-            </div>
-            <div v-if="matches.length === 0" class="empty-tip">
-              无匹配项
-            </div>
+              </div>
+            </template>
+          </div>
+          <div v-if="matches.length === 0" class="empty-tip">
+            无匹配项
           </div>
         </div>
       </div>
-    </div>
-  </div>
+    </template>
+  </ToolShell>
 </template>
 
 <style scoped lang="scss">
-.tool-container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 100%;
-  padding: 12px;
-  background: var(--jc-bg-app);
-  overflow: hidden;
-}
-.tool-header {
-  margin-bottom: 10px;
-  flex-shrink: 0;
-}
-.tool-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--jc-text-highlight);
-}
-.tool-body-split {
-  display: flex;
-  flex: 1;
-  gap: 12px;
-  min-height: 0;
-}
-.left-panel {
-  display: flex;
-  flex-direction: column;
-  flex: 1.2;
-  gap: 10px;
-  min-width: 0;
-}
-.right-panel {
-  display: flex;
-  flex-direction: column;
-  flex: 0.8;
-  min-width: 0;
-  height: 100%;
-}
 .regex-input-card {
   background: var(--jc-bg-panel);
   border: 1px solid var(--jc-border-default);
@@ -217,34 +175,6 @@ function escapeHtml(text: string) {
   font-size: 18px;
   font-weight: bold;
   color: var(--jc-text-secondary);
-}
-.regex-main-input {
-  flex: 1;
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  padding: 6px 10px;
-  font-size: 13px;
-  outline: none;
-  font-family: 'Cascadia Code', Consolas, monospace;
-  &:focus {
-    border-color: var(--jc-color-accent);
-  }
-}
-.regex-flags-input {
-  width: 60px;
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-color-success);
-  padding: 6px 8px;
-  font-size: 13px;
-  outline: none;
-  font-family: 'Cascadia Code', Consolas, monospace;
-  font-weight: bold;
-  text-align: center;
-  &:focus {
-    border-color: var(--jc-color-accent);
-  }
 }
 .editor-pane {
   display: flex;
@@ -265,21 +195,6 @@ function escapeHtml(text: string) {
   color: var(--jc-text-secondary);
   margin-bottom: 6px;
   text-transform: uppercase;
-}
-textarea {
-  flex: 1;
-  width: 100%;
-  resize: none;
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  font-family: 'Cascadia Code', Consolas, monospace;
-  font-size: 12px;
-  padding: 8px;
-  outline: none;
-  &:focus {
-    border-color: var(--jc-color-accent);
-  }
 }
 .highlight-preview {
   flex: 1;

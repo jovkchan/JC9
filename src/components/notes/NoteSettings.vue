@@ -6,6 +6,11 @@ import { save, open } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
 import { loadAllRoles, saveAllRoles, type AgentRole } from '@/config/roles'
 import { useAiStore } from '@/stores/ai'
+import JcModal from '@/components/ui/JcModal.vue'
+import JcInput from '@/components/ui/JcInput.vue'
+import JcSelect, { type JcSelectOption } from '@/components/ui/JcSelect.vue'
+import JcSwitch from '@/components/ui/JcSwitch.vue'
+import JcTextarea from '@/components/ui/JcTextarea.vue'
 
 defineProps<{
   show: boolean
@@ -21,9 +26,34 @@ const aiStore = useAiStore()
 
 const activeTab = ref<'general' | 'ai' | 'ai-roles' | 'backup' | 'skills' | 'command' |'hook'|'plugin'|'mcp'>('general')
 
+// JcSelect 选项
+const formatOptions: JcSelectOption[] = [
+  { label: 'Markdown (推荐)', value: 'markdown' },
+  { label: '纯文本', value: 'plain' },
+]
+const visibilityOptions: JcSelectOption[] = [
+  { label: 'PRIVATE (私有本地)', value: 'PRIVATE' },
+  { label: 'PUBLIC (公开/对接远端后可见)', value: 'PUBLIC' },
+]
+const providerOptions: JcSelectOption[] = [
+  { label: 'DeepSeek', value: 'deepseek' },
+  { label: 'OpenAI', value: 'openai' },
+  { label: 'Ollama (本地)', value: 'ollama' },
+  { label: 'Google Gemini', value: 'gemini' },
+  { label: 'vLLM (自部署)', value: 'vllm' },
+]
+const reasoningOptions: JcSelectOption[] = [
+  { label: 'High (推荐，大多数场景)', value: 'high' },
+  { label: 'Max (复杂 Agent 任务)', value: 'max' },
+  { label: '关闭 (节省 Token)', value: '' },
+]
+const transportOptions: JcSelectOption[] = [
+  { label: 'SSE（远程服务器）', value: 'sse' },
+  { label: 'Stdio（本地进程）', value: 'stdio' },
+]
+
 // ── 解决拖拽选择文本触发弹窗关闭的 Bug ──
 let mousedownTarget: EventTarget | null = null
-let formMousedownTarget: EventTarget | null = null
 
 function handleMousedown(e: MouseEvent) {
   mousedownTarget = e.target
@@ -32,22 +62,6 @@ function handleMousedown(e: MouseEvent) {
 function handleOverlayClick(e: MouseEvent) {
   if (e.target === e.currentTarget && mousedownTarget === e.currentTarget) {
     emit('close')
-  }
-}
-
-function handleFormMousedown(e: MouseEvent) {
-  formMousedownTarget = e.target
-}
-
-function handleModelOverlayClick(e: MouseEvent) {
-  if (e.target === e.currentTarget && formMousedownTarget === e.currentTarget) {
-    cancelModelForm()
-  }
-}
-
-function handleRoleOverlayClick(e: MouseEvent) {
-  if (e.target === e.currentTarget && formMousedownTarget === e.currentTarget) {
-    cancelRoleForm()
   }
 }
 
@@ -357,12 +371,6 @@ function statusLabel(s: string): string {
   return map[s] || s
 }
 
-function handleMcpOverlayClick(e: MouseEvent) {
-  if (e.target === e.currentTarget && formMousedownTarget === e.currentTarget) {
-    showMcpForm.value = false
-  }
-}
-
 async function saveMcpForm() {
   const f = mcpForm.value
   if (!f.name.trim()) {
@@ -665,29 +673,30 @@ async function importData() {
             <h3 class="pane-title">偏好设置</h3>
             <div class="form-group">
               <label>默认笔记格式</label>
-              <select v-model="defaultFormat" class="form-select">
-                <option value="markdown">Markdown (推荐)</option>
-                <option value="plain">纯文本</option>
-              </select>
+              <JcSelect
+                :model-value="defaultFormat"
+                :options="formatOptions"
+                style="width: 100%"
+                @update:model-value="defaultFormat = $event as 'markdown' | 'plain'"
+              />
               <span class="help-text">新建备忘时的默认输入解析格式</span>
             </div>
 
             <div class="form-group">
               <label>新建笔记默认可见性</label>
-              <select v-model="defaultVisibility" class="form-select">
-                <option value="PRIVATE">PRIVATE (私有本地)</option>
-                <option value="PUBLIC">PUBLIC (公开/对接远端后可见)</option>
-              </select>
+              <JcSelect
+                :model-value="defaultVisibility"
+                :options="visibilityOptions"
+                style="width: 100%"
+                @update:model-value="defaultVisibility = $event as 'PRIVATE' | 'PUBLIC'"
+              />
               <span class="help-text">第一期完全本地化下默认均为 PRIVATE 级别</span>
             </div>
 
             <div class="form-group">
               <label class="toggle-row">
                 <span>关闭标签时自动保存笔记</span>
-                <label class="toggle-switch">
-                  <input type="checkbox" v-model="saveOnClose" />
-                  <span class="toggle-slider"></span>
-                </label>
+                <JcSwitch v-model:checked="saveOnClose" />
               </label>
               <span class="help-text">开启后，点击标签栏 ✕ 按钮或右键关闭标签时自动保存当前编辑内容</span>
             </div>
@@ -723,30 +732,28 @@ async function importData() {
             <button class="add-model-btn" @click="addModel">+ 添加模型</button>
 
             <!-- 添加/编辑模型表单 -->
-            <div v-if="showModelForm" class="model-form-overlay" @mousedown="handleFormMousedown" @click="handleModelOverlayClick">
-              <div class="model-form-card">
-                <h4>{{ newModelForm.id ? '编辑' : '添加' }}模型配置</h4>
+            <JcModal v-model:open="showModelForm" :title="(newModelForm.id ? '编辑' : '添加') + '模型配置'" width="480">
                 <div class="form-group">
                   <label>配置名称</label>
-                  <input v-model="newModelForm.name" class="form-input" placeholder="例如：DeepSeek 主力" />
+                  <JcInput v-model="newModelForm.name" placeholder="例如：DeepSeek 主力" />
                 </div>
                 <div class="form-group">
                   <label>供应商</label>
-                  <select v-model="newModelForm.provider" @change="setProviderDefaults" class="form-select">
-                    <option value="deepseek">DeepSeek</option>
-                    <option value="openai">OpenAI</option>
-                    <option value="ollama">Ollama (本地)</option>
-                    <option value="gemini">Google Gemini</option>
-                    <option value="vllm">vLLM (自部署)</option>
-                  </select>
+                  <JcSelect
+                    :model-value="newModelForm.provider"
+                    :options="providerOptions"
+                    style="width: 100%"
+                    @change="setProviderDefaults"
+                    @update:model-value="newModelForm.provider = $event as ModelConfig['provider']"
+                  />
                 </div>
                 <div class="form-group">
                   <label>Endpoint</label>
-                  <input v-model="newModelForm.endpoint" class="form-input" @blur="onEndpointBlur" />
+                  <JcInput v-model="newModelForm.endpoint" @blur="onEndpointBlur" />
                 </div>
                 <div class="form-group" v-if="newModelForm.provider !== 'ollama' && newModelForm.provider !== 'vllm'">
                   <label>API Key</label>
-                  <input v-model="newModelForm.apiKey" type="password" class="form-input" placeholder="sk-..." />
+                  <JcInput v-model="newModelForm.apiKey" type="password" placeholder="sk-..." />
                 </div>
                 <div class="form-group">
                   <label>Model</label>
@@ -769,16 +776,17 @@ async function importData() {
                       </label>
                     </div>
                   </div>
-                  <input v-else v-model="newModelForm.model" class="form-input" placeholder="多个用英文逗号分隔，如: gemini-1.5-flash, gemini-1.5-pro" />
+                  <JcInput v-else v-model="newModelForm.model" placeholder="多个用英文逗号分隔，如: gemini-1.5-flash, gemini-1.5-pro" />
                   <span class="help-text" v-if="newModelForm.provider !== 'vllm'">支持输入多个模型，请使用英文逗号 <code>,</code> 分隔。</span>
                 </div>
                 <div class="form-group" v-if="newModelForm.provider === 'deepseek'">
                   <label>思维强度 (Thinking Mode)</label>
-                  <select v-model="newModelForm.reasoningEffort" class="form-select">
-                    <option value="high">High (推荐，大多数场景)</option>
-                    <option value="max">Max (复杂 Agent 任务)</option>
-                    <option value="">关闭 (节省 Token)</option>
-                  </select>
+                  <JcSelect
+                    :model-value="newModelForm.reasoningEffort"
+                    :options="reasoningOptions"
+                    style="width: 100%"
+                    @update:model-value="newModelForm.reasoningEffort = $event as ModelConfig['reasoningEffort']"
+                  />
                   <span class="help-text">DeepSeek 思考模式：high 适合日常编码，max 适合复杂多步推理</span>
                 </div>
                 <div class="form-row">
@@ -795,12 +803,11 @@ async function importData() {
                   <label>熔断限额 (元)</label>
                   <input v-model.number="newModelForm.costLimit" type="number" step="0.5" class="form-input" />
                 </div>
-                <div class="model-form-actions">
+                <template #footer>
                   <button class="footer-btn-cancel" @click="cancelModelForm">取消</button>
                   <button class="footer-btn-save" @click="saveModelForm">确定</button>
-                </div>
-              </div>
-            </div>
+                </template>
+              </JcModal>
           </div>
 
           <!-- 3. AI 角色管理 -->
@@ -832,27 +839,24 @@ async function importData() {
             <button class="add-role-btn" @click="addRole">+ 添加角色</button>
 
             <!-- 添加/编辑角色表单 -->
-            <div v-if="showRoleForm" class="role-form-overlay" @mousedown="handleFormMousedown" @click="handleRoleOverlayClick">
-              <div class="role-form-card">
-                <h4>{{ newRoleForm.id ? '编辑' : '添加' }} AI 角色</h4>
+            <JcModal v-model:open="showRoleForm" :title="(newRoleForm.id ? '编辑' : '添加') + ' AI 角色'" width="440">
                 <div class="form-group">
                   <label>角色名称</label>
-                  <input v-model="newRoleForm.name" class="form-input" placeholder="例如：测试工程师" />
+                  <JcInput v-model="newRoleForm.name" placeholder="例如：测试工程师" />
                 </div>
                 <div class="form-group">
                   <label>角色介绍</label>
-                  <input v-model="newRoleForm.description" class="form-input" placeholder="简述该角色的核心职责" />
+                  <JcInput v-model="newRoleForm.description" placeholder="简述该角色的核心职责" />
                 </div>
                 <div class="form-group">
                   <label>专属系统提示词 (System Prompt)</label>
-                  <textarea v-model="newRoleForm.systemPrompt" class="form-textarea" placeholder="在此处输入详细的角色设定和 ReAct 指导性提示词..." rows="6"></textarea>
+                  <JcTextarea v-model="newRoleForm.systemPrompt" :rows="6" placeholder="在此处输入详细的角色设定和 ReAct 指导性提示词..." />
                 </div>
-                <div class="role-form-actions">
+                <template #footer>
                   <button class="footer-btn-cancel" @click="cancelRoleForm">取消</button>
                   <button class="footer-btn-save" @click="saveRoleForm">确定</button>
-                </div>
-              </div>
-            </div>
+                </template>
+              </JcModal>
           </div>
 
           <!-- 4. 数据备份导入 -->
@@ -876,11 +880,7 @@ async function importData() {
             </p> -->
 
             <div class="skills-toolbar">
-              <input
-                v-model="skillsSearch"
-                class="skills-search-input"
-                placeholder="搜索技能名称、ID 或描述..."
-              />
+              <JcInput v-model="skillsSearch" placeholder="搜索技能名称、ID 或描述..." style="flex: 1; min-width: 0" />
               <button class="skills-refresh-btn" :disabled="skillsLoading" @click="loadSystemSkills">
                 {{ skillsLoading ? '加载中...' : '刷新' }}
               </button>
@@ -969,46 +969,45 @@ async function importData() {
               <button class="add-mcp-btn" @click="showMcpForm = true">+ 连接 MCP 服务器</button>
 
               <!-- 添加 MCP 表单弹窗 -->
-              <div v-if="showMcpForm" class="mcp-form-overlay" @mousedown="handleFormMousedown" @click="handleMcpOverlayClick">
-                <div class="mcp-form-card">
-                  <h4>连接 MCP 服务器</h4>
+              <JcModal v-model:open="showMcpForm" title="连接 MCP 服务器" width="460">
                   <div class="form-group">
                     <label>连接方式</label>
-                    <select v-model="mcpForm.transport" class="form-select">
-                      <option value="sse">SSE（远程服务器）</option>
-                      <option value="stdio">Stdio（本地进程）</option>
-                    </select>
+                    <JcSelect
+                      :model-value="mcpForm.transport"
+                      :options="transportOptions"
+                      style="width: 100%"
+                      @update:model-value="mcpForm.transport = $event as 'sse' | 'stdio'"
+                    />
                   </div>
                   <div class="form-group">
                     <label>服务器名称</label>
-                    <input v-model="mcpForm.name" class="form-input" placeholder="例如：my-filesystem-server" />
+                    <JcInput v-model="mcpForm.name" placeholder="例如：my-filesystem-server" />
                   </div>
                   <template v-if="mcpForm.transport === 'sse'">
                     <div class="form-group">
                       <label>SSE URL</label>
-                      <input v-model="mcpForm.url" class="form-input" placeholder="https://example.com/mcp" />
+                      <JcInput v-model="mcpForm.url" placeholder="https://example.com/mcp" />
                     </div>
                   </template>
                   <template v-if="mcpForm.transport === 'stdio'">
                     <div class="form-group">
                       <label>启动命令</label>
-                      <input v-model="mcpForm.command" class="form-input" placeholder="例如：npx" />
+                      <JcInput v-model="mcpForm.command" placeholder="例如：npx" />
                     </div>
                     <div class="form-group">
                       <label>参数</label>
-                      <input v-model="mcpForm.argsText" class="form-input" placeholder="例如：@modelcontextprotocol/server-filesystem, ." />
+                      <JcInput v-model="mcpForm.argsText" placeholder="例如：@modelcontextprotocol/server-filesystem, ." />
                       <span class="help-text">多个参数用逗号分隔</span>
                     </div>
                   </template>
-                  <div class="mcp-form-actions">
+                  <template #footer>
                     <button class="footer-btn-cancel" @click="showMcpForm = false">取消</button>
                     <button class="footer-btn-save" :disabled="connecting" @click="saveMcpForm">
                       {{ connecting ? '连接中...' : '连接' }}
                     </button>
-                  </div>
-                </div>
-              </div>
-            </template>
+                  </template>
+                </JcModal>
+              </template>
 
             <!-- ── JSON 配置模式 ── -->
             <template v-if="mcpViewMode === 'json'">
@@ -1167,7 +1166,6 @@ async function importData() {
     color: var(--jc-text-primary);
   }
 
-  .form-select,
   .form-input {
     background: var(--jc-bg-input);
     border: 1px solid var(--jc-border-default);
@@ -1198,50 +1196,6 @@ async function importData() {
     font-weight: 500;
     color: var(--jc-text-primary);
     cursor: pointer;
-  }
-}
-
-/* ── Toggle Switch ── */
-.toggle-switch {
-  position: relative;
-  display: inline-block;
-  width: 36px;
-  height: 20px;
-  flex-shrink: 0;
-  cursor: pointer;
-
-  input {
-    opacity: 0;
-    width: 0;
-    height: 0;
-  }
-
-  .toggle-slider {
-    position: absolute;
-    inset: 0;
-    background: var(--jc-border-default, #444);
-    border-radius: 20px;
-    transition: background 0.2s;
-
-    &::before {
-      content: '';
-      position: absolute;
-      width: 16px;
-      height: 16px;
-      left: 2px;
-      bottom: 2px;
-      background: #fff;
-      border-radius: 50%;
-      transition: transform 0.2s;
-    }
-  }
-
-  input:checked + .toggle-slider {
-    background: var(--jc-color-accent, #58a6ff);
-  }
-
-  input:checked + .toggle-slider::before {
-    transform: translateX(16px);
   }
 }
 
@@ -1783,22 +1737,6 @@ async function importData() {
     font-size: 13px;
     color: var(--jc-text-primary);
   }
-
-  .form-textarea {
-    background: var(--jc-bg-input);
-    border: 1px solid var(--jc-border-default);
-    color: var(--jc-text-primary);
-    font-size: 11px;
-    padding: 6px 10px;
-    border-radius: 4px;
-    outline: none;
-    resize: vertical;
-    font-family: monospace;
-
-    &:focus {
-      border-color: var(--jc-color-accent);
-    }
-  }
 }
 
 .role-form-actions {
@@ -2095,27 +2033,6 @@ async function importData() {
   align-items: center;
   gap: 10px;
   margin-bottom: 8px;
-}
-
-.skills-search-input {
-  flex: 1;
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-default);
-  color: var(--jc-text-primary);
-  font-size: 11px;
-  padding: 5px 10px;
-  border-radius: 4px;
-  outline: none;
-  min-width: 0;
-
-  &:focus {
-    border-color: var(--jc-color-accent);
-  }
-
-  &::placeholder {
-    color: var(--jc-text-secondary);
-    opacity: 0.5;
-  }
 }
 
 .skills-refresh-btn {

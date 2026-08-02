@@ -4,6 +4,9 @@ import { useNotesStore } from '@/stores/notes'
 import { invoke } from '@tauri-apps/api/core'
 import ActivityCalendar from './ActivityCalendar.vue'
 import type { Note, NoteGroup } from '@/types/notes'
+import JcModal from '@/components/ui/JcModal.vue'
+import JcInput from '@/components/ui/JcInput.vue'
+import JcButton from '@/components/ui/JcButton.vue'
 
 const store = useNotesStore()
 
@@ -468,7 +471,7 @@ onMounted(() => document.addEventListener('click', closeGroupCtx))
           :style="{ paddingLeft: (8 + item.depth * 16) + 'px' }"
           @contextmenu="openGroupCtx($event, item.group.id)">
           <template v-if="editingGroupId === item.group.id">
-            <input class="ns-edit-input" v-model="editingGroupName" @keyup.enter="confirmRenameGroup"
+            <JcInput class="ns-edit-input" v-model="editingGroupName" @keyup.enter="confirmRenameGroup"
               @keyup.escape="editingGroupId = ''" @blur="confirmRenameGroup" @click.stop autofocus />
           </template>
           <template v-else>
@@ -489,7 +492,7 @@ onMounted(() => document.addEventListener('click', closeGroupCtx))
 
       <div class="ns-item add-group" @click="showingNewGroup = true">
         <template v-if="showingNewGroup || showingNewSubGroup">
-          <input v-model="newGroupName" class="ns-add-input ns-add-sub-input" :placeholder="showingNewSubGroup ? '子组名...' : '组名...'" @keyup.enter="handleAddGroup"
+          <JcInput v-model="newGroupName" class="ns-add-input ns-add-sub-input" :placeholder="showingNewSubGroup ? '子组名...' : '组名...'" @keyup.enter="handleAddGroup"
             @keyup.escape="showingNewGroup = false; showingNewSubGroup = false" @blur="handleAddGroup" @click.stop autofocus />
         </template>
         <template v-else><span class="ns-label">+ 新建笔记组</span></template>
@@ -613,35 +616,22 @@ onMounted(() => document.addEventListener('click', closeGroupCtx))
     </Teleport>
 
     <!-- Rename modal -->
-    <Teleport to="body">
-      <div v-if="renameShow" class="mbg" @mousedown.self="renameShow = false">
-        <div class="mw" style="min-width:320px">
-          <div class="mt">重命名笔记</div>
-          <div class="mb">
-            <div class="fld"><label>新名称</label><input v-model="renameValue" @keyup.enter="confirmRenameNote"
-                autofocus />
-            </div>
-            <div class="acts"><button class="btn" @click="renameShow = false">取消</button><button class="btn pri"
-                @click="confirmRenameNote">保存</button></div>
-          </div>
-        </div>
-      </div>
-    </Teleport>
+    <JcModal v-model:open="renameShow" title="重命名笔记" width="360">
+      <div class="fld"><label>新名称</label><JcInput v-model="renameValue" @keyup.enter="confirmRenameNote" autofocus /></div>
+      <template #footer>
+        <JcButton @click="renameShow = false">取消</JcButton>
+        <JcButton type="primary" @click="confirmRenameNote">保存</JcButton>
+      </template>
+    </JcModal>
 
     <!-- Delete confirm -->
-    <Teleport to="body">
-      <div v-if="deleteConfirmShow" class="mbg" @mousedown.self="deleteConfirmShow = false">
-        <div class="mw" style="min-width:320px">
-          <div class="mt">删除笔记</div>
-          <div class="mb">
-            <p style="color:var(--jc-text-secondary);font-size:12px">确定要{{ deletePermanent ? '永久' : '' }}删除笔记「{{ deleteNoteTitle }}」吗？<br /><span
-                style="font-size:11px">{{ deletePermanent ? '此操作不可恢复' : '删除后可在回收站恢复' }}</span></p>
-            <div class="acts"><button class="btn" @click="deleteConfirmShow = false">取消</button><button class="btn pri"
-                :style="{ background: deletePermanent ? '#da3633' : 'var(--jc-color-error)' }" @click="confirmDelete">{{ deletePermanent ? '永久删除' : '删除' }}</button></div>
-          </div>
-        </div>
-      </div>
-    </Teleport>
+    <JcModal v-model:open="deleteConfirmShow" title="删除笔记" width="360">
+      <p style="color:var(--jc-text-secondary);font-size:12px">确定要{{ deletePermanent ? '永久' : '' }}删除笔记「{{ deleteNoteTitle }}」吗？<br /><span style="font-size:11px">{{ deletePermanent ? '此操作不可恢复' : '删除后可在回收站恢复' }}</span></p>
+      <template #footer>
+        <JcButton @click="deleteConfirmShow = false">取消</JcButton>
+        <JcButton danger @click="confirmDelete">{{ deletePermanent ? '永久删除' : '删除' }}</JcButton>
+      </template>
+    </JcModal>
 
     <!-- Sidebar Footer -->
 
