@@ -1045,7 +1045,7 @@ onUnmounted(() => {
               <div class="custom-row">
                 <div class="custom-col">
                   <label>导出文件格式</label>
-                  <JcSelect v-model="customSettings.format" :options="customFormatOptions" style="width: 100%" />
+                  <JcSelect beam v-model="customSettings.format" :options="customFormatOptions" style="width: 100%" />
                 </div>
               </div>
               <div v-if="customSettings.format === 'ico'" class="custom-row">

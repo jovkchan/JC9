@@ -310,7 +310,7 @@ const cmykString = computed(() => `cmyk(${cmykC.value}%, ${cmykM.value}%, ${cmyk
         <!-- HEX 文本输入 -->
         <div class="slider-group">
           <div class="slider-header">HEX 值</div>
-          <JcInput v-model="hexInput" @input="handleHexInput" placeholder="#FFFFFF" style="width: 150px; font-family: 'Cascadia Code', Consolas, monospace" />
+          <JcInput beam v-model="hexInput" @input="handleHexInput" placeholder="#FFFFFF" style="width: 150px; font-family: 'Cascadia Code', Consolas, monospace" />
         </div>
 
         <!-- RGB + Alpha 调节 -->

@@ -260,11 +260,11 @@ function clearAll() {
         <div class="config-row">
           <div class="cfg-item">
             <label>密钥长度 (Key Size)</label>
-            <JcSelect :model-value="keySize" :options="keySizeOptions" style="width: 100%" @update:model-value="(v) => keySize = Number(v)" />
+            <JcSelect beam :model-value="keySize" :options="keySizeOptions" style="width: 100%" @update:model-value="(v) => keySize = Number(v)" />
           </div>
           <div class="cfg-item">
             <label>密钥用途 (Usage)</label>
-            <JcSelect v-model="keyUsage" :options="keyUsageOptions" style="width: 100%" />
+            <JcSelect beam v-model="keyUsage" :options="keyUsageOptions" style="width: 100%" />
           </div>
         </div>
 
@@ -279,7 +279,7 @@ function clearAll() {
             <span>公钥 PEM (Public Key)</span>
             <JcButton size="small" @click="copyText(publicKeyPem)">复制</JcButton>
           </div>
-          <JcTextarea v-model="publicKeyPem" mono :rows="5" :spellcheck="false" placeholder="此处显示生成的公钥，或粘贴您的 RSA 公钥 PEM..." />
+          <JcTextarea v-model="publicKeyPem" mono beam :beam-size-ratio="0.6" :rows="5" :spellcheck="false" placeholder="此处显示生成的公钥，或粘贴您的 RSA 公钥 PEM..." />
         </div>
 
         <!-- 私钥 PEM 框 -->
@@ -288,7 +288,7 @@ function clearAll() {
             <span>私钥 PEM (Private Key)</span>
             <JcButton size="small" @click="copyText(privateKeyPem)">复制</JcButton>
           </div>
-          <JcTextarea v-model="privateKeyPem" mono :rows="5" :spellcheck="false" placeholder="此处显示生成的私钥，或粘贴您的 RSA 私钥 PEM..." />
+          <JcTextarea v-model="privateKeyPem" mono beam :beam-size-ratio="0.6" :rows="5" :spellcheck="false" placeholder="此处显示生成的私钥，或粘贴您的 RSA 私钥 PEM..." />
         </div>
       </div>
 
@@ -307,7 +307,7 @@ function clearAll() {
         <div class="card op-panel">
           <div class="data-field">
             <label>输入数据 / 明文 (Plain Text)</label>
-            <JcTextarea v-model="inputText" :spellcheck="false" :rows="6" placeholder="输入要加密或签名的文本内容..." />
+            <JcTextarea v-model="inputText" beam :beam-size-ratio="0.6" :spellcheck="false" :rows="6" placeholder="输入要加密或签名的文本内容..." />
           </div>
 
           <!-- Tab 1: 加解密 -->
@@ -319,7 +319,7 @@ function clearAll() {
             
             <div class="data-field">
               <label>加密结果 / 密文 (Base64 Encrypted String)</label>
-              <JcTextarea v-model="outputText" mono :spellcheck="false" :rows="6" placeholder="加密后的 Base64 文本..." />
+              <JcTextarea v-model="outputText" mono beam :beam-size-ratio="0.6" :spellcheck="false" :rows="6" placeholder="加密后的 Base64 文本..." />
             </div>
           </div>
 
@@ -336,7 +336,7 @@ function clearAll() {
 
             <div class="data-field">
               <label>签名值 (Base64 Signature String)</label>
-              <JcTextarea v-model="signatureText" mono :spellcheck="false" :rows="6" placeholder="生成的 Base64 签名串..." />
+              <JcTextarea v-model="signatureText" mono beam :beam-size-ratio="0.6" :spellcheck="false" :rows="6" placeholder="生成的 Base64 签名串..." />
             </div>
           </div>
         </div>

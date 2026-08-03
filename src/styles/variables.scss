@@ -131,6 +131,11 @@ $light: (
   --jc-border-level-3: #666;
   // Dark theme tokens
   @include define-css-vars($dark);
+  // 流光默认渐变（根配置：JcBorderBeam / JcInput / JcTextarea 共用，改这里全局生效；实例传 beam-color/color 则覆盖）
+  // 3 色：蓝（头部）→ 紫 → 浅紫（尾部接近边框，边框成为第四色延续）→ 柔和淡出
+  --jc-beam-gradient: linear-gradient(to left, #5b7cff 0%, #8a58ff 40%, #a878ff 68%, transparent);
+  // 流光细条高度（BorderBeam/Input/Textarea 共用），小于输入框高度可避免光束同时盖住上下边框的双轨
+  --jc-beam-height: 12px;
 }
 
 // ── Light theme override ──

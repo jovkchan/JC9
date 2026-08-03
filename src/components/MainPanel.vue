@@ -513,23 +513,23 @@ onUnmounted(() => {
       <div v-else class="memory-edit-view">
         <div class="mem-edit-field">
           <label>标题</label>
-          <JcInput v-model="t.title" />
+          <JcInput beam v-model="t.title" />
         </div>
         <div class="mem-edit-field">
           <label>类型</label>
-          <JcSelect :model-value="t.type" :options="memTypeOptions" style="width: 100%" @update:model-value="(v) => t.type = v as string" />
+          <JcSelect beam :model-value="t.type" :options="memTypeOptions" style="width: 100%" @update:model-value="(v) => t.type = v as string" />
         </div>
         <div class="mem-edit-field">
           <label>Scope</label>
-          <JcInput v-model="t.scope" placeholder="项目标识" />
+          <JcInput beam v-model="t.scope" placeholder="项目标识" />
         </div>
         <div class="mem-edit-field">
           <label>Topic Key</label>
-          <JcInput v-model="t.topicKey" placeholder="去重键" />
+          <JcInput beam v-model="t.topicKey" placeholder="去重键" />
         </div>
         <div class="mem-edit-field content-field">
           <label>内容</label>
-          <JcTextarea v-model="t.content" class="jc-fill" />
+          <JcTextarea v-model="t.content" beam :beam-size-ratio="0.6" class="jc-fill" />
         </div>
       </div>
     </div>

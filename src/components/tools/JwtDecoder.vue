@@ -129,7 +129,7 @@ function clearAll() {
 
     <div class="jwt-input-section">
       <div class="pane-label">粘贴 JWT Token (三段式字符串)</div>
-      <JcTextarea v-model="tokenInput" mono :spellcheck="false" :rows="3" placeholder="在此处粘贴以 eyJ... 开头的三段式 JWT 令牌..." />
+      <JcTextarea v-model="tokenInput" mono beam :beam-size-ratio="0.6" :spellcheck="false" :rows="3" placeholder="在此处粘贴以 eyJ... 开头的三段式 JWT 令牌..." />
     </div>
 
     <div class="tool-body-split">
@@ -138,7 +138,7 @@ function clearAll() {
           <span>Header (头部信息)</span>
           <JcButton type="primary" size="small" :disabled="!headerResult" @click="copyText(headerResult)">复制 Header</JcButton>
         </div>
-        <JcTextarea v-model="headerResult" mono readonly :spellcheck="false" class="jc-fill" placeholder="等待解析..." />
+        <JcTextarea v-model="headerResult" mono readonly beam :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="等待解析..." />
       </div>
 
       <div class="editor-pane flex-column-layout">
@@ -146,7 +146,7 @@ function clearAll() {
           <span>Payload (有效载荷)</span>
           <JcButton type="primary" size="small" :disabled="!payloadResult" @click="copyText(payloadResult)">复制 Payload</JcButton>
         </div>
-        <JcTextarea v-model="payloadResult" mono readonly :spellcheck="false" class="jc-fill" placeholder="等待解析..." />
+        <JcTextarea v-model="payloadResult" mono readonly beam :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="等待解析..." />
 
         <div v-if="decodedTimes.length > 0" class="time-claims-panel">
           <div class="claims-title">时间戳声明转换</div>

@@ -210,6 +210,8 @@ function clearAll() {
         <JcTextarea
           v-model="originalText"
           mono
+          beam
+          :beam-size-ratio="0.6"
           :spellcheck="false"
           class="jc-fill"
           placeholder="在此粘贴原始的文本、代码或配置文件..."
@@ -220,6 +222,8 @@ function clearAll() {
         <JcTextarea
           v-model="modifiedText"
           mono
+          beam
+          :beam-size-ratio="0.6"
           :spellcheck="false"
           class="jc-fill"
           placeholder="在此粘贴修改后的文本、代码或配置文件..."

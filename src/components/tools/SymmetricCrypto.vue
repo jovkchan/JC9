@@ -212,9 +212,9 @@ function copyResult(text: string) {
         <div class="field-item">
           <div class="label-with-select">
             <label>密钥 (Key)</label>
-            <JcSelect v-model="keyFormat" :options="textFormatOptions" size="small" />
+            <JcSelect beam v-model="keyFormat" :options="textFormatOptions" size="small" />
           </div>
-          <JcInput v-model="key" placeholder="输入加密密钥..." style="font-family: 'Cascadia Code', Consolas, monospace" />
+          <JcInput beam v-model="key" placeholder="输入加密密钥..." style="font-family: 'Cascadia Code', Consolas, monospace" />
           <div class="field-desc">
             {{ algorithm === 'AES' ? 'AES 密钥长度支持: 16字节(128位)/24字节(192位)/32字节(256位)' : 'DES 密钥长度固定为 8字节(64位)' }}
           </div>
@@ -223,9 +223,9 @@ function copyResult(text: string) {
         <div class="field-item" v-show="mode === 'CBC'">
           <div class="label-with-select">
             <label>偏移量 (IV)</label>
-            <JcSelect v-model="ivFormat" :options="textFormatOptions" size="small" />
+            <JcSelect beam v-model="ivFormat" :options="textFormatOptions" size="small" />
           </div>
-          <JcInput v-model="iv" placeholder="输入偏移量..." style="font-family: 'Cascadia Code', Consolas, monospace" />
+          <JcInput beam v-model="iv" placeholder="输入偏移量..." style="font-family: 'Cascadia Code', Consolas, monospace" />
           <div class="field-desc">
             {{ algorithm === 'AES' ? 'AES CBC 模式 IV 长度固定为 16 字节' : 'DES CBC 模式 IV 长度固定为 8 字节' }}
           </div>
@@ -245,11 +245,11 @@ function copyResult(text: string) {
           <div class="panel-header">
             <span>明文数据 (Plaintext)</span>
             <div class="panel-acts">
-              <JcSelect v-model="plainFormat" :options="textFormatOptions" size="small" />
+              <JcSelect beam v-model="plainFormat" :options="textFormatOptions" size="small" />
               <JcButton size="small" @click="copyResult(plainText)">复制</JcButton>
             </div>
           </div>
-          <JcTextarea v-model="plainText" :rows="7" :spellcheck="false" placeholder="在此输入需要加密的明文，或解密出的结果..." />
+          <JcTextarea v-model="plainText" beam :beam-size-ratio="0.6" :rows="7" :spellcheck="false" placeholder="在此输入需要加密的明文，或解密出的结果..." />
         </div>
 
         <!-- 密文框 -->
@@ -257,11 +257,11 @@ function copyResult(text: string) {
           <div class="panel-header">
             <span>密文数据 (Ciphertext)</span>
             <div class="panel-acts">
-              <JcSelect v-model="cipherFormat" :options="cipherFormatOptions" size="small" />
+              <JcSelect beam v-model="cipherFormat" :options="cipherFormatOptions" size="small" />
               <JcButton size="small" @click="copyResult(cipherText)">复制</JcButton>
             </div>
           </div>
-          <JcTextarea v-model="cipherText" mono :rows="7" :spellcheck="false" placeholder="在此输入需要解密的密文，或加密出的结果..." />
+          <JcTextarea v-model="cipherText" mono beam :beam-size-ratio="0.6" :rows="7" :spellcheck="false" placeholder="在此输入需要解密的密文，或加密出的结果..." />
         </div>
 
         <!-- 错误提示 -->

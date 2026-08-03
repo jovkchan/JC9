@@ -100,7 +100,7 @@ onMounted(() => {
 <template>
   <ToolShell title="系统环境变量" subtitle="进程级">
     <template #actions>
-      <JcInput v-model="filterText" placeholder="搜索变量名或内容..." style="width: 220px" />
+      <JcInput beam v-model="filterText" placeholder="搜索变量名或内容..." style="width: 220px" />
       <JcButton type="primary" @click="openAddModal">+ 新增变量</JcButton>
       <JcButton :loading="loading" @click="fetchEnv">{{ loading ? '刷新中...' : '刷新' }}</JcButton>
     </template>
@@ -134,6 +134,7 @@ onMounted(() => {
       <div class="fld">
         <label>变量名 (Key)</label>
         <JcInput
+          beam
           v-model="modalKey"
           placeholder="如: NODE_ENV"
           :disabled="modalMode === 'edit'"
@@ -143,7 +144,7 @@ onMounted(() => {
       </div>
       <div class="fld">
         <label>变量值 (Value)</label>
-        <JcTextarea v-model="modalValue" placeholder="请输入环境变量的值" :rows="4" mono />
+        <JcTextarea v-model="modalValue" beam :beam-size-ratio="0.6" placeholder="请输入环境变量的值" :rows="4" mono />
       </div>
 
       <div v-if="modalError" class="modal-error">

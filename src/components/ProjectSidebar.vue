@@ -737,8 +737,8 @@ onUnmounted(() => {
     <div v-show="effectiveTab==='projects'" class="panel">
       <div class="bar"><JcButton size="small" @click="showAdd=!showAdd">{{ showAdd?'收起':'+ 添加项目' }}</JcButton></div>
       <div v-if="showAdd" class="add-panel">
-        <JcInput v-model="newName" placeholder="项目名称" @keyup.enter="handleAdd" />
-        <div class="row"><JcInput v-model="newDir" placeholder="项目目录" style="flex:1;min-width:0" @keyup.enter="handleAdd" /><JcButton @click="pickDir">...</JcButton></div>
+        <JcInput beam v-model="newName" placeholder="项目名称" @keyup.enter="handleAdd" />
+        <div class="row"><JcInput beam v-model="newDir" placeholder="项目目录" style="flex:1;min-width:0" @keyup.enter="handleAdd" /><JcButton @click="pickDir">...</JcButton></div>
         <div v-if="detectedLang" style="font-size:11px;color:var(--jc-color-success)">识别: {{ detectedLang }} · {{ detectedCmds.length }} 命令</div>
         <JcButton type="primary" block @click="handleAdd">添加</JcButton>
       </div>
@@ -746,7 +746,7 @@ onUnmounted(() => {
         <div v-for="p in store.projects" :key="p.id">
           <div class="proj" :class="{sel:store.selectedProjectId===p.id}" @click="toggleExpand(p.id);store.selectedProjectId=p.id" @contextmenu="openProjCtx($event,p.id)">
             <template v-if="editingProjId===p.id">
-              <JcInput class="proj-edit-input" v-model="editProjName" @keyup.enter="confirmRenameProj" @keyup.escape="editingProjId=''" @blur="confirmRenameProj" @click.stop />
+              <JcInput beam class="proj-edit-input" v-model="editProjName" @keyup.enter="confirmRenameProj" @keyup.escape="editingProjId=''" @blur="confirmRenameProj" @click.stop />
             </template>
             <template v-else>
             <span class="arrow">{{ expandedProjects.has(p.id)?'▾':'▸' }}</span><span class="pn">{{ p.name }}</span><span class="pc">{{ p.commands.length }}</span>
@@ -756,7 +756,7 @@ onUnmounted(() => {
           <div v-if="expandedProjects.has(p.id)" class="cmds">
             <div v-for="cmd in p.commands" :key="cmd.id" class="cmd" :class="{on:isRunning(p.id,cmd.id)}" @contextmenu="openCmdCtx($event,p.id,cmd)">
               <template v-if="editingCmdId===p.id+'::'+cmd.id">
-                <JcInput class="cmd-edit-input" v-model="editCmdName" @keyup.enter="confirmRenameCmd" @keyup.escape="editingCmdId=''" @blur="confirmRenameCmd" @click.stop />
+                <JcInput beam class="cmd-edit-input" v-model="editCmdName" @keyup.enter="confirmRenameCmd" @keyup.escape="editingCmdId=''" @blur="confirmRenameCmd" @click.stop />
               </template>
               <template v-else>
               <span class="dot" :class="{live:isRunning(p.id,cmd.id)}"></span>
@@ -811,7 +811,7 @@ onUnmounted(() => {
         </template>
       </div>
       <div style="padding:4px 6px;border-top:1px solid var(--jc-border-default);flex-shrink:0">
-        <JcInput v-model="wfSearch" placeholder="搜索工作流..." size="small" />
+        <JcInput beam v-model="wfSearch" placeholder="搜索工作流..." size="small" />
       </div>
     </div>
 
@@ -819,7 +819,7 @@ onUnmounted(() => {
     <div v-show="effectiveTab==='tools'" class="panel" style="display:flex;flex-direction:column">
       <!-- 搜索过滤 -->
       <div class="search-bar">
-        <JcInput v-model="toolSearchQuery" placeholder="搜索实用工具..." />
+        <JcInput beam v-model="toolSearchQuery" placeholder="搜索实用工具..." />
       </div>
 
       <div class="tools-list-container">
@@ -941,18 +941,18 @@ onUnmounted(() => {
         </span>
       </template>
             <template v-if="!wfJsonMode">
-              <div class="fld"><label>名称</label><JcInput v-model="wfName" placeholder="如: 编译并运行" autofocus /></div>
-              <div class="fld"><label>分类</label><JcInput v-model="wfCat" placeholder="如: Go / Tauri" /></div>
+              <div class="fld"><label>名称</label><JcInput beam v-model="wfName" placeholder="如: 编译并运行" autofocus /></div>
+              <div class="fld"><label>分类</label><JcInput beam v-model="wfCat" placeholder="如: Go / Tauri" /></div>
               <div class="fld">
                 <label>说明</label>
                 <div style="display:flex;gap:4px">
-                  <JcInput v-model="wfDesc" placeholder="描述需求，让 AI 生成工作流" style="flex:1;min-width:0" />
+                  <JcInput beam v-model="wfDesc" placeholder="描述需求，让 AI 生成工作流" style="flex:1;min-width:0" />
                   <JcButton size="small" @click="aiGenerateWorkflow" :disabled="aiGenerating" style="white-space:nowrap">
                     {{ aiGenerating ? '⏳...' : '🤖 AI 生成' }}
                   </JcButton>
                 </div>
                 <div style="display:flex;gap:4px;margin-top:4px;align-items:center">
-                  <JcSelect v-if="wfModelList.length > 0" v-model="wfAiModel" :options="wfModelList.map((l) => ({ label: l, value: l }))" size="small" style="flex:1;min-width:0" @change="selectWfModel(wfAiModel)" />
+                  <JcSelect beam v-if="wfModelList.length > 0" v-model="wfAiModel" :options="wfModelList.map((l) => ({ label: l, value: l }))" size="small" style="flex:1;min-width:0" @change="selectWfModel(wfAiModel)" />
                   <span v-else style="font-size:10px;color:var(--jc-text-secondary)">未找到模型配置，请先在设置中添加</span>
                 </div>
                 <div v-if="wfAiMsg" style="margin-top:4px;font-size:11px;color:var(--jc-text-highlight)">{{ wfAiMsg }}</div>
@@ -961,17 +961,17 @@ onUnmounted(() => {
               <div v-for="(step, idx) in wfSteps" :key="idx" class="wf-step-card">
                 <div class="wf-step-header">
                   <span class="wf-step-num">#{{ idx+1 }}</span>
-                  <JcInput v-model="step.name" placeholder="步骤名称" style="flex:1;min-width:0" />
+                  <JcInput beam v-model="step.name" placeholder="步骤名称" style="flex:1;min-width:0" />
                   <JcButton size="small" danger @click="removeStep(idx)">✕</JcButton>
                 </div>
-                <JcTextarea v-model="step.command" :rows="2" placeholder="命令（如 go build -o app.exe .）" />
+                <JcTextarea v-model="step.command" beam :beam-size-ratio="0.6" :rows="2" placeholder="命令（如 go build -o app.exe .）" />
                 <JcButton size="small" @click="stepAiIdx = idx; stepAiInput = step.command">🤖 AI</JcButton>
                 <div class="wf-step-footer">
-                  <JcInput v-model="step.workingDir" placeholder="工作目录（点击📁选择）" style="flex:1;min-width:0" />
+                  <JcInput beam v-model="step.workingDir" placeholder="工作目录（点击📁选择）" style="flex:1;min-width:0" />
                   <JcButton size="small" @click="pickWfDir(step)">📁</JcButton>
                 </div>
                 <div v-if="stepAiIdx === idx" class="wf-step-ai-box">
-                  <JcInput v-model="stepAiInput" placeholder="描述需要的命令" style="flex:1;min-width:0;font-size:11px" />
+                  <JcInput beam v-model="stepAiInput" placeholder="描述需要的命令" style="flex:1;min-width:0;font-size:11px" />
                   <JcButton size="small" @click="aiGenStep(step)">生成</JcButton>
                   <JcButton size="small" @click="stepAiIdx = -1">✕</JcButton>
                 </div>
@@ -979,11 +979,11 @@ onUnmounted(() => {
               <JcButton block @click="addStep">+ 添加步骤</JcButton>
             </template>
             <template v-else>
-              <div class="fld"><label>名称</label><JcInput v-model="wfName" placeholder="工作流名称" /></div>
-              <div class="fld"><label>说明</label><JcInput v-model="wfDesc" placeholder="描述需求，让 AI 生成 JSON" /></div>
+              <div class="fld"><label>名称</label><JcInput beam v-model="wfName" placeholder="工作流名称" /></div>
+              <div class="fld"><label>说明</label><JcInput beam v-model="wfDesc" placeholder="描述需求，让 AI 生成 JSON" /></div>
               <div style="margin-top:6px">
                 <div class="wf-section-label">JSON 定义</div>
-                <JcTextarea v-model="wfJsonText" mono :rows="12" :spellcheck="false" />
+                <JcTextarea v-model="wfJsonText" mono beam :beam-size-ratio="0.6" :rows="12" :spellcheck="false" />
                 <JcButton block style="margin-top:4px" @click="aiGenerateWorkflow" :disabled="aiGenerating">
                   {{ aiGenerating ? '⏳ 生成中...' : 'AI 按描述生成' }}
                 </JcButton>

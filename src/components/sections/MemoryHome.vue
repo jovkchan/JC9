@@ -106,7 +106,7 @@ onMounted(() => { loadMemoryList() })
           @click="memoryScope = sc; memoryPage = 1; loadMemoryList()">{{ sc }}</span>
       </div>
       <div class="memory-search-row">
-        <JcInput v-model="memorySearch" placeholder="搜索..." style="flex:1;min-width:0" @keyup.enter="searchMemory" />
+        <JcInput beam v-model="memorySearch" placeholder="搜索..." style="flex:1;min-width:0" @keyup.enter="searchMemory" />
         <JcButton size="small" @click="searchMemory">搜索</JcButton>
         <JcButton v-if="memorySearch" size="small" @click="memorySearch = ''; searchMemory()">清除</JcButton>
       </div>

@@ -52,18 +52,18 @@ function clearAll() {
 <template>
   <ToolShell title="URL 编码 / 解码" subtitle="Encode / Decode" split>
     <template #actions>
-      <JcSelect v-model="mode" :options="modeOptions" size="small" />
+      <JcSelect beam v-model="mode" :options="modeOptions" size="small" />
       <JcButton type="primary" size="small" :disabled="!output" @click="copyResult">复制结果</JcButton>
       <JcButton size="small" danger ghost @click="clearAll">清空</JcButton>
     </template>
     <template #left-label>原始文本</template>
     <template #left>
-      <JcTextarea v-model="input" mono :spellcheck="false" class="jc-fill" placeholder="粘贴需要 URL 编码或解码的文本..." />
+      <JcTextarea v-model="input" mono beam :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="粘贴需要 URL 编码或解码的文本..." />
     </template>
     <template #right-label>转换结果</template>
     <template #right>
       <div class="url-right">
-        <JcTextarea v-model="output" mono readonly :spellcheck="false" class="jc-fill" placeholder="等待转换..." />
+        <JcTextarea v-model="output" mono readonly beam :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="等待转换..." />
         <div v-if="errorMsg" class="url-error">{{ errorMsg }}</div>
       </div>
     </template>

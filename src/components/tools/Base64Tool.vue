@@ -85,6 +85,8 @@ function clearAll() {
       <JcTextarea
         v-model="input"
         mono
+        beam
+        :beam-size-ratio="0.6"
         :spellcheck="false"
         class="jc-fill"
         :placeholder="mode === 'encode' ? '在此输入普通文本...' : '在此粘贴 Base64 串...'"
@@ -99,6 +101,8 @@ function clearAll() {
           v-model="output"
           mono
           readonly
+          beam
+          :beam-size-ratio="0.6"
           :spellcheck="false"
           class="jc-fill"
           :placeholder="mode === 'encode' ? '等待编码...' : '等待解码...'"

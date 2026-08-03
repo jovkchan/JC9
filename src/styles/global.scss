@@ -6,6 +6,90 @@
 
 * { margin:0; padding:0; box-sizing:border-box; }
 
+// ── 流光共享 keyframes（JcBorderBeam / JcInput / JcTextarea 共用；加速版由 beamAccelerate 切换，勿在子组件重复定义）──
+@keyframes jc-beam-move {
+  from { offset-distance: 0%; }
+  to { offset-distance: 100%; }
+}
+@keyframes jc-beam-move-acc {
+  /* 拐角轻微加速：拐角附近 offset-distance 略快（4% 走 8%~15%），直边基本匀速 */
+  0%   { offset-distance: 0%; }
+  4%   { offset-distance: 8%; }
+  21%  { offset-distance: 18%; }
+  25%  { offset-distance: 25%; }
+  29%  { offset-distance: 33%; }
+  46%  { offset-distance: 43%; }
+  50%  { offset-distance: 50%; }
+  54%  { offset-distance: 58%; }
+  71%  { offset-distance: 68%; }
+  75%  { offset-distance: 75%; }
+  79%  { offset-distance: 83%; }
+  96%  { offset-distance: 93%; }
+  100% { offset-distance: 100%; }
+}
+
+/* ── 流光 beam 共享样式（JcInput / JcTextarea / JcSelect 共用；JcBorderBeam 结构独立） ── */
+.jc-beam {
+  display: none;
+  position: absolute;
+  inset: 0;
+  border-radius: 4px;
+  padding: 1px;
+  pointer-events: none;
+  z-index: 1;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+@supports ((mask-composite: exclude) or (-webkit-mask-composite: xor)) {
+  .jc-beam {
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask-composite: exclude;
+  }
+}
+@supports (offset-path: rect(0 auto auto 0 round 1px)) {
+  .jc-beam {
+    display: block;
+  }
+  .jc-beam__effect {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: var(--jc-beam-size, 100px);
+    height: var(--jc-beam-height, 12px);
+    opacity: 1;
+    background-image: var(--jc-beam-gradient, linear-gradient(to left, #5b7cff 0%, #8a58ff 40%, #a878ff 68%, transparent));
+    offset-anchor: 90% 50%;
+    offset-distance: 0%;
+    offset-path: rect(0 auto auto 0 round var(--jc-beam-height, 12px));
+    offset-rotate: auto;
+    animation-name: var(--jc-beam-anim, jc-beam-move);
+    animation-duration: 6s;
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+    animation-play-state: paused;
+    will-change: offset-distance;
+  }
+}
+/* 聚焦显示（表单控件 focus-within） */
+.jc-input:focus-within .jc-beam,
+.jc-select:focus-within .jc-beam,
+.jc-textarea-host:focus-within .jc-beam {
+  opacity: 1;
+}
+.jc-input:focus-within .jc-beam .jc-beam__effect,
+.jc-select:focus-within .jc-beam .jc-beam__effect,
+.jc-textarea-host:focus-within .jc-beam .jc-beam__effect {
+  animation-play-state: running;
+}
+@media (prefers-reduced-motion: reduce) {
+  .jc-beam__effect {
+    display: none;
+  }
+}
+
 html, body, #app {
   height: 100%;
   font-family: 'Segoe UI', system-ui, sans-serif;

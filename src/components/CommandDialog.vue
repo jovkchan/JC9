@@ -28,9 +28,9 @@ defineExpose({openDialog})
 <template>
   <JcModal v-model:open="visible" :title="editing ? '编辑命令' : '添加命令'" width="440" @cancel="close">
     <div class="mb">
-      <div class="fld"><label>命令名称</label><JcInput v-model="name" placeholder="如: 启动前端" @keyup.enter="save" autofocus /></div>
-      <div class="fld"><label>工作目录</label><div class="row"><JcInput v-model="workingDir" placeholder="如: D:\code\my-project" style="flex:1;min-width:0" @keyup.enter="save" /><JcButton @click="pickDir">...</JcButton></div></div>
-      <div class="fld"><label>启动命令</label><JcInput v-model="command" placeholder="如: npm run dev" @keyup.enter="save" style="font-family:'Cascadia Code',Consolas,monospace" /></div>
+      <div class="fld"><label>命令名称</label><JcInput beam v-model="name" placeholder="如: 启动前端" @keyup.enter="save" autofocus /></div>
+      <div class="fld"><label>工作目录</label><div class="row"><JcInput beam v-model="workingDir" placeholder="如: D:\code\my-project" style="flex:1;min-width:0" @keyup.enter="save" /><JcButton @click="pickDir">...</JcButton></div></div>
+      <div class="fld"><label>启动命令</label><JcInput beam v-model="command" placeholder="如: npm run dev" @keyup.enter="save" style="font-family:'Cascadia Code',Consolas,monospace" /></div>
     </div>
     <template #footer>
       <JcButton @click="close">取消</JcButton>

@@ -674,6 +674,7 @@ async function importData() {
             <div class="form-group">
               <label>默认笔记格式</label>
               <JcSelect
+                beam
                 :model-value="defaultFormat"
                 :options="formatOptions"
                 style="width: 100%"
@@ -685,6 +686,7 @@ async function importData() {
             <div class="form-group">
               <label>新建笔记默认可见性</label>
               <JcSelect
+                beam
                 :model-value="defaultVisibility"
                 :options="visibilityOptions"
                 style="width: 100%"
@@ -735,11 +737,12 @@ async function importData() {
             <JcModal v-model:open="showModelForm" :title="(newModelForm.id ? '编辑' : '添加') + '模型配置'" width="480">
                 <div class="form-group">
                   <label>配置名称</label>
-                  <JcInput v-model="newModelForm.name" placeholder="例如：DeepSeek 主力" />
+                  <JcInput beam v-model="newModelForm.name" placeholder="例如：DeepSeek 主力" />
                 </div>
                 <div class="form-group">
                   <label>供应商</label>
                   <JcSelect
+                    beam
                     :model-value="newModelForm.provider"
                     :options="providerOptions"
                     style="width: 100%"
@@ -749,11 +752,11 @@ async function importData() {
                 </div>
                 <div class="form-group">
                   <label>Endpoint</label>
-                  <JcInput v-model="newModelForm.endpoint" @blur="onEndpointBlur" />
+                  <JcInput beam v-model="newModelForm.endpoint" @blur="onEndpointBlur" />
                 </div>
                 <div class="form-group" v-if="newModelForm.provider !== 'ollama' && newModelForm.provider !== 'vllm'">
                   <label>API Key</label>
-                  <JcInput v-model="newModelForm.apiKey" type="password" placeholder="sk-..." />
+                  <JcInput beam v-model="newModelForm.apiKey" type="password" placeholder="sk-..." />
                 </div>
                 <div class="form-group">
                   <label>Model</label>
@@ -776,12 +779,13 @@ async function importData() {
                       </label>
                     </div>
                   </div>
-                  <JcInput v-else v-model="newModelForm.model" placeholder="多个用英文逗号分隔，如: gemini-1.5-flash, gemini-1.5-pro" />
+                  <JcInput beam v-else v-model="newModelForm.model" placeholder="多个用英文逗号分隔，如: gemini-1.5-flash, gemini-1.5-pro" />
                   <span class="help-text" v-if="newModelForm.provider !== 'vllm'">支持输入多个模型，请使用英文逗号 <code>,</code> 分隔。</span>
                 </div>
                 <div class="form-group" v-if="newModelForm.provider === 'deepseek'">
                   <label>思维强度 (Thinking Mode)</label>
                   <JcSelect
+                    beam
                     :model-value="newModelForm.reasoningEffort"
                     :options="reasoningOptions"
                     style="width: 100%"
@@ -842,15 +846,15 @@ async function importData() {
             <JcModal v-model:open="showRoleForm" :title="(newRoleForm.id ? '编辑' : '添加') + ' AI 角色'" width="440">
                 <div class="form-group">
                   <label>角色名称</label>
-                  <JcInput v-model="newRoleForm.name" placeholder="例如：测试工程师" />
+                  <JcInput beam v-model="newRoleForm.name" placeholder="例如：测试工程师" />
                 </div>
                 <div class="form-group">
                   <label>角色介绍</label>
-                  <JcInput v-model="newRoleForm.description" placeholder="简述该角色的核心职责" />
+                  <JcInput beam v-model="newRoleForm.description" placeholder="简述该角色的核心职责" />
                 </div>
                 <div class="form-group">
                   <label>专属系统提示词 (System Prompt)</label>
-                  <JcTextarea v-model="newRoleForm.systemPrompt" :rows="6" placeholder="在此处输入详细的角色设定和 ReAct 指导性提示词..." />
+                  <JcTextarea v-model="newRoleForm.systemPrompt" beam :beam-size-ratio="0.6" :rows="6" placeholder="在此处输入详细的角色设定和 ReAct 指导性提示词..." />
                 </div>
                 <template #footer>
                   <button class="footer-btn-cancel" @click="cancelRoleForm">取消</button>
@@ -880,7 +884,7 @@ async function importData() {
             </p> -->
 
             <div class="skills-toolbar">
-              <JcInput v-model="skillsSearch" placeholder="搜索技能名称、ID 或描述..." style="flex: 1; min-width: 0" />
+              <JcInput beam v-model="skillsSearch" placeholder="搜索技能名称、ID 或描述..." style="flex: 1; min-width: 0" />
               <button class="skills-refresh-btn" :disabled="skillsLoading" @click="loadSystemSkills">
                 {{ skillsLoading ? '加载中...' : '刷新' }}
               </button>
@@ -973,6 +977,7 @@ async function importData() {
                   <div class="form-group">
                     <label>连接方式</label>
                     <JcSelect
+                      beam
                       :model-value="mcpForm.transport"
                       :options="transportOptions"
                       style="width: 100%"
@@ -981,22 +986,22 @@ async function importData() {
                   </div>
                   <div class="form-group">
                     <label>服务器名称</label>
-                    <JcInput v-model="mcpForm.name" placeholder="例如：my-filesystem-server" />
+                    <JcInput beam v-model="mcpForm.name" placeholder="例如：my-filesystem-server" />
                   </div>
                   <template v-if="mcpForm.transport === 'sse'">
                     <div class="form-group">
                       <label>SSE URL</label>
-                      <JcInput v-model="mcpForm.url" placeholder="https://example.com/mcp" />
+                      <JcInput beam v-model="mcpForm.url" placeholder="https://example.com/mcp" />
                     </div>
                   </template>
                   <template v-if="mcpForm.transport === 'stdio'">
                     <div class="form-group">
                       <label>启动命令</label>
-                      <JcInput v-model="mcpForm.command" placeholder="例如：npx" />
+                      <JcInput beam v-model="mcpForm.command" placeholder="例如：npx" />
                     </div>
                     <div class="form-group">
                       <label>参数</label>
-                      <JcInput v-model="mcpForm.argsText" placeholder="例如：@modelcontextprotocol/server-filesystem, ." />
+                      <JcInput beam v-model="mcpForm.argsText" placeholder="例如：@modelcontextprotocol/server-filesystem, ." />
                       <span class="help-text">多个参数用逗号分隔</span>
                     </div>
                   </template>

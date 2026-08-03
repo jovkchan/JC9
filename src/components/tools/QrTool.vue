@@ -677,7 +677,7 @@ function clearParse() {
         <!-- 模块一：内容 -->
         <div class="setting-section">
           <div class="section-subtitle">1. 文本与链接内容</div>
-          <JcTextarea v-model="qrText" :rows="4" placeholder="在此输入需要转换成二维码的文本或 URL 链接..." />
+          <JcTextarea v-model="qrText" beam :beam-size-ratio="0.6" :rows="4" placeholder="在此输入需要转换成二维码的文本或 URL 链接..." />
         </div>
 
         <!-- 模块二：一键美化预置样式 -->
@@ -755,7 +755,7 @@ function clearParse() {
               </div>
               <div v-if="fgColorMode === 'gradient'" class="config-field">
                 <label>渐变方向</label>
-                <JcSelect :model-value="fgGradientDirection" :options="gradientDirectionOptions" style="width: 100%" @update:model-value="(v) => fgGradientDirection = v as 'horizontal' | 'vertical' | 'diagonal'" />
+                <JcSelect beam :model-value="fgGradientDirection" :options="gradientDirectionOptions" style="width: 100%" @update:model-value="(v) => fgGradientDirection = v as 'horizontal' | 'vertical' | 'diagonal'" />
               </div>
             </div>
           </div>
@@ -771,11 +771,11 @@ function clearParse() {
             </div>
             <div class="config-field">
               <label>码点形状 (Data Dots)</label>
-              <JcSelect :model-value="dotType" :options="dotTypeOptions" style="width: 100%" @update:model-value="(v) => dotType = v as DotShape" />
+              <JcSelect beam :model-value="dotType" :options="dotTypeOptions" style="width: 100%" @update:model-value="(v) => dotType = v as DotShape" />
             </div>
             <div class="config-field">
               <label>码眼形状 (Finder Eyes)</label>
-              <JcSelect :model-value="eyeType" :options="eyeTypeOptions" style="width: 100%" @update:model-value="(v) => eyeType = v as EyeShape" />
+              <JcSelect beam :model-value="eyeType" :options="eyeTypeOptions" style="width: 100%" @update:model-value="(v) => eyeType = v as EyeShape" />
             </div>
           </div>
 
@@ -823,7 +823,7 @@ function clearParse() {
           <div v-if="drawText" class="flex-config-row mt-8">
             <div class="config-field flex-2">
               <label>文字内容</label>
-              <JcInput v-model="labelText" placeholder="例如：扫码查看详情" />
+              <JcInput beam v-model="labelText" placeholder="例如：扫码查看详情" />
             </div>
             <div class="config-field">
               <label>文字颜色</label>
@@ -834,7 +834,7 @@ function clearParse() {
             </div>
             <div class="config-field">
               <label>字号大小</label>
-              <JcSelect :model-value="labelSize" :options="labelSizeOptions" style="width: 100%" @update:model-value="(v) => labelSize = Number(v)" />
+              <JcSelect beam :model-value="labelSize" :options="labelSizeOptions" style="width: 100%" @update:model-value="(v) => labelSize = Number(v)" />
             </div>
           </div>
         </div>
@@ -845,11 +845,11 @@ function clearParse() {
           <div class="flex-config-row">
             <div class="config-field">
               <label>码边距 (Margins)</label>
-              <JcSelect :model-value="margin" :options="marginOptions" style="width: 100%" @update:model-value="(v) => margin = Number(v)" />
+              <JcSelect beam :model-value="margin" :options="marginOptions" style="width: 100%" @update:model-value="(v) => margin = Number(v)" />
             </div>
             <div class="config-field">
               <label>二维码容错率</label>
-              <JcSelect :model-value="errorCorrectionLevel" :options="errorCorrectionOptions" :disabled="logoType !== 'none'" style="width: 100%" @update:model-value="(v) => errorCorrectionLevel = v as 'L' | 'M' | 'Q' | 'H'" />
+              <JcSelect beam :model-value="errorCorrectionLevel" :options="errorCorrectionOptions" :disabled="logoType !== 'none'" style="width: 100%" @update:model-value="(v) => errorCorrectionLevel = v as 'L' | 'M' | 'Q' | 'H'" />
               <span v-if="logoType !== 'none'" class="field-hint">嵌入 Logo 时强制为最高容错 (30%)</span>
             </div>
           </div>

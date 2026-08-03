@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import type { JcBorderBeamColor } from './JcBorderBeam.vue'
+import { useBeam } from '../../composables/useBeam'
 
 defineOptions({ name: 'JcTextarea' })
 
@@ -15,6 +17,16 @@ const props = withDefaults(
     /** 是否允许手动拖拽缩放 */
     resize?: boolean
     spellcheck?: boolean
+    /** 聚焦时显示流光边框（BorderBeam 效果）。开启后内部用 wrapper 承载流光层，根元素变为 div.jc-textarea-host */
+    beam?: boolean
+    /** 流光颜色（beam 开启时生效），单色或渐变停靠点数组 */
+    beamColor?: JcBorderBeamColor
+    /** 流光长度 = 宿主宽度 × 比例（beam 开启时生效，如 0.4） */
+    beamSizeRatio?: number
+    /** 流光渐变方向（beam 开启时生效），如 'to left' 或 '-225deg' */
+    beamAngle?: string
+    /** 拐角变速：true=拐角轻微加速 / false=匀速 */
+    beamAccelerate?: boolean
   }>(),
   {
     modelValue: '',
@@ -25,6 +37,11 @@ const props = withDefaults(
     mono: false,
     resize: true,
     spellcheck: true,
+    beam: false,
+    beamColor: undefined,
+    beamSizeRatio: undefined,
+    beamAngle: 'to left',
+    beamAccelerate: false,
   },
 )
 
@@ -43,6 +60,16 @@ const classes = computed(() => [
   },
 ])
 
+const hostRef = ref<HTMLElement>()
+const { beamStyle } = useBeam({
+  enabled: () => props.beam,
+  color: () => props.beamColor,
+  angle: () => props.beamAngle,
+  accelerate: () => props.beamAccelerate,
+  root: () => hostRef.value,
+  sizeRatio: () => props.beamSizeRatio ?? 0.4,
+})
+
 function onInput(e: Event) {
   emit('update:modelValue', (e.target as HTMLTextAreaElement).value)
 }
@@ -52,7 +79,9 @@ function onChange(e: Event) {
 </script>
 
 <template>
+  <!-- 无 beam：保持原生 textarea 根（零影响，兼容 ref / class / scoped 穿透 / 事件） -->
   <textarea
+    v-if="!beam"
     :value="modelValue"
     :placeholder="placeholder"
     :rows="rows"
@@ -65,6 +94,25 @@ function onChange(e: Event) {
     @focus="emit('focus', $event)"
     @blur="emit('blur', $event)"
   />
+  <!-- 有 beam：wrapper 承载流光层（:focus-within 触发） -->
+  <div v-else ref="hostRef" class="jc-textarea-host" :style="beamStyle">
+    <textarea
+      :value="modelValue"
+      :placeholder="placeholder"
+      :rows="rows"
+      :disabled="disabled"
+      :readonly="readonly"
+      :spellcheck="spellcheck"
+      :class="classes"
+      @input="onInput"
+      @change="onChange"
+      @focus="emit('focus', $event)"
+      @blur="emit('blur', $event)"
+    />
+    <span class="jc-beam" aria-hidden="true">
+      <span class="jc-beam__effect" />
+    </span>
+  </div>
 </template>
 
 <style scoped>
@@ -85,8 +133,9 @@ function onChange(e: Event) {
   color: var(--jc-text-secondary, #858585);
 }
 .jc-textarea:focus {
+  /* 细边框：仅 1px accent 色，无外发光（亮/暗一致，暗色下不再发亮） */
   border-color: var(--jc-color-accent, #8a58ff);
-  box-shadow: 0 0 0 2px var(--jc-color-accent-light-9, rgba(138, 88, 255, 0.15));
+  box-shadow: none;
 }
 .jc-textarea:disabled {
   opacity: 0.5;
@@ -98,5 +147,26 @@ function onChange(e: Event) {
 }
 .jc-textarea.is-fixed {
   resize: none;
+}
+
+/* ── 聚焦流光边框（beam 开启，对齐 JcBorderBeam / JcInput：mask 挖环 + CSS Motion Path） ── */
+.jc-textarea-host {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+.jc-textarea-host > .jc-textarea {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  resize: none;
+}
+
+/* 流光激活时原边框调浅为浅紫（避免深紫主色与流光重叠看不清） */
+.jc-textarea-host:focus-within > .jc-textarea {
+  border-color: rgba(138, 88, 255, 0.45) !important;
 }
 </style>

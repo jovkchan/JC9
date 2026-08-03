@@ -103,7 +103,7 @@ function clearAll() {
           <span>原始中文/字符文本</span>
           <JcButton danger size="small" @click="clearAll">清空</JcButton>
         </div>
-        <JcTextarea v-model="inputText" mono :spellcheck="false" class="jc-fill" placeholder="输入任意中文字符、特殊符号或 Emoji 图像..." />
+        <JcTextarea v-model="inputText" mono beam :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="输入任意中文字符、特殊符号或 Emoji 图像..." />
       </div>
 
       <div class="results-display-pane">
@@ -112,7 +112,7 @@ function clearAll() {
             <span>Unicode 逃逸串 (\uXXXX)</span>
             <JcButton type="primary" size="small" :disabled="!unicodeEscapeResult" @click="copyResult(unicodeEscapeResult)">复制</JcButton>
           </div>
-          <JcTextarea mono readonly :spellcheck="false" :model-value="unicodeEscapeResult" :rows="3" placeholder="转换结果..." />
+          <JcTextarea mono readonly beam :beam-size-ratio="0.6" :spellcheck="false" :model-value="unicodeEscapeResult" :rows="3" placeholder="转换结果..." />
         </div>
 
         <div class="result-item-group">
@@ -120,7 +120,7 @@ function clearAll() {
             <span>HTML 十六进制实体 (&#xXXXX;)</span>
             <JcButton type="primary" size="small" :disabled="!htmlHexResult" @click="copyResult(htmlHexResult)">复制</JcButton>
           </div>
-          <JcTextarea mono readonly :spellcheck="false" :model-value="htmlHexResult" :rows="3" placeholder="转换结果..." />
+          <JcTextarea mono readonly beam :beam-size-ratio="0.6" :spellcheck="false" :model-value="htmlHexResult" :rows="3" placeholder="转换结果..." />
         </div>
 
         <div class="result-item-group">
@@ -128,7 +128,7 @@ function clearAll() {
             <span>HTML 十进制实体 (&#DDDD;)</span>
             <JcButton type="primary" size="small" :disabled="!htmlDecimalResult" @click="copyResult(htmlDecimalResult)">复制</JcButton>
           </div>
-          <JcTextarea mono readonly :spellcheck="false" :model-value="htmlDecimalResult" :rows="3" placeholder="转换结果..." />
+          <JcTextarea mono readonly beam :beam-size-ratio="0.6" :spellcheck="false" :model-value="htmlDecimalResult" :rows="3" placeholder="转换结果..." />
         </div>
       </div>
     </div>
@@ -139,14 +139,14 @@ function clearAll() {
           <span>转义编码输入</span>
           <JcButton danger size="small" @click="clearAll">清空</JcButton>
         </div>
-        <JcTextarea v-model="inputText" mono :spellcheck="false" class="jc-fill" placeholder="粘贴含有 \u4f60\u597d 或 &#30028; 等转义格式的字符串..." />
+        <JcTextarea v-model="inputText" mono beam :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="粘贴含有 \u4f60\u597d 或 &#30028; 等转义格式的字符串..." />
       </div>
       <div class="editor-pane">
         <div class="pane-label-row">
           <span>还原文本结果</span>
           <JcButton type="primary" size="small" :disabled="!decodedResult" @click="copyResult(decodedResult)">复制结果</JcButton>
         </div>
-        <JcTextarea v-model="decodedResult" mono readonly :spellcheck="false" class="jc-fill" placeholder="解码还原内容..." />
+        <JcTextarea v-model="decodedResult" mono readonly beam :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="解码还原内容..." />
       </div>
     </div>
   </ToolShell>
