@@ -6,7 +6,7 @@
 ## 规范来源索引
 
 | 类别 | 页面 | 状态 |
-|---|---|---|
+| --- | --- | --- |
 | 设计价值观 | [values-cn.md](https://ant.design/docs/spec/values-cn.md) | 原则层，已内化为本文件 |
 | 色彩 | [colors-cn.md](https://ant.design/docs/spec/colors-cn.md) | ✅ 已落地 `tokens.scss`（色板/中性色/功能色） |
 | 布局 | [layout-cn.md](https://ant.design/docs/spec/layout-cn.md) | ✅ 8px 网格 → `--jc-space-*` |

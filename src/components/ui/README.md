@@ -15,7 +15,7 @@
 
 ## 📁 目录
 
-```
+```text
 src/components/ui/
   tokens.scss        # 设计 Token（Seed/Map/Alias，暗色默认 + 亮色覆盖 + 系统偏好）
   theme.ts           # 主题切换 composable
@@ -59,7 +59,7 @@ import { JcButton, JcModal } from '@/components/ui'
 参照 antd Design Token 三层模型：
 
 | 层级 | 说明 | 例子 |
-|---|---|---|
+| --- | --- | --- |
 | **Seed** | 品牌/功能色、字阶、间距、圆角、控件高度、阴影 | `--jc-color-accent` `--jc-font-size` `--jc-space-xs` `--jc-radius` `--jc-control-height` `--jc-shadow-1/2/3` |
 | **Map** | 背景/文本/边框层级 | `--jc-bg-app/panel/elevated` `--jc-text-primary/secondary` `--jc-border-*` |
 | **Alias** | 组件消费的语义变量 | `--jc-shadow-menu` `--jc-shadow-modal` |
@@ -90,7 +90,7 @@ const { isDark, toggle } = useJcTheme()  // 组件内响应式使用
 ### JcButton（对齐 antd Button）
 
 | 属性 | 类型 | 默认 | 说明 |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | type | `primary\|default\|dashed\|text\|link` | `default` | 按钮类型 |
 | danger | `boolean` | `false` | 危险按钮 |
 | ghost | `boolean` | `false` | 幽灵按钮（透明背景） |
