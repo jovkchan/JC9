@@ -59,6 +59,11 @@ const classes = computed(() => [
 ])
 
 const rootRef = ref<HTMLElement>()
+const innerRef = ref<HTMLInputElement>()
+defineExpose({
+  focus: () => innerRef.value?.focus(),
+  blur: () => innerRef.value?.blur(),
+})
 const { beamStyle } = useBeam({
   enabled: () => props.beam,
   color: () => props.beamColor,
@@ -83,6 +88,7 @@ function clear() {
 <template>
   <span ref="rootRef" :class="classes">
     <input
+      ref="innerRef"
       :type="type"
       :value="modelValue"
       :placeholder="placeholder"

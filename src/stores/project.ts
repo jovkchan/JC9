@@ -33,7 +33,7 @@ export const useProjectStore = defineStore('project', () => {
   const workflows = ref<Workflow[]>([])
   const pendingInput = ref('')
   const recentTools = ref<string[]>(JSON.parse(localStorage.getItem('jc9-recent-tools') || '[]'))
-  const sidebarTab = ref<'projects'|'workflows'|'tools'|'notes'|'memories'>('projects')
+  const sidebarTab = ref<'projects'|'workflows'|'automation'|'tools'|'notes'|'memories'>('projects')
 
   // ── 模块标签状态持久化（切换模块后恢复上次激活的标签）──
   const moduleTabState = ref<Record<string, { type: string; index: number; docIndex: number; toolIndex: number; memoryIndex: number }>>({})

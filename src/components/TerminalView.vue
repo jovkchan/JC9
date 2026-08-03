@@ -6,13 +6,14 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useProjectStore } from '@/stores/project'
 import JcContextMenu from '@/components/ui/JcContextMenu.vue'
+import JcInput from '@/components/ui/JcInput.vue'
 import type { JcContextMenuItem } from '@/components/ui'
 import '@xterm/xterm/css/xterm.css'
 
 const props = defineProps<{ processId: string; active: boolean }>()
 const store = useProjectStore()
 const container = ref<HTMLDivElement>()
-const input = ref(''); const inputRef = ref<HTMLInputElement>()
+const input = ref(''); const inputRef = ref<InstanceType<typeof JcInput>>()
 function focusTerm(){ term?.focus() }
 const history: string[] = []; let hi = -1
 let term: Terminal|null=null; let fit: FitAddon|null=null; let ul: (()=>void)|null=null; let ro: ResizeObserver|null=null
@@ -78,7 +79,7 @@ onUnmounted(()=>{ul?.();ro?.disconnect();term?.dispose();})
     <div ref="container" class="to" @click="focusTerm" @contextmenu.prevent="onCtx" />
     <div class="tb">
       <span class="p">>_</span>
-      <input ref="inputRef" v-model="input" class="ti" placeholder="回车发送 | 点终端区域交互选择 ↑↓" @keyup.enter="sendLine" @keydown="onKd" spellcheck="false" />
+      <JcInput ref="inputRef" v-model="input" beam style="flex:1;min-width:0" placeholder="回车发送 | 点终端区域交互选择 ↑↓" @keyup.enter="sendLine" @keydown="onKd" />
     </div>
     <!-- 右键菜单 -->
     <JcContextMenu :show="ctxShow" :x="ctxX" :y="ctxY" :items="ctxItems" @select="onCtxSelect" @update:show="ctxShow = $event" />
@@ -94,8 +95,7 @@ onUnmounted(()=>{ul?.();ro?.disconnect();term?.dispose();})
 }
 .tb { display:flex; align-items:center; gap:6px; padding:6px 12px; background:var(--jc-bg-elevated); border-top:1px solid var(--jc-border-default); }
 .p { color:var(--jc-color-success); font-family:'Cascadia Code',Consolas,monospace; font-size:13px; font-weight:700; }
-.ti { flex:1; @include input-base; font-family:'Cascadia Code',Consolas,monospace; font-size:13px; padding:3px 8px;
-  &:focus { border-color:var(--jc-color-accent); outline:none; }
-}
+/* 终端命令输入框（JcInput）等宽字体覆盖 */
+.tb :deep(.jc-input__inner) { font-family:'Cascadia Code',Consolas,monospace; font-size:13px; }
 </style>
 

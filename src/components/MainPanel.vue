@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted, computed, watch, defineAsyncComponent } fr
 import { invoke } from '@tauri-apps/api/core'
 import { useProjectStore } from '@/stores/project'
 import { useNotesStore } from '@/stores/notes'
+import { useAutomationStore } from '@/stores/automation'
 import { useStatusStore } from '@/stores/status'
 import TerminalView from '@/components/TerminalView.vue'
 import LogPanel from '@/components/LogPanel.vue'
@@ -12,6 +13,7 @@ import JcInput from '@/components/ui/JcInput.vue'
 import JcSelect from '@/components/ui/JcSelect.vue'
 import JcTextarea from '@/components/ui/JcTextarea.vue'
 import JcTabBar from '@/components/ui/JcTabBar.vue'
+import AutomationEditor from '@/components/automation/AutomationEditor.vue'
 import type { JcContextMenuItem } from '@/components/ui'
 import type { JcTabItem } from '@/components/ui'
 
@@ -65,6 +67,7 @@ const FloatingSearch = defineAsyncComponent(() => import('@/components/notes/Flo
 
 const store = useProjectStore()
 const notesStore = useNotesStore()
+const autoStore = useAutomationStore()
 
 const activeNoteId = computed(() => notesStore.activeNoteTabId)
 
@@ -534,7 +537,15 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <div v-if="store.runningTabs.length===0&&store.docTabs.length===0&&store.toolTabs.length===0&&store.memoryTabs.length===0&&notesStore.noteTabs.length===0" class="empty-or-feed" style="flex:1;display:flex">
+    <!-- Automation content：仅编辑视图显示编辑器；列表视图显示占位 -->
+    <div v-if="store.sidebarTab === 'automation' && autoStore.editing" class="content">
+      <AutomationEditor />
+    </div>
+    <div v-else-if="store.sidebarTab === 'automation'" class="content">
+      <div class="empty automation-empty">从左侧选择自动化，或点击「+ 新建」开始搭建</div>
+    </div>
+
+    <div v-if="store.sidebarTab !== 'automation'&&store.runningTabs.length===0&&store.docTabs.length===0&&store.toolTabs.length===0&&store.memoryTabs.length===0&&notesStore.noteTabs.length===0" class="empty-or-feed" style="flex:1;display:flex">
       <div class="empty">从左侧面板选择功能开始使用</div>
     </div>
 
