@@ -144,7 +144,7 @@ toast.success('保存成功')  // success/error/warning/info
 | glowBlur | `number \| string` | `--jc-glow-blur` | 光晕模糊半径 |
 | glowOpacity | `number` | `--jc-glow-opacity` | 光晕不透明度 0~1 |
 
-> 表单控件 `JcInput / JcTextarea / JcSelect` 在 `beam` 基础上加 `glow` prop 即可开启同步内部光晕，颜色 / 速度 / 位置与流光完全一致（模糊、透明度走全局 `--jc-glow-*` token）。
+> 表单控件 `JcInput / JcTextarea / JcSelect` 在 `beam` 基础上加 `glow` prop 即可开启同步内部光晕，颜色 / 速度 / 位置与流光完全一致（模糊、透明度走全局 `--jc-glow-*` token）。流光一圈时长默认 6s（`--jc-beam-duration` token），可用 `beam-duration`（秒）覆盖；`beam-color` / `beam-angle` 可自定义流光颜色与方向。
 
 ## 🧰 移植到其他项目（Checklist）
 

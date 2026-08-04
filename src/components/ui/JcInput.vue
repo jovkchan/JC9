@@ -27,6 +27,8 @@ const props = withDefaults(
     beamAngle?: string
     /** 拐角变速：true=拐角轻微加速 / false=匀速 */
     beamAccelerate?: boolean
+    /** 流光完成一圈的时长（秒），缺省 6s */
+    beamDuration?: number
     /** 内部光晕：内环光束与流光同步（同速/同位/同色），模糊柔化为内部发光 */
     glow?: boolean
   }>(),
@@ -43,6 +45,7 @@ const props = withDefaults(
     beamColor: undefined,
     beamAngle: 'to left',
     beamAccelerate: false,
+    beamDuration: undefined,
     glow: false,
   },
 )
@@ -73,6 +76,7 @@ const { beamStyle } = useBeam({
   color: () => props.beamColor,
   angle: () => props.beamAngle,
   accelerate: () => props.beamAccelerate,
+  duration: () => props.beamDuration,
   root: () => rootRef.value,
   sizeRatio: () => 0.4,
   glow: () => props.glow,

@@ -74,6 +74,7 @@ function clearAll() {
         mono
         beam glow
         :beam-size-ratio="0.6"
+        :beam-duration="3"
         :beam-color="[
           { color: '#4fb576', percent: 0 },
           { color: '#44c489', percent: 30 },

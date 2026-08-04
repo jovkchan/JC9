@@ -70,6 +70,8 @@ export interface UseBeamOptions {
   angle: () => string
   /** 拐角变速：true=拐角轻微加速 / false=匀速 */
   accelerate: () => boolean
+  /** 流光完成一圈的时长（秒）；缺省用 --jc-beam-duration token（6s） */
+  duration: () => number | undefined
   /** 宿主元素（用于测量宽度计算光束长度） */
   root: () => HTMLElement | undefined
   /** 光束长度 = 宿主宽度 × 比例（如 0.4）；细长条高度固定 < 高度，避免上下双轨 */
@@ -93,12 +95,23 @@ export function useBeam(opts: UseBeamOptions) {
   const glowGradient = computed(() => buildGlowGradient(opts.color(), opts.angle()))
 
   const beamSizeRef = ref('100px')
+  const beamDurationRef = ref('8s')
   let ro: ResizeObserver | undefined
 
   function syncBeamSize() {
     const el = opts.root()
     if (!opts.enabled() || !el) return
-    beamSizeRef.value = `${Math.round(el.clientWidth * opts.sizeRatio())}px`
+    const w = el.clientWidth
+    beamSizeRef.value = `${Math.round(w * opts.sizeRatio())}px`
+    // 统一线性速度：一圈时长 = 路径周长 / 全局速度（px/s）；大组件圈时长自动加长、小组件缩短 → 速度一致
+    const h = el.clientHeight
+    const speed = parseFloat(getComputedStyle(el).getPropertyValue('--jc-beam-speed')) || 90
+    const perimeter = 2 * (w + h)
+    beamDurationRef.value = `${Math.max(1, Math.round(perimeter / speed))}s`
+  }
+
+  function onEffectConfigChange() {
+    syncBeamSize()
   }
 
   onMounted(() => {
@@ -109,12 +122,19 @@ export function useBeam(opts: UseBeamOptions) {
       ro = new ResizeObserver(syncBeamSize)
       ro.observe(el)
     }
+    // 全局动画效果配置变化（如速度）→ 重新计算圈时长
+    window.addEventListener('jc-effect-config', onEffectConfigChange)
   })
-  onBeforeUnmount(() => ro?.disconnect())
+  onBeforeUnmount(() => {
+    ro?.disconnect()
+    window.removeEventListener('jc-effect-config', onEffectConfigChange)
+  })
 
   const beamStyle = computed(() => {
     const glow = opts.glow()
     const blur = opts.glowBlur()
+    const glowOpacity = opts.glowOpacity()
+    const duration = opts.duration()
     // 光晕前后各外扩 4px（若隐若现的泛光）：宽度 = 流光 + 8px，offset-anchor 使 4px 均匀落在流光头尾两侧
     const glowPad = 4
     const size = parseFloat(beamSizeRef.value) || 100
@@ -122,11 +142,14 @@ export function useBeam(opts: UseBeamOptions) {
     return {
       '--jc-beam-size': beamSizeRef.value,
       '--jc-beam-gradient': beamGradient.value,
-      '--jc-beam-anim': opts.accelerate() ? 'jc-beam-move-acc' : 'jc-beam-move',
+      // 未显式开启拐角变速时引用全局（设置 → 动画效果 → 拐角变速）
+      '--jc-beam-anim': opts.accelerate() ? 'jc-beam-move-acc' : 'var(--jc-beam-anim, jc-beam-move)',
+      // 未显式指定 beam-duration 时用按周长计算的统一速度圈时长
+      '--jc-beam-duration': duration !== undefined ? `${duration}s` : beamDurationRef.value,
       ...(glow
         ? {
             '--jc-glow-blur': blur !== undefined ? unit(blur) : 'var(--jc-glow-blur, 6px)',
-            '--jc-glow-opacity': String(opts.glowOpacity() ?? 0.65),
+            '--jc-glow-opacity': glowOpacity !== undefined ? String(glowOpacity) : 'var(--jc-glow-opacity, 0.65)',
             '--jc-glow-size': `${glowSize}px`,
             '--jc-glow-anchor': `${((0.9 * size + glowPad) / glowSize) * 100}%`,
             ...(glowGradient.value ? { '--jc-glow-gradient': glowGradient.value } : {}),

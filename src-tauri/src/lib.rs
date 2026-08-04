@@ -228,6 +228,18 @@ fn save_ai_config(config: String) -> Result<(), String> {
     database::save_ai_config(&config)
 }
 
+/// 读取动画效果配置（存为 ~/.jc9/data/effect-config.json，跨 dev/build 共享）
+#[tauri::command]
+fn get_effect_config() -> Result<String, String> {
+    database::get_effect_config()
+}
+
+/// 保存动画效果配置到 JSON 文件
+#[tauri::command]
+fn save_effect_config(config: String) -> Result<(), String> {
+    database::save_effect_config(&config)
+}
+
 // ── 工作流（多命令顺序执行）──
 
 #[tauri::command]
@@ -2472,6 +2484,8 @@ pub fn run() {
             get_startup_logs,
             get_ai_config,
             save_ai_config,
+            get_effect_config,
+            save_effect_config,
             get_workflows,
             save_workflows,
             run_workflow,

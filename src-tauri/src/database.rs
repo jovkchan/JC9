@@ -1073,6 +1073,25 @@ pub fn save_ai_config(config: &str) -> Result<(), String> {
     fs::write(&path, config).map_err(|e| format!("保存 ai-config 失败: {e}"))
 }
 
+/// 读取动画效果配置（流光/光晕），存为 JSON 文件
+pub fn get_effect_config() -> Result<String, String> {
+    let path = dirs_data().join("effect-config.json");
+    if path.exists() {
+        fs::read_to_string(&path).map_err(|e| format!("读取 effect-config 失败: {e}"))
+    } else {
+        Ok("{}".to_string())
+    }
+}
+
+/// 保存动画效果配置到 JSON 文件
+pub fn save_effect_config(config: &str) -> Result<(), String> {
+    let path = dirs_data().join("effect-config.json");
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    fs::write(&path, config).map_err(|e| format!("保存 effect-config 失败: {e}"))
+}
+
 // ── 工作流（多命令顺序执行，替代旧快捷方式）──
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -67,7 +67,7 @@
     offset-path: rect(0 auto auto 0 round 4px);
     offset-rotate: auto;
     animation-name: var(--jc-beam-anim, jc-beam-move);
-    animation-duration: 6s;
+    animation-duration: var(--jc-beam-duration, 6s);
     animation-timing-function: linear;
     animation-iteration-count: infinite;
     animation-play-state: paused;
@@ -120,7 +120,7 @@
     offset-path: rect(0 auto auto 0 round 4px);
     offset-rotate: auto;
     animation-name: var(--jc-beam-anim, jc-beam-move);
-    animation-duration: 6s;
+    animation-duration: var(--jc-beam-duration, 8s);
     animation-timing-function: linear;
     animation-iteration-count: infinite;
     animation-play-state: paused;
@@ -149,6 +149,32 @@
 }
 .jc-select__beam-overlay .jc-beam-glow {
   opacity: var(--jc-glow-opacity, 0.65);
+}
+/* ── 全局动画效果开关（设置 → 动画效果 动态配置；html class 控制启用/禁用） ──
+   注意：隐藏必须用 visibility:hidden 而非 display:none —— display:none 会终止并重启 CSS 动画，
+   单独关闭光晕/流光后再打开会导致光晕与流光相位不同步；visibility:hidden 保持动画持续运行，
+   重新显示时仍在原位、与流光严格同步 */
+html.jc-beam-off .jc-beam,
+html.jc-beam-off .jc-border-beam,
+html.jc-beam-off .jc-beam-glow,
+html.jc-beam-off .jc-border-beam__glow {
+  visibility: hidden !important;
+}
+html.jc-glow-off .jc-beam-glow,
+html.jc-glow-off .jc-border-beam__glow {
+  visibility: hidden !important;
+}
+html.jc-beam-input-off .jc-input .jc-beam,
+html.jc-beam-input-off .jc-input .jc-beam-glow {
+  visibility: hidden !important;
+}
+html.jc-beam-textarea-off .jc-textarea-host .jc-beam,
+html.jc-beam-textarea-off .jc-textarea-host .jc-beam-glow {
+  visibility: hidden !important;
+}
+html.jc-beam-select-off .jc-select .jc-beam,
+html.jc-beam-select-off .jc-select .jc-beam-glow {
+  visibility: hidden !important;
 }
 @media (prefers-reduced-motion: reduce) {
   .jc-beam__effect,

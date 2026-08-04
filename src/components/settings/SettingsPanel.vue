@@ -11,6 +11,7 @@ import JcModal from '@/components/ui/JcModal.vue'
 import JcInput from '@/components/ui/JcInput.vue'
 import JcSelect from '@/components/ui/JcSelect.vue'
 import JcTextarea from '@/components/ui/JcTextarea.vue'
+import { useEffectConfig } from '@/stores/effectConfig'
 
 const formatOptions = [
   { label: 'Markdown (推荐)', value: 'markdown' },
@@ -68,6 +69,7 @@ const win = getCurrentWindow()
 const notesStore = useNotesStore()
 const status = useStatusStore()
 const aiStore = useAiStore()
+const effectCfg = useEffectConfig()
 
 const maximized = ref(false)
 const saveFeedback = ref('')
@@ -81,7 +83,7 @@ async function doClose() { try { await win.close() } catch {} }
 
 // ── Theme sync ──
 // ── Tab ──
-const activeTab = ref<'general' | 'ai' | 'ai-roles' | 'backup' | 'skills' | 'command' | 'hook' | 'plugin' | 'mcp' | 'memory'>('general')
+const activeTab = ref<'general' | 'effects' | 'ai' | 'ai-roles' | 'backup' | 'skills' | 'command' | 'hook' | 'plugin' | 'mcp' | 'memory'>('general')
 
 // ── General settings ──
 const defaultFormat = ref<'markdown' | 'plain'>('markdown')
@@ -833,6 +835,7 @@ async function compressMemories() {
     <div class="settings-body">
       <aside class="settings-nav">
         <div :class="['nav-item', { active: activeTab === 'general' }]" @click="activeTab = 'general'">通用设置</div>
+        <div :class="['nav-item', { active: activeTab === 'effects' }]" @click="activeTab = 'effects'">动画效果</div>
         <div :class="['nav-item', { active: activeTab === 'ai' }]" @click="activeTab = 'ai'">模型配置</div>
         <div :class="['nav-item', { active: activeTab === 'ai-roles' }]" @click="activeTab = 'ai-roles'">智能体</div>
         <div :class="['nav-item', { active: activeTab === 'skills' }]" @click="activeTab = 'skills'; loadSystemSkills()">技能</div>
@@ -867,6 +870,93 @@ async function compressMemories() {
               </label>
             </label>
             <span class="help-text">开启后，点击标签栏 ✕ 按钮或右键关闭标签时自动保存当前编辑内容</span>
+          </div>
+        </div>
+
+        <!-- 动画效果 -->
+        <div v-if="activeTab === 'effects'" class="settings-pane effects-pane">
+          <h3 class="pane-title">动画效果</h3>
+          <p class="pane-desc">全局动态配置流光/光晕效果，实时生效并保存到 DATA 目录 effect-config.json（后续新增更多效果的基础）。组件实例显式传参（beam-color / beam-duration 等）仍优先于全局值。</p>
+
+          <!-- 效果预览卡片：实时展示 JC 组件流光/光晕 -->
+          <div class="effects-preview-card">
+            <div class="effects-card-title">🎬 效果预览（实时）</div>
+            <div class="effects-preview-grid">
+              <JcInput beam glow placeholder="输入框 · 聚焦查看" />
+              <JcSelect beam glow :model-value="'option'" :options="[{ label: '选择器', value: 'option' }]" />
+              <JcTextarea beam glow class="span-2" :rows="2" placeholder="多行文本 · 聚焦查看" />
+            </div>
+            <div class="effects-preview-hint">聚焦任一组件即可查看边框流光 + 内部光晕</div>
+          </div>
+
+          <div class="effects-card">
+          <div class="form-group">
+            <label class="toggle-row">
+              <span>流光效果</span>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="effectCfg.config.enabled" />
+                <span class="toggle-slider"></span>
+              </label>
+            </label>
+            <span class="help-text">总开关：关闭后所有组件的边框流光（及光晕）隐藏</span>
+          </div>
+          <div class="form-group">
+            <label class="toggle-row">
+              <span>内部光晕</span>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="effectCfg.config.glow" />
+                <span class="toggle-slider"></span>
+              </label>
+            </label>
+            <span class="help-text">流光基础上叠加的内侧泛光</span>
+          </div>
+
+          <div class="form-group">
+            <label>启用组件</label>
+            <div class="effect-chips">
+              <span :class="['effect-chip', { active: effectCfg.config.input }]" @click="effectCfg.config.input = !effectCfg.config.input">输入框</span>
+              <span :class="['effect-chip', { active: effectCfg.config.textarea }]" @click="effectCfg.config.textarea = !effectCfg.config.textarea">多行文本</span>
+              <span :class="['effect-chip', { active: effectCfg.config.select }]" @click="effectCfg.config.select = !effectCfg.config.select">选择器</span>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>光束速度：{{ effectCfg.config.speed }} px/s</label>
+            <input type="range" class="effect-range" v-model.number="effectCfg.config.speed" min="20" max="300" step="5" />
+            <span class="help-text">统一线速度：每个组件按自身周长计算圈时长（= 周长 ÷ 速度），大小组件移动速度一致</span>
+          </div>
+          <div class="form-group">
+            <label class="toggle-row">
+              <span>拐角变速</span>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="effectCfg.config.accelerate" />
+                <span class="toggle-slider"></span>
+              </label>
+            </label>
+          </div>
+
+          <div class="form-group">
+            <label>光晕大小（模糊）：{{ effectCfg.config.glowBlur }}px</label>
+            <input type="range" class="effect-range" v-model.number="effectCfg.config.glowBlur" min="0" max="20" step="1" />
+          </div>
+          <div class="form-group">
+            <label>光晕透明度：{{ Math.round(effectCfg.config.glowOpacity * 100) }}%</label>
+            <input type="range" class="effect-range" v-model.number="effectCfg.config.glowOpacity" min="0" max="1" step="0.05" />
+          </div>
+
+          <div class="form-group">
+            <label>全局渐变颜色（流光/光晕共用，可添加 / 删除 / 调停靠点）</label>
+            <div v-for="(stop, i) in effectCfg.config.colors" :key="i" class="effect-color-row">
+              <input type="color" class="effect-color-picker" v-model="stop.color" />
+              <input type="range" class="effect-range" v-model.number="stop.percent" min="0" max="100" step="1" />
+              <span class="effect-color-percent">{{ stop.percent }}%</span>
+              <button class="btn-sm btn-danger" @click="effectCfg.removeColor(i)" :disabled="effectCfg.config.colors.length <= 1">✕</button>
+            </div>
+            <div class="effect-color-actions">
+              <button class="btn-sm" @click="effectCfg.addColor()">+ 添加颜色</button>
+              <button class="btn-sm" @click="effectCfg.reset()">恢复默认</button>
+            </div>
+          </div>
           </div>
         </div>
 
@@ -1656,6 +1746,60 @@ async function compressMemories() {
   font-family: inherit;
 }
 .backup-actions { display: flex; gap: 10px; margin-top: 8px; }
+
+/* 动画效果 */
+.effect-chips { display: flex; gap: 6px; }
+.effect-chip {
+  padding: 4px 10px; font-size: 11px; border: 1px solid var(--jc-border-default);
+  border-radius: 4px; color: var(--jc-text-secondary); cursor: pointer; transition: all 0.15s;
+  &:hover { border-color: var(--jc-color-accent); }
+  &.active { background: rgba(88,166,255,0.1); border-color: var(--jc-color-accent); color: var(--jc-color-accent); }
+}
+.effect-range { width: 100%; accent-color: var(--jc-color-accent); }
+.effect-color-row { display: flex; align-items: center; gap: 8px; }
+.effect-color-picker { width: 34px; height: 24px; padding: 0; border: 1px solid var(--jc-border-default); border-radius: 4px; background: transparent; cursor: pointer; }
+.effect-color-percent { font-size: 11px; color: var(--jc-text-secondary); width: 44px; text-align: right; }
+.effect-color-actions { display: flex; gap: 6px; }
+
+/* 动画效果：卡片化布局（最大 900px 居中） */
+.effects-pane {
+  max-width: 900px;
+  width: 100%;
+  margin: 0 auto;
+}
+.effects-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--jc-bg-elevated);
+  border: 1px solid var(--jc-border-default);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.effects-card-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--jc-text-highlight);
+}
+.effects-preview-card {
+  background: var(--jc-bg-elevated);
+  border: 1px solid var(--jc-border-default);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.effects-preview-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 8px;
+  .span-2 { grid-column: span 2; }
+}
+.effects-preview-hint {
+  font-size: 10px;
+  color: var(--jc-text-secondary);
+  opacity: 0.8;
+  margin-top: 8px;
+}
 
 // 分页
 .page-btn {

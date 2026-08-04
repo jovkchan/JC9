@@ -41,7 +41,7 @@ const props = withDefaults(
   }>(),
   {
     color: undefined,
-    duration: 6,
+    duration: undefined,
     lineWidth: 1,
     outset: undefined,
     size: 100,
@@ -59,7 +59,7 @@ const props = withDefaults(
 const anchorRef = ref<HTMLSpanElement | null>(null)
 const wrapRef = ref<HTMLDivElement | null>(null)
 const hostEl = ref<HTMLElement | null>(null)
-const borderState = ref({ width: 0, radius: '0px', borderWidth: [0, 0, 0, 0] as number[] })
+const borderState = ref({ width: 0, height: 0, radius: '0px', borderWidth: [0, 0, 0, 0] as number[] })
 let ro: ResizeObserver | null = null
 
 // trigger 触发状态
@@ -115,6 +115,10 @@ const beamStyle = computed(() => {
   const beamNum = parseFloat(beamSize) || 100
   const glowSize = beamNum + glowPad * 2
   const glowAnchor = `${((0.9 * beamNum + glowPad) / glowSize) * 100}%`
+  // 未显式指定 duration 时：圈时长 = 路径周长 / 全局速度（px/s）→ 统一线速度
+  const speed = parseFloat(getComputedStyle(hostEl.value ?? document.documentElement).getPropertyValue('--jc-beam-speed')) || 90
+  const perimeter = 2 * (borderState.value.width + borderState.value.height)
+  const bbDuration = duration !== undefined ? `${duration}s` : `${Math.max(1, Math.round(perimeter / speed))}s`
   return {
     '--jc-bb-inset': outset !== undefined
       ? (typeof outset === 'number' ? `-${outset}px` : `calc(-1 * ${outset})`)
@@ -122,13 +126,13 @@ const beamStyle = computed(() => {
     '--jc-bb-radius': borderState.value.radius,
     '--jc-bb-line-width': unit(lineWidth),
     '--jc-bb-size': beamSize,
-    '--jc-bb-duration': `${duration}s`,
+    '--jc-bb-duration': bbDuration,
     '--jc-bb-gradient': gradient.value,
-    '--jc-bb-anim': props.beamAccelerate ? 'jc-beam-move-acc' : 'jc-beam-move',
+    '--jc-bb-anim': props.beamAccelerate ? 'jc-beam-move-acc' : 'var(--jc-beam-anim, jc-beam-move)',
     // 内部光晕：与流光共用 --jc-bb-inset（同 box → 同 offset-path → 位置严格同步），blur 向内部晕染；
     // 光晕 = 流光 + 两端各 4px 淡出泛光（宽度/锚点由 glowSize/glowAnchor 决定）
     '--jc-glow-blur': props.glowBlur !== undefined ? unit(props.glowBlur) : 'var(--jc-glow-blur, 6px)',
-    '--jc-glow-opacity': String(props.glowOpacity ?? 0.65),
+    '--jc-glow-opacity': props.glowOpacity !== undefined ? String(props.glowOpacity) : 'var(--jc-glow-opacity, 0.65)',
     '--jc-glow-size': `${glowSize}px`,
     '--jc-glow-anchor': glowAnchor,
     ...(glowGradient.value ? { '--jc-glow-gradient': glowGradient.value } : {}),
@@ -142,6 +146,7 @@ function measure() {
   const num = (v: string) => { const n = parseFloat(v); return Number.isFinite(n) ? n : 0 }
   borderState.value = {
     width: host.offsetWidth,
+    height: host.offsetHeight,
     radius: cs.borderRadius,
     borderWidth: [
       num(cs.borderTopWidth),
@@ -161,6 +166,8 @@ onMounted(() => {
   measure()
   ro = new ResizeObserver(measure)
   ro.observe(host)
+  // 全局动画效果配置变化（如速度）→ 重新测量并计算圈时长
+  window.addEventListener('jc-effect-config', measure)
 })
 
 onBeforeUnmount(() => {
@@ -168,6 +175,7 @@ onBeforeUnmount(() => {
   clearTrigger.value = null
   ro?.disconnect()
   ro = null
+  window.removeEventListener('jc-effect-config', measure)
 })
 </script>
 
