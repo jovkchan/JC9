@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
 import type { JcBorderBeamColor } from './JcBorderBeam.vue'
+import JcBeam from './JcBeam.vue'
 import { useBeam } from '../../composables/useBeam'
 
 defineOptions({ name: 'JcSelect' })
@@ -29,6 +30,8 @@ const props = withDefaults(
     beamAngle?: string
     /** 拐角变速：true=拐角轻微加速 / false=匀速 */
     beamAccelerate?: boolean
+    /** 内部光晕：内环光束与流光同步（同速/同位/同色），模糊柔化为内部发光 */
+    glow?: boolean
   }>(),
   {
     modelValue: undefined,
@@ -41,6 +44,7 @@ const props = withDefaults(
     beamColor: undefined,
     beamAngle: 'to left',
     beamAccelerate: false,
+    glow: false,
   },
 )
 
@@ -59,6 +63,9 @@ const { beamStyle } = useBeam({
   accelerate: () => props.beamAccelerate,
   root: () => rootRef.value,
   sizeRatio: () => 0.4,
+  glow: () => props.glow,
+  glowBlur: () => undefined,
+  glowOpacity: () => undefined,
 })
 
 // ── 自定义下拉（div 模拟 select，流光可包裹选框 + 弹出列表整体） ──
@@ -178,24 +185,20 @@ onBeforeUnmount(() => {
     >
       <span class="jc-select__value">{{ selected ? selected.label : placeholder }}</span>
       <span class="jc-select__arrow" aria-hidden="true">▾</span>
-      <!-- 选框流光（下拉关闭时；打开时改用整体大流光包裹选框+列表） -->
-      <span v-if="beam && !open" class="jc-beam" :style="beamStyle" aria-hidden="true">
-        <span class="jc-beam__effect" />
-      </span>
+      <!-- 选框流光 + 内部光晕（下拉关闭时；打开时改用整体大流光包裹选框+列表） -->
+      <JcBeam v-if="beam && !open" :glow="glow" :style="beamStyle" />
     </div>
 
     <!-- 下拉列表（Teleport 到 body，流光可包裹弹出整体外框） -->
     <Teleport to="body">
-      <!-- 整体大流光：一个环包裹选框 + 下拉列表整体外框 -->
+      <!-- 整体大流光：一个环包裹选框 + 下拉列表整体外框（JcBeam 封装流光+光晕） -->
       <span
         v-if="beam && open"
         class="jc-select__beam-overlay"
         :style="overlayStyle"
         aria-hidden="true"
       >
-        <span class="jc-beam" :style="beamStyle">
-          <span class="jc-beam__effect" />
-        </span>
+        <JcBeam :glow="glow" :style="beamStyle" />
       </span>
       <div
         v-show="open"
@@ -350,12 +353,8 @@ onBeforeUnmount(() => {
   pointer-events: none;
   /* 整体浮动阴影：选框 + 下拉一起浮起（融合一体的投影） */
   box-shadow: var(--jc-shadow-menu, 0 4px 14px rgba(0, 0, 0, 0.4));
-}
-.jc-select__beam-overlay .jc-beam {
-  opacity: 1;
-}
-.jc-select__beam-overlay .jc-beam .jc-beam__effect {
-  animation-play-state: running;
+  /* 流光/光晕常显规则已移至 global.scss：Teleport 到 body 不在 :focus-within 作用域，
+     且 .jc-beam/.jc-beam-glow 由 JcBeam 组件渲染（无本组件 data-v），scoped 匹配不到 */
 }
 /* 流光激活时原边框调浅为浅紫（避免与流光重叠看不清） */
 .jc-select.has-beam:focus-within .jc-select__trigger {

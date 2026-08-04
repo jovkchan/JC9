@@ -144,13 +144,13 @@ function copyAnswersText() {
       <div class="control-panel">
         <div class="input-row">
           <JcInput
-            beam
+            beam glow
             v-model="domain"
             placeholder="请输入域名，如 github.com"
             style="flex: 1; min-width: 0"
             @keyup.enter="resolveDns"
           />
-          <JcSelect beam v-model="recordType" :options="recordTypeOptions" style="width: 110px" />
+          <JcSelect beam glow v-model="recordType" :options="recordTypeOptions" style="width: 110px" />
         </div>
 
         <div class="setting-section">

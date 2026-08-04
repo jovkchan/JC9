@@ -126,6 +126,26 @@ toast.success('保存成功')  // success/error/warning/info
 </ToolShell>
 ```
 
+### JcBorderBeam（流光边框 + 内部光晕）
+
+对齐 Ant Design BorderBeam：mask 挖环 + CSS Motion Path 光束，可包裹任意元素或 input/select/textarea 等替换元素。
+
+| 属性 | 类型 | 默认 | 说明 |
+| --- | --- | --- | --- |
+| color | `string \| {color,percent}[]` | `--jc-beam-gradient` | 流光颜色（渐变停靠点，percent 0~100） |
+| duration | `number` | `6` | 流光一圈秒数 |
+| lineWidth | `number \| string` | `1` | 流光线宽 |
+| size / sizeRatio | `number \| string` / `number` | `100` / - | 光束长度（sizeRatio = 宿主宽度比例） |
+| beamAngle | `string` | `'to left'` | 渐变方向 |
+| beamAccelerate | `boolean` | `false` | 拐角变速 |
+| trigger | `always\|hover\|focus` | `always` | 何时显示 |
+| wrap | `boolean` | `false` | 包裹层承载（兼容替换元素） |
+| **glow** | `boolean` | `false` | **内部光晕：与流光同路径 / 同速 / 同色，模糊向内部晕染（不分离）** |
+| glowBlur | `number \| string` | `--jc-glow-blur` | 光晕模糊半径 |
+| glowOpacity | `number` | `--jc-glow-opacity` | 光晕不透明度 0~1 |
+
+> 表单控件 `JcInput / JcTextarea / JcSelect` 在 `beam` 基础上加 `glow` prop 即可开启同步内部光晕，颜色 / 速度 / 位置与流光完全一致（模糊、透明度走全局 `--jc-glow-*` token）。
+
 ## 🧰 移植到其他项目（Checklist）
 
 - [ ] 复制 `src/components/ui/` 整个目录

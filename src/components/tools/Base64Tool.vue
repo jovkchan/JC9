@@ -85,7 +85,7 @@ function clearAll() {
       <JcTextarea
         v-model="input"
         mono
-        beam
+        beam glow
         :beam-size-ratio="0.6"
         :spellcheck="false"
         class="jc-fill"
@@ -101,7 +101,7 @@ function clearAll() {
           v-model="output"
           mono
           readonly
-          beam
+          beam glow
           :beam-size-ratio="0.6"
           :spellcheck="false"
           class="jc-fill"

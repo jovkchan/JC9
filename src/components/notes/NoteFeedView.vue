@@ -191,7 +191,7 @@ const activeFilterSummary = computed(() => {
     <!-- Memos 快速发布框 -->
     <div class="memo-creator">
       <div class="creator-title" v-if="showTitleInput">
-        <JcInput beam v-model="newTitle" placeholder="输入备忘标题（可选）..." />
+        <JcInput beam glow v-model="newTitle" placeholder="输入备忘标题（可选）..." />
       </div>
       <JcTextarea
         ref="textareaRef"

@@ -117,12 +117,12 @@ function copyPublic() {
           <!-- 动态参数选项 (RSA位数/ECDSA曲线) -->
           <div v-if="algorithm === 'rsa'" class="config-item flex-1">
             <span class="config-label">密钥长度 (Bits)</span>
-            <JcSelect beam :model-value="bits" :options="bitsOptions" style="width: 100%" @update:model-value="(v) => bits = Number(v)" />
+            <JcSelect beam glow :model-value="bits" :options="bitsOptions" style="width: 100%" @update:model-value="(v) => bits = Number(v)" />
           </div>
 
           <div v-if="algorithm === 'ecdsa'" class="config-item flex-1">
             <span class="config-label">曲线类型 (Curve)</span>
-            <JcSelect beam :model-value="curve" :options="curveOptions" style="width: 100%" @update:model-value="(v) => curve = Number(v)" />
+            <JcSelect beam glow :model-value="curve" :options="curveOptions" style="width: 100%" @update:model-value="(v) => curve = Number(v)" />
           </div>
         </div>
 
@@ -130,7 +130,7 @@ function copyPublic() {
           <!-- 注释 (Comment) -->
           <div class="config-item flex-1">
             <span class="config-label">注释 (Comment - 比如邮箱)</span>
-            <JcInput beam v-model="comment" placeholder="e.g. your-email@example.com (留空则不加)" />
+            <JcInput beam glow v-model="comment" placeholder="e.g. your-email@example.com (留空则不加)" />
           </div>
 
           <!-- 保护密码 (Passphrase) -->
@@ -177,7 +177,7 @@ function copyPublic() {
             <span class="result-title">私钥 (Private Key)</span>
             <JcButton size="small" @click="copyPrivate">{{ copyPrivateSuccess ? '已复制 ✔' : '复制私钥' }}</JcButton>
           </div>
-          <JcTextarea :model-value="privateKey" mono readonly beam :beam-size-ratio="0.6" class="jc-fill key-display" placeholder="尚未生成私钥" />
+          <JcTextarea :model-value="privateKey" mono readonly beam glow :beam-size-ratio="0.6" class="jc-fill key-display" placeholder="尚未生成私钥" />
           <span class="security-tip">提示：私钥必须严密保管，绝对不能泄露给任何人。</span>
         </div>
 
@@ -187,7 +187,7 @@ function copyPublic() {
             <span class="result-title">公钥 (Public Key)</span>
             <JcButton size="small" @click="copyPublic">{{ copyPublicSuccess ? '已复制 ✔' : '复制公钥' }}</JcButton>
           </div>
-          <JcTextarea :model-value="publicKey" mono readonly beam :beam-size-ratio="0.6" class="jc-fill key-display" placeholder="尚未生成公钥" />
+          <JcTextarea :model-value="publicKey" mono readonly beam glow :beam-size-ratio="0.6" class="jc-fill key-display" placeholder="尚未生成公钥" />
           <span class="security-tip">提示：公钥可以安全地共享、或配置在服务器的 <code>~/.ssh/authorized_keys</code> 中。</span>
         </div>
       </div>

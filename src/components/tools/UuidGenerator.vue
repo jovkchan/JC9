@@ -63,7 +63,7 @@ function clearAll() {
         <div class="uuid-form__row">
           <label class="uuid-form__label">生成数量</label>
           <JcInput
-            beam
+            beam glow
             :model-value="String(count)"
             type="number"
             size="small"
@@ -77,7 +77,7 @@ function clearAll() {
     </template>
     <template #right-label>生成的 UUID 列表</template>
     <template #right>
-      <JcTextarea v-model="output" mono readonly beam :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="等待生成..." />
+      <JcTextarea v-model="output" mono readonly beam glow :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="等待生成..." />
     </template>
   </ToolShell>
 </template>

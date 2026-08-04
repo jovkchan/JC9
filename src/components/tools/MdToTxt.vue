@@ -201,12 +201,12 @@ function clearAll() {
           <JcCheckbox v-model:checked="keepCodeBlock">保留代码块</JcCheckbox>
           <span class="mdt-stats">输入 {{ input.length }} 字符 · 输出 {{ output.length }} 字符</span>
         </div>
-        <JcTextarea v-model="input" mono beam :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="请粘贴被污染的 Markdown 或笔记原文..." />
+        <JcTextarea v-model="input" mono beam glow :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="请粘贴被污染的 Markdown 或笔记原文..." />
       </div>
     </template>
     <template #right-label>输出（纯净 TXT）</template>
     <template #right>
-      <JcTextarea v-model="output" mono readonly beam :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="转换结果将显示在这里..." />
+      <JcTextarea v-model="output" mono readonly beam glow :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="转换结果将显示在这里..." />
     </template>
   </ToolShell>
 </template>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { JcBorderBeamColor } from './JcBorderBeam.vue'
+import JcBeam from './JcBeam.vue'
 import { useBeam } from '../../composables/useBeam'
 
 defineOptions({ name: 'JcTextarea' })
@@ -27,6 +28,8 @@ const props = withDefaults(
     beamAngle?: string
     /** 拐角变速：true=拐角轻微加速 / false=匀速 */
     beamAccelerate?: boolean
+    /** 内部光晕：内环光束与流光同步（同速/同位/同色），模糊柔化为内部发光 */
+    glow?: boolean
   }>(),
   {
     modelValue: '',
@@ -42,6 +45,7 @@ const props = withDefaults(
     beamSizeRatio: undefined,
     beamAngle: 'to left',
     beamAccelerate: false,
+    glow: false,
   },
 )
 
@@ -68,6 +72,9 @@ const { beamStyle } = useBeam({
   accelerate: () => props.beamAccelerate,
   root: () => hostRef.value,
   sizeRatio: () => props.beamSizeRatio ?? 0.4,
+  glow: () => props.glow,
+  glowBlur: () => undefined,
+  glowOpacity: () => undefined,
 })
 
 function onInput(e: Event) {
@@ -95,7 +102,7 @@ function onChange(e: Event) {
     @blur="emit('blur', $event)"
   />
   <!-- 有 beam：wrapper 承载流光层（:focus-within 触发） -->
-  <div v-else ref="hostRef" class="jc-textarea-host" :style="beamStyle">
+  <div v-else ref="hostRef" class="jc-textarea-host">
     <textarea
       :value="modelValue"
       :placeholder="placeholder"
@@ -109,9 +116,8 @@ function onChange(e: Event) {
       @focus="emit('focus', $event)"
       @blur="emit('blur', $event)"
     />
-    <span class="jc-beam" aria-hidden="true">
-      <span class="jc-beam__effect" />
-    </span>
+    <!-- 聚焦流光边框 + 内部光晕（JcBeam 封装） -->
+    <JcBeam :glow="glow" :style="beamStyle" />
   </div>
 </template>
 

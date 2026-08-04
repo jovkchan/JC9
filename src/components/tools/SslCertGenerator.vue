@@ -165,7 +165,7 @@ function downloadAll() {
           <!-- Common Name -->
           <div class="config-item flex-2">
             <span class="config-label">常用名称 (Common Name / CN)</span>
-            <JcInput beam v-model="commonName" placeholder="e.g. localhost 或 127.0.0.1" />
+            <JcInput beam glow v-model="commonName" placeholder="e.g. localhost 或 127.0.0.1" />
           </div>
 
           <!-- 有效天数 -->
@@ -185,7 +185,7 @@ function downloadAll() {
           <div class="config-item flex-1">
             <span class="config-label">Subject Alternative Names (SAN) - 决定浏览器信任与否的关键</span>
             <div class="san-input-wrapper">
-              <JcInput beam v-model="newSan" placeholder="添加域名或 IP (如 test.local 或 192.168.1.100)，回车确认" @keyup.enter="addSanTag" style="flex: 1; min-width: 0" />
+              <JcInput beam glow v-model="newSan" placeholder="添加域名或 IP (如 test.local 或 192.168.1.100)，回车确认" @keyup.enter="addSanTag" style="flex: 1; min-width: 0" />
               <JcButton size="small" @click="addSanTag">添加</JcButton>
             </div>
             <div class="san-tags-container">
@@ -221,12 +221,12 @@ function downloadAll() {
           <!-- 算法特定参数 -->
           <div v-if="algorithm === 'rsa'" class="config-item flex-1">
             <span class="config-label">密钥长度 (Bits)</span>
-            <JcSelect beam :model-value="bits" :options="bitsOptions" style="width: 100%" @update:model-value="(v) => bits = Number(v)" />
+            <JcSelect beam glow :model-value="bits" :options="bitsOptions" style="width: 100%" @update:model-value="(v) => bits = Number(v)" />
           </div>
 
           <div v-if="algorithm === 'ecdsa'" class="config-item flex-1">
             <span class="config-label">曲线类型 (Curve)</span>
-            <JcSelect beam v-model="curve" :options="curveOptions" style="width: 100%" />
+            <JcSelect beam glow v-model="curve" :options="curveOptions" style="width: 100%" />
           </div>
         </div>
 
@@ -259,7 +259,7 @@ function downloadAll() {
               <span class="result-title">服务器证书 (server.crt)</span>
               <JcButton size="small" @click="copyText('serverCert', serverCert)">{{ copySuccessMap['serverCert'] ? '已复制 ✔' : '复制证书' }}</JcButton>
             </div>
-            <JcTextarea :model-value="serverCert" mono readonly beam :beam-size-ratio="0.6" class="jc-fill key-display" />
+            <JcTextarea :model-value="serverCert" mono readonly beam glow :beam-size-ratio="0.6" class="jc-fill key-display" />
           </div>
 
           <!-- 私钥 (PrivateKey) -->
@@ -268,7 +268,7 @@ function downloadAll() {
               <span class="result-title">服务器私钥 (server.key)</span>
               <JcButton size="small" @click="copyText('serverKey', serverKey)">{{ copySuccessMap['serverKey'] ? '已复制 ✔' : '复制私钥' }}</JcButton>
             </div>
-            <JcTextarea :model-value="serverKey" mono readonly beam :beam-size-ratio="0.6" class="jc-fill key-display" />
+            <JcTextarea :model-value="serverKey" mono readonly beam glow :beam-size-ratio="0.6" class="jc-fill key-display" />
           </div>
         </div>
 
@@ -363,11 +363,11 @@ function downloadAll() {
             </div>
 
             <!-- 展示窗口 -->
-            <JcTextarea v-if="activeFile === 'ca'" :model-value="caCert" mono readonly beam :beam-size-ratio="0.6" class="jc-fill key-display" />
-            <JcTextarea v-else-if="activeFile === 'server_cert'" :model-value="serverCert" mono readonly beam :beam-size-ratio="0.6" class="jc-fill key-display" />
-            <JcTextarea v-else-if="activeFile === 'server_key'" :model-value="serverKey" mono readonly beam :beam-size-ratio="0.6" class="jc-fill key-display" />
-            <JcTextarea v-else-if="activeFile === 'client_cert'" :model-value="clientCert" mono readonly beam :beam-size-ratio="0.6" class="jc-fill key-display" />
-            <JcTextarea v-else-if="activeFile === 'client_key'" :model-value="clientKey" mono readonly beam :beam-size-ratio="0.6" class="jc-fill key-display" />
+            <JcTextarea v-if="activeFile === 'ca'" :model-value="caCert" mono readonly beam glow :beam-size-ratio="0.6" class="jc-fill key-display" />
+            <JcTextarea v-else-if="activeFile === 'server_cert'" :model-value="serverCert" mono readonly beam glow :beam-size-ratio="0.6" class="jc-fill key-display" />
+            <JcTextarea v-else-if="activeFile === 'server_key'" :model-value="serverKey" mono readonly beam glow :beam-size-ratio="0.6" class="jc-fill key-display" />
+            <JcTextarea v-else-if="activeFile === 'client_cert'" :model-value="clientCert" mono readonly beam glow :beam-size-ratio="0.6" class="jc-fill key-display" />
+            <JcTextarea v-else-if="activeFile === 'client_key'" :model-value="clientKey" mono readonly beam glow :beam-size-ratio="0.6" class="jc-fill key-display" />
           </div>
         </div>
       </div>

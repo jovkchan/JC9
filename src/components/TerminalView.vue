@@ -79,7 +79,7 @@ onUnmounted(()=>{ul?.();ro?.disconnect();term?.dispose();})
     <div ref="container" class="to" @click="focusTerm" @contextmenu.prevent="onCtx" />
     <div class="tb">
       <span class="p">>_</span>
-      <JcInput ref="inputRef" v-model="input" beam style="flex:1;min-width:0" placeholder="回车发送 | 点终端区域交互选择 ↑↓" @keyup.enter="sendLine" @keydown="onKd" />
+      <JcInput ref="inputRef" v-model="input" beam glow style="flex:1;min-width:0" placeholder="回车发送 | 点终端区域交互选择 ↑↓" @keyup.enter="sendLine" @keydown="onKd" />
     </div>
     <!-- 右键菜单 -->
     <JcContextMenu :show="ctxShow" :x="ctxX" :y="ctxY" :items="ctxItems" @select="onCtxSelect" @update:show="ctxShow = $event" />

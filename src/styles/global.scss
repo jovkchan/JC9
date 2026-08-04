@@ -63,7 +63,8 @@
     background-image: var(--jc-beam-gradient, linear-gradient(to left, #5b7cff 0%, #8a58ff 40%, #a878ff 68%, transparent));
     offset-anchor: 90% 50%;
     offset-distance: 0%;
-    offset-path: rect(0 auto auto 0 round var(--jc-beam-height, 12px));
+    /* 拐角圆角与 .jc-beam 光环圆角(4px)一致，避免拐角处光束被甩到光环外侧而消失 */
+    offset-path: rect(0 auto auto 0 round 4px);
     offset-rotate: auto;
     animation-name: var(--jc-beam-anim, jc-beam-move);
     animation-duration: 6s;
@@ -73,7 +74,8 @@
     will-change: offset-distance;
   }
 }
-/* 聚焦显示（表单控件 focus-within） */
+
+/* ── 聚焦显示：边框流光（.jc-beam）── */
 .jc-input:focus-within .jc-beam,
 .jc-select:focus-within .jc-beam,
 .jc-textarea-host:focus-within .jc-beam {
@@ -84,8 +86,73 @@
 .jc-textarea-host:focus-within .jc-beam .jc-beam__effect {
   animation-play-state: running;
 }
+
+/* ── 内部光晕层（表单控件共用）：与流光共用 inset（同 box → 同 offset-path → 位置严格同步），
+   模糊向内部晕染；不参与 mask 挖环，overflow 裁剪掉外溢部分 ── */
+.jc-beam-glow {
+  display: none;
+  position: absolute;
+  inset: 0;
+  border-radius: 4px;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+@supports (offset-path: rect(0 auto auto 0 round 1px)) {
+  .jc-beam-glow {
+    display: block;
+  }
+  .jc-beam-glow__effect {
+    position: absolute;
+    top: 0;
+    left: 0;
+    /* 光晕前后各外扩 4px（若隐若现的泛光）：宽度 = 流光 + 8px，offset-anchor 使外扩均匀落在头尾 */
+    width: var(--jc-glow-size, calc(var(--jc-beam-size, 100px) + 8px));
+    height: var(--jc-beam-height, 12px);
+    opacity: 1;
+    background-image: var(--jc-glow-gradient, linear-gradient(to left, transparent 0%, #5b7cff 4%, #8a58ff 45%, #a878ff 68%, transparent 100%));
+    filter: blur(var(--jc-glow-blur, 10px));
+    offset-anchor: var(--jc-glow-anchor, 87%) 50%;
+    offset-distance: 0%;
+    /* 拐角圆角与 .jc-beam-glow 光环圆角(4px)一致，避免拐角处光晕被甩到光环外侧而消失 */
+    offset-path: rect(0 auto auto 0 round 4px);
+    offset-rotate: auto;
+    animation-name: var(--jc-beam-anim, jc-beam-move);
+    animation-duration: 6s;
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+    animation-play-state: paused;
+    will-change: offset-distance;
+  }
+}
+/* 聚焦显示（表单控件 focus-within，光晕透明度走 token） */
+.jc-input:focus-within .jc-beam-glow,
+.jc-select:focus-within .jc-beam-glow,
+.jc-textarea-host:focus-within .jc-beam-glow {
+  opacity: var(--jc-glow-opacity, 0.65);
+}
+.jc-input:focus-within .jc-beam-glow .jc-beam-glow__effect,
+.jc-select:focus-within .jc-beam-glow .jc-beam-glow__effect,
+.jc-textarea-host:focus-within .jc-beam-glow .jc-beam-glow__effect {
+  animation-play-state: running;
+}
+/* JcSelect 下拉整体大流光：Teleport 到 body，不在 :focus-within 作用域内，需显式常显。
+   放全局（不限定作用域）：.jc-beam/.jc-beam-glow 由 JcBeam 组件渲染，scoped 的 data-v 匹配不到 */
+.jc-select__beam-overlay .jc-beam {
+  opacity: 1;
+}
+.jc-select__beam-overlay .jc-beam .jc-beam__effect,
+.jc-select__beam-overlay .jc-beam-glow .jc-beam-glow__effect {
+  animation-play-state: running;
+}
+.jc-select__beam-overlay .jc-beam-glow {
+  opacity: var(--jc-glow-opacity, 0.65);
+}
 @media (prefers-reduced-motion: reduce) {
-  .jc-beam__effect {
+  .jc-beam__effect,
+  .jc-beam-glow__effect {
     display: none;
   }
 }

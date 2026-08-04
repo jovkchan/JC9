@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { JcBorderBeamColor } from './JcBorderBeam.vue'
+import JcBeam from './JcBeam.vue'
 import { useBeam } from '../../composables/useBeam'
 
 defineOptions({ name: 'JcInput' })
@@ -26,6 +27,8 @@ const props = withDefaults(
     beamAngle?: string
     /** 拐角变速：true=拐角轻微加速 / false=匀速 */
     beamAccelerate?: boolean
+    /** 内部光晕：内环光束与流光同步（同速/同位/同色），模糊柔化为内部发光 */
+    glow?: boolean
   }>(),
   {
     modelValue: '',
@@ -40,6 +43,7 @@ const props = withDefaults(
     beamColor: undefined,
     beamAngle: 'to left',
     beamAccelerate: false,
+    glow: false,
   },
 )
 
@@ -71,6 +75,9 @@ const { beamStyle } = useBeam({
   accelerate: () => props.beamAccelerate,
   root: () => rootRef.value,
   sizeRatio: () => 0.4,
+  glow: () => props.glow,
+  glowBlur: () => undefined,
+  glowOpacity: () => undefined,
 })
 
 function onInput(e: Event) {
@@ -110,10 +117,8 @@ function clear() {
     >
       ✕
     </button>
-    <!-- 聚焦流光边框（beam 开启时，共享 .jc-beam 样式） -->
-    <span v-if="beam" class="jc-beam" :style="beamStyle" aria-hidden="true">
-      <span class="jc-beam__effect" />
-    </span>
+    <!-- 聚焦流光边框 + 内部光晕（JcBeam 封装：流光环与光晕共用同一套 beamStyle 变量） -->
+    <JcBeam v-if="beam" :glow="glow" :style="beamStyle" />
   </span>
 </template>
 

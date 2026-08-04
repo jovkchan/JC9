@@ -111,15 +111,15 @@ function escapeHtml(text: string) {
       <div class="regex-input-card">
         <div class="fld-row">
           <span class="regex-slash">/</span>
-          <JcInput beam v-model="regexStr" placeholder="在此输入正则表达式，如: [a-zA-Z]+" style="flex: 1; min-width: 0; font-family: 'Cascadia Code', Consolas, monospace" />
+          <JcInput beam glow v-model="regexStr" placeholder="在此输入正则表达式，如: [a-zA-Z]+" style="flex: 1; min-width: 0; font-family: 'Cascadia Code', Consolas, monospace" />
           <span class="regex-slash">/</span>
-          <JcInput beam v-model="flags" title="修饰符：g=全局, i=忽略大小写, m=多行" style="width: 64px; font-family: 'Cascadia Code', Consolas, monospace; font-weight: 700" />
+          <JcInput beam glow v-model="flags" title="修饰符：g=全局, i=忽略大小写, m=多行" style="width: 64px; font-family: 'Cascadia Code', Consolas, monospace; font-weight: 700" />
         </div>
       </div>
 
       <div class="editor-pane flex-1">
         <div class="pane-label">测试文本</div>
-        <JcTextarea v-model="testText" mono beam :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="在此粘贴待匹配的测试文本..." />
+        <JcTextarea v-model="testText" mono beam glow :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="在此粘贴待匹配的测试文本..." />
       </div>
 
       <div class="editor-pane flex-1">

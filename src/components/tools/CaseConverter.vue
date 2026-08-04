@@ -91,17 +91,17 @@ function clearAll() {
 <template>
   <ToolShell title="命名风格转换器" subtitle="Case Converter" split>
     <template #actions>
-      <JcSelect beam v-model="convertType" :options="convertTypeOptions" size="small" />
+      <JcSelect beam glow v-model="convertType" :options="convertTypeOptions" size="small" />
       <JcButton type="primary" size="small" :disabled="!output" @click="copyResult">复制结果</JcButton>
       <JcButton size="small" danger ghost @click="clearAll">清空</JcButton>
     </template>
     <template #left-label>输入原始文本 (支持多行批量)</template>
     <template #left>
-      <JcTextarea v-model="input" mono beam :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="输入要转换风格的变量名，如 user_name 或 userName..." />
+      <JcTextarea v-model="input" mono beam glow :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="输入要转换风格的变量名，如 user_name 或 userName..." />
     </template>
     <template #right-label>转换后结果</template>
     <template #right>
-      <JcTextarea v-model="output" mono readonly beam :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="等待转换..." />
+      <JcTextarea v-model="output" mono readonly beam glow :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="等待转换..." />
     </template>
   </ToolShell>
 </template>

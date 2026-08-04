@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>JC9 流光内部光晕 Demo（方案 C · 同路径同步）</title>
+<style>
+  /* ── 与 src/styles/variables.scss 一致的光晕 token ── */
+  :root {
+    --jc-beam-gradient: linear-gradient(to left, #5b7cff 0%, #8a58ff 40%, #a878ff 68%, transparent);
+    --jc-beam-height: 12px;
+    --jc-glow-blur: 6px;
+    --jc-glow-opacity: 0.65;
+    --jc-bg-app: #1e1e22;
+    --jc-bg-panel: #2a2a2f;
+    --jc-bg-input: #3c3c3c;
+    --jc-border-strong: #555;
+    --jc-text-primary: #ccc;
+    --jc-text-secondary: #858585;
+    --jc-color-accent: #8a58ff;
+    --jc-control-height: 28px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--jc-bg-app);
+    color: var(--jc-text-primary);
+    padding: 40px;
+  }
+  h2 { font-size: 16px; opacity: .9; }
+  p.desc { font-size: 12px; opacity: .55; margin: 6px 0 20px; max-width: 620px; line-height: 1.7; }
+  .sec-title { font-size: 13px; opacity: .7; margin: 30px 0 10px; border-bottom: 1px solid rgba(255,255,255,.08); padding-bottom: 6px; }
+
+  /* ── 与 src/styles/global.scss 一致的 keyframes ── */
+  @keyframes jc-beam-move {
+    from { offset-distance: 0%; }
+    to   { offset-distance: 100%; }
+  }
+  @keyframes jc-beam-move-acc {
+    0%   { offset-distance: 0%; }
+    4%   { offset-distance: 8%; }
+    21%  { offset-distance: 18%; }
+    25%  { offset-distance: 25%; }
+    29%  { offset-distance: 33%; }
+    46%  { offset-distance: 43%; }
+    50%  { offset-distance: 50%; }
+    54%  { offset-distance: 58%; }
+    71%  { offset-distance: 68%; }
+    75%  { offset-distance: 75%; }
+    79%  { offset-distance: 83%; }
+    96%  { offset-distance: 93%; }
+    100% { offset-distance: 100%; }
+  }
+
+  /* ═══ JcBorderBeam（卡片）结构：mask 挖环边框流光 + 同路径内部光晕 ═══ */
+  .host {
+    position: relative;
+    width: 320px;
+    padding: 24px;
+    border-radius: 12px;
+    background: var(--jc-bg-panel);
+    margin: 24px 0;
+  }
+  .host .label { font-size: 13px; opacity: .8; }
+  .host .note { font-size: 11px; opacity: .5; margin-top: 6px; }
+
+  .jc-border-beam {
+    position: absolute;
+    inset: var(--jc-bb-inset, -1px);
+    border-radius: var(--jc-bb-radius, 0px);
+    z-index: 1;
+    overflow: hidden;
+    pointer-events: none;
+    padding: var(--jc-bb-line-width, 1px);
+  }
+  .jc-border-beam {
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask-composite: exclude;
+  }
+  .jc-border-beam__effect,
+  .jc-border-beam__glow-effect {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: var(--jc-bb-size, 100px);
+    height: var(--jc-beam-height, 12px);
+    background-image: var(--jc-bb-gradient, var(--jc-beam-gradient));
+    offset-anchor: 90% 50%;
+    offset-distance: 0%;
+    offset-path: rect(0 auto auto 0 round var(--jc-bb-radius, 12px));
+    offset-rotate: auto;
+    animation-name: var(--jc-bb-anim, jc-beam-move-acc);
+    animation-duration: var(--jc-bb-duration, 6s);
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+    will-change: offset-distance;
+  }
+  /* 内部光晕层：与流光共用 --jc-bb-inset（同 box → 同 offset-path → 位置严格同步），blur 向内部晕染；
+     光晕长度为流光 0.5×（紧凑光晕），offset-anchor 68% 偏向前端，头部淡入 */
+  .jc-border-beam__glow {
+    position: absolute;
+    inset: var(--jc-bb-inset, -1px);
+    border-radius: var(--jc-bb-radius, 0px);
+    z-index: 0;
+    overflow: hidden;
+    pointer-events: none;
+    opacity: var(--jc-glow-opacity, 0.65);
+  }
+  .jc-border-beam__glow-effect {
+    /* 光晕 = 流光 + 两端各 4px 淡出泛光（若隐若现） */
+    width: calc(var(--jc-bb-size, 100px) + 8px);
+    background-image: linear-gradient(to left, transparent 0%, #5b7cff 4%, #8a58ff 45%, #a878ff 68%, transparent 100%);
+    offset-anchor: 87% 50%;
+    filter: blur(var(--jc-glow-blur, 6px));
+  }
+
+  /* ═══ 表单控件共享结构：.jc-beam（mask 挖环）+ .jc-beam-glow（同路径光晕），:focus-within 触发 ═══ */
+  .jc-input,
+  .jc-textarea-host {
+    position: relative;
+    display: flex;
+    width: 320px;
+    margin: 12px 0;
+  }
+  .jc-input { align-items: center; }
+  .jc-textarea-host { flex-direction: column; }
+  .jc-input input,
+  .jc-textarea-host textarea {
+    width: 100%;
+    font-family: inherit;
+    font-size: 12px;
+    color: var(--jc-text-primary);
+    background: var(--jc-bg-input);
+    border: 1px solid var(--jc-border-strong);
+    border-radius: 4px;
+    outline: none;
+    padding: 0 10px;
+    transition: border-color 120ms ease;
+  }
+  .jc-input input { height: var(--jc-control-height, 28px); flex: none; }
+  .jc-textarea-host textarea { height: 72px; flex: 1; padding: 6px 10px; resize: none; line-height: 1.6; }
+  .jc-input input:focus,
+  .jc-textarea-host textarea:focus { border-color: var(--jc-color-accent); }
+  .jc-input.has-beam:focus-within input,
+  .jc-textarea-host:focus-within textarea { border-color: rgba(138,88,255,0.45) !important; }
+
+  .jc-beam {
+    position: absolute;
+    inset: 0;
+    border-radius: 4px;
+    padding: 1px;
+    pointer-events: none;
+    z-index: 1;
+    overflow: hidden;
+    opacity: 0;
+    transition: opacity 0.25s ease;
+  }
+  .jc-beam {
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask-composite: exclude;
+  }
+  .jc-beam__effect,
+  .jc-beam-glow__effect {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: var(--jc-beam-size, 128px);
+    height: var(--jc-beam-height, 12px);
+    background-image: var(--jc-beam-gradient, linear-gradient(to left, #5b7cff 0%, #8a58ff 40%, #a878ff 68%, transparent));
+    offset-anchor: 90% 50%;
+    offset-distance: 0%;
+    offset-path: rect(0 auto auto 0 round 4px);
+    offset-rotate: auto;
+    animation-name: var(--jc-beam-anim, jc-beam-move);
+    animation-duration: 6s;
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+    animation-play-state: paused;
+    will-change: offset-distance;
+  }
+  /* 内部光晕层（表单控件）：与 .jc-beam 同 box（inset 0）→ 同 offset-path → 位置严格同步；
+     光晕长度为流光 0.5×（紧凑光晕），offset-anchor 68% 偏向前端 */
+  .jc-beam-glow {
+    position: absolute;
+    inset: 0;
+    border-radius: 4px;
+    z-index: 0;
+    overflow: hidden;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.25s ease;
+  }
+  .jc-beam-glow__effect {
+    /* 光晕 = 流光 + 两端各 4px 淡出泛光（若隐若现） */
+    width: calc(var(--jc-beam-size, 128px) + 8px);
+    background-image: linear-gradient(to left, transparent 0%, #5b7cff 4%, #8a58ff 45%, #a878ff 68%, transparent 100%);
+    offset-anchor: 87% 50%;
+    filter: blur(var(--jc-glow-blur, 6px));
+  }
+  .jc-input:focus-within .jc-beam,
+  .jc-textarea-host:focus-within .jc-beam { opacity: 1; }
+  .jc-input:focus-within .jc-beam .jc-beam__effect,
+  .jc-textarea-host:focus-within .jc-beam .jc-beam__effect,
+  .jc-input:focus-within .jc-beam-glow .jc-beam-glow__effect,
+  .jc-textarea-host:focus-within .jc-beam-glow .jc-beam-glow__effect { animation-play-state: running; }
+  .jc-input:focus-within .jc-beam-glow,
+  .jc-textarea-host:focus-within .jc-beam-glow { opacity: var(--jc-glow-opacity, 0.65); }
+
+  /* ── 参数面板 ── */
+  .controls {
+    background: var(--jc-bg-panel);
+    border-radius: 8px;
+    padding: 16px;
+    width: 320px;
+    margin-top: 28px;
+  }
+  .controls label { display: block; margin: 8px 0 4px; font-size: 12px; opacity: 0.8; }
+  .controls input[type="range"], .controls select {
+    width: 100%;
+    accent-color: var(--jc-color-accent);
+  }
+</style>
+</head>
+<body>
+  <h2>方案 C · 内部光晕与流光同路径同步（速度 / 位置 / 颜色）</h2>
+  <p class="desc">
+    关键修正：光晕与流光<b>共用同一 inset（同一 box → 同一 offset-path）</b>，位置严格同步、不会分离；
+    内部光晕由 <code>blur()</code> 向元素内部晕染产生，<code>overflow:hidden</code> 裁掉外溢部分。
+  </p>
+
+  <div class="sec-title">JcBorderBeam · 卡片流光 + 内部光晕（always 常显）</div>
+  <div class="host" id="host">
+    <div class="label" id="label">流光边框 + 内部光晕</div>
+    <div class="note" id="note">同路径 / 同速 / 同色 · duration 6s</div>
+    <div class="jc-border-beam" id="borderBeam"><span class="jc-border-beam__effect"></span></div>
+    <div class="jc-border-beam__glow" id="glowBeam"><span class="jc-border-beam__glow-effect"></span></div>
+  </div>
+
+  <div class="sec-title">JcInput · 聚焦流光 + 内部光晕（focus-within）</div>
+  <div class="jc-input has-beam" id="inputHost">
+    <input id="demoInput" type="text" placeholder="点击输入框聚焦看看" />
+    <span class="jc-beam" id="inputBeam"><span class="jc-beam__effect"></span></span>
+    <span class="jc-beam-glow" id="inputGlow"><span class="jc-beam-glow__effect"></span></span>
+  </div>
+  <p class="desc" style="margin-top:0;">聚焦时边框流光 + 内部光晕同时亮起，二者严格同步。</p>
+
+  <div class="sec-title">JcTextarea · 聚焦流光 + 内部光晕（focus-within）</div>
+  <div class="jc-textarea-host" id="taHost">
+    <textarea id="demoTa" placeholder="点击此处聚焦看看"></textarea>
+    <span class="jc-beam" id="taBeam"><span class="jc-beam__effect"></span></span>
+    <span class="jc-beam-glow" id="taGlow"><span class="jc-beam-glow__effect"></span></span>
+  </div>
+  <p class="desc" style="margin-top:0;">textarea 根需保留原生元素，流光/光晕由包裹层承载（与组件内部实现一致）。</p>
+
+  <div class="controls">
+    <h3 style="font-size:13px;">参数（实时生效 · 作用于上方 JcBorderBeam 卡片）</h3>
+    <label for="dur">duration（秒）：<span id="durVal">6</span></label>
+    <input id="dur" type="range" min="1" max="12" step="0.5" value="6" />
+    <label for="blur">glowBlur（px）：<span id="blurVal">6</span></label>
+    <input id="blur" type="range" min="0" max="16" step="1" value="6" />
+    <label for="opacity">glowOpacity：<span id="opacityVal">0.65</span></label>
+    <input id="opacity" type="range" min="0" max="1" step="0.05" value="0.65" />
+    <label for="accel">beamAccelerate：<span id="accelVal">on</span></label>
+    <select id="accel">
+      <option value="jc-beam-move-acc">加速（拐角变速）</option>
+      <option value="jc-beam-move">匀速</option>
+    </select>
+  </div>
+
+  <script>
+    const borderBeam = document.getElementById('borderBeam');
+    const glowBeam = document.getElementById('glowBeam');
+    const note = document.getElementById('note');
+
+    // 自定义属性必须用 setProperty（Object.assign(el.style, {--x}) 不会真正写入，此前参数不生效的根因）
+    const setVar = (el, name, value) => el.style.setProperty(name, value);
+
+    const set = () => {
+      const dur = document.getElementById('dur').value;
+      const blur = document.getElementById('blur').value;
+      const opacity = document.getElementById('opacity').value;
+      const anim = document.getElementById('accel').value;
+      // 流光与光晕共用同一组变量 → 同 box / 同路径 / 同速度 / 同颜色
+      const shared = {
+        '--jc-bb-inset': '-1px',
+        '--jc-bb-radius': '12px',
+        '--jc-bb-line-width': '1px',
+        '--jc-bb-size': '120px',
+        '--jc-bb-duration': dur + 's',
+        '--jc-bb-anim': anim,
+      };
+      for (const el of [borderBeam, glowBeam]) {
+        for (const [k, v] of Object.entries(shared)) setVar(el, k, v);
+      }
+      setVar(glowBeam, '--jc-glow-blur', blur + 'px');
+      setVar(glowBeam, '--jc-glow-opacity', opacity);
+      document.getElementById('durVal').textContent = dur;
+      document.getElementById('blurVal').textContent = blur;
+      document.getElementById('opacityVal').textContent = opacity;
+      document.getElementById('accelVal').textContent = anim.includes('acc') ? 'on' : 'off';
+      note.textContent = `同路径 / 同速 / 同色 · duration ${dur}s`;
+    };
+
+    ['dur', 'blur', 'opacity', 'accel'].forEach(id => {
+      document.getElementById(id).addEventListener('input', set);
+    });
+    set();
+  </script>
+</body>
+</html>

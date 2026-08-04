@@ -255,8 +255,8 @@ function clearAll() {
 <template>
   <ToolShell title="SQL 格式化 / 压缩" subtitle="Format / Minify" split>
     <template #actions>
-      <JcSelect beam v-model="caseOption" :options="caseOptions" size="small" @change="formatSql" />
-      <JcSelect beam v-model="indentSize" :options="indentOptions" size="small" @change="formatSql" />
+      <JcSelect beam glow v-model="caseOption" :options="caseOptions" size="small" @change="formatSql" />
+      <JcSelect beam glow v-model="indentSize" :options="indentOptions" size="small" @change="formatSql" />
       <JcButton type="primary" size="small" @click="formatSql">格式化</JcButton>
       <JcButton size="small" @click="minifySql">一键压缩</JcButton>
       <JcButton size="small" :disabled="!output" @click="copyResult">复制结果</JcButton>
@@ -264,12 +264,12 @@ function clearAll() {
     </template>
     <template #left-label>输入 SQL 语句</template>
     <template #left>
-      <JcTextarea v-model="input" mono beam :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="在此粘贴需要美化或压缩的一长串 SQL..." @input="formatSql" />
+      <JcTextarea v-model="input" mono beam glow :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="在此粘贴需要美化或压缩的一长串 SQL..." @input="formatSql" />
     </template>
     <template #right-label>处理结果</template>
     <template #right>
       <div class="sql-right">
-        <JcTextarea v-model="output" mono readonly beam :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="等待处理..." />
+        <JcTextarea v-model="output" mono readonly beam glow :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="等待处理..." />
         <div v-if="errorMsg" class="sql-error">{{ errorMsg }}</div>
       </div>
     </template>

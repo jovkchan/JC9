@@ -48,7 +48,7 @@ function onCtxSelect(item: JcContextMenuItem) {
       <JcButton size="small" type="primary" @click="store.create()">+ 新建</JcButton>
     </div>
     <div class="al-search">
-      <JcInput beam v-model="store.search" placeholder="搜索自动化" />
+      <JcInput beam glow v-model="store.search" placeholder="搜索自动化" />
     </div>
     <div class="al-body">
       <div

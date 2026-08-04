@@ -96,7 +96,7 @@ function clearAll() {
           <span class="name">二进制 (Radix 2)</span>
         </div>
         <div class="input-wrap">
-          <JcInput beam class="code-font" :model-value="binVal" @update:model-value="updateValues('bin', $event)" placeholder="请输入二进制数据（如 101010）..." style="flex: 1; min-width: 0" />
+          <JcInput beam glow class="code-font" :model-value="binVal" @update:model-value="updateValues('bin', $event)" placeholder="请输入二进制数据（如 101010）..." style="flex: 1; min-width: 0" />
           <JcButton size="small" :disabled="!binVal" @click="copyText(binVal)" title="复制二进制">复制</JcButton>
         </div>
       </div>
@@ -107,7 +107,7 @@ function clearAll() {
           <span class="name">八进制 (Radix 8)</span>
         </div>
         <div class="input-wrap">
-          <JcInput beam class="code-font" :model-value="octVal" @update:model-value="updateValues('oct', $event)" placeholder="请输入八进制数据（如 52）..." style="flex: 1; min-width: 0" />
+          <JcInput beam glow class="code-font" :model-value="octVal" @update:model-value="updateValues('oct', $event)" placeholder="请输入八进制数据（如 52）..." style="flex: 1; min-width: 0" />
           <JcButton size="small" :disabled="!octVal" @click="copyText(octVal)" title="复制八进制">复制</JcButton>
         </div>
       </div>
@@ -118,7 +118,7 @@ function clearAll() {
           <span class="name">十进制 (Radix 10)</span>
         </div>
         <div class="input-wrap">
-          <JcInput beam class="code-font" :model-value="decVal" @update:model-value="updateValues('dec', $event)" placeholder="请输入十进制数据（如 42）..." style="flex: 1; min-width: 0" />
+          <JcInput beam glow class="code-font" :model-value="decVal" @update:model-value="updateValues('dec', $event)" placeholder="请输入十进制数据（如 42）..." style="flex: 1; min-width: 0" />
           <JcButton size="small" :disabled="!decVal" @click="copyText(decVal)" title="复制十进制">复制</JcButton>
         </div>
       </div>
@@ -129,7 +129,7 @@ function clearAll() {
           <span class="name">十六进制 (Radix 16)</span>
         </div>
         <div class="input-wrap">
-          <JcInput beam class="code-font" :model-value="hexVal" @update:model-value="updateValues('hex', $event)" placeholder="请输入十六进制数据（如 2A）..." style="flex: 1; min-width: 0" />
+          <JcInput beam glow class="code-font" :model-value="hexVal" @update:model-value="updateValues('hex', $event)" placeholder="请输入十六进制数据（如 2A）..." style="flex: 1; min-width: 0" />
           <JcButton size="small" :disabled="!hexVal" @click="copyText(hexVal)" title="复制十六进制">复制</JcButton>
         </div>
       </div>

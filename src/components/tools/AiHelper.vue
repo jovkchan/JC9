@@ -198,7 +198,7 @@ onUnmounted(() => { destroy() })
             <div class="console-section" v-if="ai.workers.length > 0">
               <div class="console-section-title">🔍 知识库</div>
               <div class="kb-search-compact">
-                <JcInput beam v-model="kbSearchQuery" placeholder="搜索知识库..." style="flex:1;min-width:0" @keyup.enter="searchKnowledgeBase" />
+                <JcInput beam glow v-model="kbSearchQuery" placeholder="搜索知识库..." style="flex:1;min-width:0" @keyup.enter="searchKnowledgeBase" />
                 <JcButton size="small" @click="searchKnowledgeBase">搜索</JcButton>
               </div>
               <div v-for="entry in kbSearchResults" :key="entry.id" class="kb-result-item">

@@ -210,7 +210,7 @@ function clearAll() {
         <JcTextarea
           v-model="originalText"
           mono
-          beam
+          beam glow
           :beam-size-ratio="0.6"
           :spellcheck="false"
           class="jc-fill"
@@ -222,7 +222,7 @@ function clearAll() {
         <JcTextarea
           v-model="modifiedText"
           mono
-          beam
+          beam glow
           :beam-size-ratio="0.6"
           :spellcheck="false"
           class="jc-fill"

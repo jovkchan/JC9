@@ -136,6 +136,9 @@ $light: (
   --jc-beam-gradient: linear-gradient(to left, #5b7cff 0%, #8a58ff 40%, #a878ff 68%, transparent);
   // 流光细条高度（BorderBeam/Input/Textarea 共用），小于输入框高度可避免光束同时盖住上下边框的双轨
   --jc-beam-height: 12px;
+  // 流光内部光晕（与边框流光同路径/同速度/同颜色，模糊向内部晕染）
+  --jc-glow-blur: 6px;
+  --jc-glow-opacity: 0.65;
 }
 
 // ── Light theme override ──

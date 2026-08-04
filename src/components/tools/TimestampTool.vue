@@ -134,12 +134,12 @@ onUnmounted(() => {
         <div class="form-row">
           <div class="fld flex-2">
             <label>Unix 时间戳 (秒或毫秒)</label>
-            <JcInput beam v-model="inputTimestamp" @update:model-value="convertToDate" placeholder="如: 1719385623" />
+            <JcInput beam glow v-model="inputTimestamp" @update:model-value="convertToDate" placeholder="如: 1719385623" />
           </div>
           <div class="fld flex-3">
             <label>格式化时间</label>
             <div class="row">
-              <JcInput beam v-model="outputDate" readonly placeholder="等待转换..." style="flex: 1; min-width: 0" />
+              <JcInput beam glow v-model="outputDate" readonly placeholder="等待转换..." style="flex: 1; min-width: 0" />
               <JcButton size="small" @click="copyCurrent(parseInt(outputDate))" :disabled="!outputDate || outputDate.includes('失败')">复制</JcButton>
             </div>
           </div>
@@ -153,7 +153,7 @@ onUnmounted(() => {
           <div class="fld flex-2">
             <label>本地日期时间字符串</label>
             <div class="row">
-              <JcInput beam v-model="inputDateStr" @update:model-value="convertToTimestamp" placeholder="格式: YYYY-MM-DD HH:mm:ss" style="flex: 1; min-width: 0" />
+              <JcInput beam glow v-model="inputDateStr" @update:model-value="convertToTimestamp" placeholder="格式: YYYY-MM-DD HH:mm:ss" style="flex: 1; min-width: 0" />
               <JcButton size="small" @click="fillNow">当前时间</JcButton>
             </div>
           </div>
@@ -162,11 +162,11 @@ onUnmounted(() => {
             <div class="row gap-12">
               <div class="row flex-1">
                 <span class="suffix-label">秒 (10位)：</span>
-                <JcInput beam v-model="outputTimestampSec" readonly placeholder="秒" style="flex: 1; min-width: 0" />
+                <JcInput beam glow v-model="outputTimestampSec" readonly placeholder="秒" style="flex: 1; min-width: 0" />
               </div>
               <div class="row flex-1">
                 <span class="suffix-label">毫秒 (13位)：</span>
-                <JcInput beam v-model="outputTimestampMs" readonly placeholder="毫秒" style="flex: 1; min-width: 0" />
+                <JcInput beam glow v-model="outputTimestampMs" readonly placeholder="毫秒" style="flex: 1; min-width: 0" />
               </div>
             </div>
           </div>

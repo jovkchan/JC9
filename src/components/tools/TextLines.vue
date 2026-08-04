@@ -133,7 +133,7 @@ function clearAll() {
       </div>
     </template>
     <template #left>
-      <JcTextarea v-model="input" mono beam :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="请在此粘贴或输入需要操作的多行数据..." />
+      <JcTextarea v-model="input" mono beam glow :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="请在此粘贴或输入需要操作的多行数据..." />
     </template>
 
     <template #right-label>输出处理结果</template>
@@ -154,26 +154,26 @@ function clearAll() {
         <div v-if="delimiterMode === 'join'" class="sub-config-grid">
           <div class="field">
             <label>前缀 (如 ')</label>
-            <JcInput beam v-model="prefixChar" size="small" />
+            <JcInput beam glow v-model="prefixChar" size="small" />
           </div>
           <div class="field">
             <label>后缀 (如 ')</label>
-            <JcInput beam v-model="suffixChar" size="small" />
+            <JcInput beam glow v-model="suffixChar" size="small" />
           </div>
           <div class="field">
             <label>连接符</label>
-            <JcInput beam v-model="joinChar" size="small" placeholder="例如 , 或 \n" />
+            <JcInput beam glow v-model="joinChar" size="small" placeholder="例如 , 或 \n" />
           </div>
         </div>
 
         <div v-else class="sub-config-grid">
           <div class="field full-width">
             <label>拆分分隔符</label>
-            <JcInput beam v-model="splitChar" size="small" placeholder="例如 , 或 \t" />
+            <JcInput beam glow v-model="splitChar" size="small" placeholder="例如 , 或 \t" />
           </div>
         </div>
       </div>
-      <JcTextarea v-model="output" mono readonly beam :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="等待处理..." />
+      <JcTextarea v-model="output" mono readonly beam glow :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="等待处理..." />
     </template>
   </ToolShell>
 </template>

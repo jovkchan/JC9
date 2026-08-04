@@ -585,7 +585,7 @@ onMounted(() => {
           <div class="section-subtitle">1. 表达式绑定输出 (Cron Expression)</div>
           <div class="cron-input-row">
             <JcInput
-              beam
+              beam glow
               v-model="manualCron"
               @input="parseAndApplyCron"
               placeholder="请输入 Cron 表达式"

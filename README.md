@@ -199,7 +199,7 @@ npx tauri build
 
 - `src/components/ui/`：对齐 Ant Design 设计规范的自研可移植组件库（零业务依赖）
 - 组件：`JcButton / JcInput / JcTextarea / JcSelect / JcSegmented / JcModal / JcContextMenu / JcMenuList / JcDropdown / JcTooltip / JcSwitch / JcRadio / JcCheckbox / JcBadge / JcTable / JcTree / JcSkeleton / JcCard / JcEmpty / JcTabBar / JcToast / ToolShell` 等 20+ 组件
-- `JcBorderBeam` 流光边框 + 三表单控件统一集成，渐变 / 光束长度 / 动画全局 token 配置
+- `JcBorderBeam` 流光边框 + 三表单控件统一集成，渐变 / 光束长度 / 动画全局 token 配置；`glow` 内部光晕与流光同速 / 同位 / 同色同步
 - 设计规范沉淀于 `src/components/ui/DESIGN-SPEC.md`；未来计划提取为独立 npm 包 `@jc9/ui`
 
 ##  项目结构

@@ -484,7 +484,7 @@ onBeforeUnmount(() => {
     <div class="ae-bar">
       <JcButton size="small" @click="store.closeEditor()">← 返回</JcButton>
       <JcInput
-        beam
+        beam glow
         v-if="store.current"
         :model-value="store.current.name"
         class="ae-name"

@@ -35,6 +35,7 @@ export { default as JcTabBar } from './JcTabBar.vue'
 export type { JcTabItem } from './JcTabBar.vue'
 export { default as JcBorderBeam } from './JcBorderBeam.vue'
 export type { JcBorderBeamColor, JcBorderBeamTrigger } from './JcBorderBeam.vue'
+export { default as JcBeam } from './JcBeam.vue'
 export { default as ToolShell } from './ToolShell.vue'
 
 // 命令式 Toast

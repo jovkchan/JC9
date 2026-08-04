@@ -471,7 +471,7 @@ onMounted(() => document.addEventListener('click', closeGroupCtx))
           :style="{ paddingLeft: (8 + item.depth * 16) + 'px' }"
           @contextmenu="openGroupCtx($event, item.group.id)">
           <template v-if="editingGroupId === item.group.id">
-            <JcInput beam class="ns-edit-input" v-model="editingGroupName" @keyup.enter="confirmRenameGroup"
+            <JcInput beam glow class="ns-edit-input" v-model="editingGroupName" @keyup.enter="confirmRenameGroup"
               @keyup.escape="editingGroupId = ''" @blur="confirmRenameGroup" @click.stop autofocus />
           </template>
           <template v-else>
@@ -492,7 +492,7 @@ onMounted(() => document.addEventListener('click', closeGroupCtx))
 
       <div class="ns-item add-group" @click="showingNewGroup = true">
         <template v-if="showingNewGroup || showingNewSubGroup">
-          <JcInput beam v-model="newGroupName" class="ns-add-input ns-add-sub-input" :placeholder="showingNewSubGroup ? '子组名...' : '组名...'" @keyup.enter="handleAddGroup"
+          <JcInput beam glow v-model="newGroupName" class="ns-add-input ns-add-sub-input" :placeholder="showingNewSubGroup ? '子组名...' : '组名...'" @keyup.enter="handleAddGroup"
             @keyup.escape="showingNewGroup = false; showingNewSubGroup = false" @blur="handleAddGroup" @click.stop autofocus />
         </template>
         <template v-else><span class="ns-label">+ 新建笔记组</span></template>
@@ -617,7 +617,7 @@ onMounted(() => document.addEventListener('click', closeGroupCtx))
 
     <!-- Rename modal -->
     <JcModal v-model:open="renameShow" title="重命名笔记" width="360">
-      <div class="fld"><label>新名称</label><JcInput beam v-model="renameValue" @keyup.enter="confirmRenameNote" autofocus /></div>
+      <div class="fld"><label>新名称</label><JcInput beam glow v-model="renameValue" @keyup.enter="confirmRenameNote" autofocus /></div>
       <template #footer>
         <JcButton @click="renameShow = false">取消</JcButton>
         <JcButton type="primary" @click="confirmRenameNote">保存</JcButton>

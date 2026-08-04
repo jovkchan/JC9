@@ -626,7 +626,7 @@ function formatFileSize(bytes: number): string {
   <ToolShell title="哈希/校验和计算器">
     <template #actions>
       <label style="font-size: 11px; color: var(--jc-text-secondary)">计算算法：</label>
-      <JcSelect beam v-model="mode" :options="algoOptions" size="small" :disabled="isCalculating" style="width: 150px" />
+      <JcSelect beam glow v-model="mode" :options="algoOptions" size="small" :disabled="isCalculating" style="width: 150px" />
       <JcButton type="primary" size="small" @click="copyResult" :disabled="!outputHash">复制哈希</JcButton>
       <JcButton size="small" danger ghost @click="clearAll" :disabled="isCalculating">清空</JcButton>
     </template>
@@ -643,11 +643,11 @@ function formatFileSize(bytes: number): string {
     <div v-show="activeTab === 'text'" class="tool-body-split">
       <div class="editor-pane">
         <div class="pane-label">输入文本内容</div>
-        <JcTextarea v-model="inputText" mono beam :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="在此输入需要计算哈希的字符串文本..." />
+        <JcTextarea v-model="inputText" mono beam glow :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="在此输入需要计算哈希的字符串文本..." />
       </div>
       <div class="editor-pane">
         <div class="pane-label">哈希输出 (HEX 结果)</div>
-        <JcTextarea :model-value="outputHash" mono readonly beam :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill hash-output" placeholder="计算出的哈希值会在这里显示..." />
+        <JcTextarea :model-value="outputHash" mono readonly beam glow :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill hash-output" placeholder="计算出的哈希值会在这里显示..." />
       </div>
     </div>
 

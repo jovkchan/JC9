@@ -135,7 +135,7 @@ function copyText() {
 
     <template #right-label>生成的占位符文本</template>
     <template #right>
-      <JcTextarea v-model="output" mono readonly beam :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="等待生成..." />
+      <JcTextarea v-model="output" mono readonly beam glow :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="等待生成..." />
     </template>
   </ToolShell>
 </template>

@@ -267,7 +267,7 @@ function formatSize(bytes: number): string {
           </div>
         </div>
         <input type="file" ref="fileInput" accept=".svg" style="display: none" @change="handleFileSelect" />
-        <JcTextarea v-model="inputSvg" mono beam :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="在这里粘贴 &lt;svg&gt;...&lt;/svg&gt; 代码..." />
+        <JcTextarea v-model="inputSvg" mono beam glow :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="在这里粘贴 &lt;svg&gt;...&lt;/svg&gt; 代码..." />
       </div>
     </template>
 
@@ -318,7 +318,7 @@ function formatSize(bytes: number): string {
             <JcButton size="small" @click="downloadSvg">下载 .svg</JcButton>
           </div>
         </div>
-        <JcTextarea mono readonly beam :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill code-output" :model-value="outputSvg" />
+        <JcTextarea mono readonly beam glow :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill code-output" :model-value="outputSvg" />
       </div>
 
       <div v-if="errorMsg" class="error-panel card">

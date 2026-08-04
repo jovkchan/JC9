@@ -273,7 +273,7 @@ function clearDecoder() {
             <span>Data URL 格式 (用于 CSS / HTML 直引)</span>
             <JcButton size="small" type="primary" @click="copyText(base64DataUrl)" :disabled="!base64DataUrl">复制</JcButton>
           </div>
-          <JcTextarea :model-value="base64DataUrl" mono readonly beam :beam-size-ratio="0.6" class="jc-fill" placeholder="上传图片后自动生成..." />
+          <JcTextarea :model-value="base64DataUrl" mono readonly beam glow :beam-size-ratio="0.6" class="jc-fill" placeholder="上传图片后自动生成..." />
         </div>
 
         <div class="copy-text-group flex-fill-group">
@@ -281,7 +281,7 @@ function clearDecoder() {
             <span>纯 Base64 数据</span>
             <JcButton size="small" @click="copyText(base64Pure)" :disabled="!base64Pure">复制</JcButton>
           </div>
-          <JcTextarea :model-value="base64Pure" mono readonly beam :beam-size-ratio="0.6" class="jc-fill" placeholder="上传图片后自动生成..." />
+          <JcTextarea :model-value="base64Pure" mono readonly beam glow :beam-size-ratio="0.6" class="jc-fill" placeholder="上传图片后自动生成..." />
         </div>
 
         <div class="copy-text-group flex-row">
@@ -290,14 +290,14 @@ function clearDecoder() {
               <span>HTML Image 标签</span>
               <JcButton size="small" @click="copyText(base64Html)" :disabled="!base64Html">复制</JcButton>
             </div>
-            <JcInput beam :model-value="base64Html" readonly placeholder="等待生成..." style="font-family: 'Cascadia Code', Consolas, monospace" />
+            <JcInput beam glow :model-value="base64Html" readonly placeholder="等待生成..." style="font-family: 'Cascadia Code', Consolas, monospace" />
           </div>
           <div class="flex-item">
             <div class="group-title">
               <span>CSS Background 声明</span>
               <JcButton size="small" @click="copyText(base64Css)" :disabled="!base64Css">复制</JcButton>
             </div>
-            <JcInput beam :model-value="base64Css" readonly placeholder="等待生成..." style="font-family: 'Cascadia Code', Consolas, monospace" />
+            <JcInput beam glow :model-value="base64Css" readonly placeholder="等待生成..." style="font-family: 'Cascadia Code', Consolas, monospace" />
           </div>
         </div>
       </div>
@@ -313,7 +313,7 @@ function clearDecoder() {
             <JcButton size="small" danger ghost @click="clearDecoder">清空</JcButton>
           </div>
         </div>
-        <JcTextarea v-model="base64Input" @input="handleDecode" mono beam :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="在此处粘贴图片的 Base64 字符串（支持包含或不包含前缀 data:image/...;base64,）..." />
+        <JcTextarea v-model="base64Input" @input="handleDecode" mono beam glow :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="在此处粘贴图片的 Base64 字符串（支持包含或不包含前缀 data:image/...;base64,）..." />
         <div v-if="decodeError" class="tool-footer-error style-inline">{{ decodeError }}</div>
       </div>
 

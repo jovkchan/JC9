@@ -84,15 +84,15 @@ function cancel() {
 
     <div v-if="showForm || editing" class="cmd-form">
       <div class="form-row">
-        <JcInput beam v-model="name" placeholder="命令名称 (如: 启动前端)" style="flex: 2; min-width: 0" />
+        <JcInput beam glow v-model="name" placeholder="命令名称 (如: 启动前端)" style="flex: 2; min-width: 0" />
         <div class="dir-input-wrap">
-          <JcInput beam v-model="workingDir" placeholder="工作目录 (如: D:\\code\\my-project)" style="flex: 1; min-width: 0" />
+          <JcInput beam glow v-model="workingDir" placeholder="工作目录 (如: D:\\code\\my-project)" style="flex: 1; min-width: 0" />
           <JcButton size="small" @click="pickDirectory" title="选择文件夹">📂</JcButton>
         </div>
       </div>
       <div class="form-row">
         <JcInput
-          beam
+          beam glow
           v-model="command"
           placeholder="启动命令 (如: npm run dev)"
           @keyup.enter="handleSubmit"

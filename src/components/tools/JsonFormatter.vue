@@ -60,7 +60,7 @@ function clearAll() {
 <template>
   <ToolShell title="JSON 格式化器" subtitle="Format / Minify" split>
     <template #actions>
-      <JcSelect beam v-model="indentSize" :options="indentOptions" size="small" @change="formatJson" />
+      <JcSelect beam glow v-model="indentSize" :options="indentOptions" size="small" @change="formatJson" />
       <JcButton type="primary" size="small" @click="formatJson">格式化</JcButton>
       <JcButton size="small" @click="minifyJson">压缩 (Minify)</JcButton>
       <JcButton size="small" :disabled="!output" @click="copyResult">复制结果</JcButton>
@@ -72,7 +72,7 @@ function clearAll() {
       <JcTextarea
         v-model="input"
         mono
-        beam
+        beam glow
         :beam-size-ratio="0.6"
         :beam-color="[
           { color: '#4fb576', percent: 0 },
@@ -93,7 +93,7 @@ function clearAll() {
     <template #right-label>格式化结果</template>
     <template #right>
       <div class="json-right">
-        <JcTextarea v-model="output" mono readonly beam :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="等待格式化..." />
+        <JcTextarea v-model="output" mono readonly beam glow :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="等待格式化..." />
         <div v-if="errorMsg" class="json-error">{{ errorMsg }}</div>
       </div>
     </template>

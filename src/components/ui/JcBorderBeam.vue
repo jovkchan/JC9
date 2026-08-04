@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { buildBeamGradient } from '../../composables/useBeam'
+import { buildBeamGradient, buildGlowGradient } from '../../composables/useBeam'
 
 defineOptions({ name: 'JcBorderBeam' })
 
@@ -32,6 +32,12 @@ const props = withDefaults(
     trigger?: JcBorderBeamTrigger
     /** 用包裹层承载流光（兼容 input/select 等替换元素；包裹层为 inline-block 贴合内容） */
     wrap?: boolean
+    /** 内部光晕：与边框流光同路径/同速/同色，模糊向内部晕染（不分离） */
+    glow?: boolean
+    /** 光晕模糊半径，数字按 px */
+    glowBlur?: number | string
+    /** 光晕不透明度（0~1） */
+    glowOpacity?: number
   }>(),
   {
     color: undefined,
@@ -44,6 +50,9 @@ const props = withDefaults(
     beamAccelerate: false,
     trigger: 'always',
     wrap: false,
+    glow: false,
+    glowBlur: undefined,
+    glowOpacity: undefined,
   },
 )
 
@@ -91,6 +100,7 @@ const unit = (v: number | string) => {
 }
 
 const gradient = computed(() => buildBeamGradient(props.color, props.beamAngle))
+const glowGradient = computed(() => buildGlowGradient(props.color, props.beamAngle))
 
 const beamStyle = computed(() => {
   const { outset, duration, lineWidth, size, sizeRatio } = props
@@ -100,6 +110,11 @@ const beamStyle = computed(() => {
   const beamSize = sizeRatio != null && borderState.value.width > 0
     ? `${Math.round(borderState.value.width * sizeRatio)}px`
     : unit(size)
+  // 光晕前后各外扩 4px（若隐若现的泛光）：宽度 = 流光 + 8px，offset-anchor 使 4px 均匀落在流光头尾两侧
+  const glowPad = 4
+  const beamNum = parseFloat(beamSize) || 100
+  const glowSize = beamNum + glowPad * 2
+  const glowAnchor = `${((0.9 * beamNum + glowPad) / glowSize) * 100}%`
   return {
     '--jc-bb-inset': outset !== undefined
       ? (typeof outset === 'number' ? `-${outset}px` : `calc(-1 * ${outset})`)
@@ -110,6 +125,13 @@ const beamStyle = computed(() => {
     '--jc-bb-duration': `${duration}s`,
     '--jc-bb-gradient': gradient.value,
     '--jc-bb-anim': props.beamAccelerate ? 'jc-beam-move-acc' : 'jc-beam-move',
+    // 内部光晕：与流光共用 --jc-bb-inset（同 box → 同 offset-path → 位置严格同步），blur 向内部晕染；
+    // 光晕 = 流光 + 两端各 4px 淡出泛光（宽度/锚点由 glowSize/glowAnchor 决定）
+    '--jc-glow-blur': props.glowBlur !== undefined ? unit(props.glowBlur) : 'var(--jc-glow-blur, 6px)',
+    '--jc-glow-opacity': String(props.glowOpacity ?? 0.65),
+    '--jc-glow-size': `${glowSize}px`,
+    '--jc-glow-anchor': glowAnchor,
+    ...(glowGradient.value ? { '--jc-glow-gradient': glowGradient.value } : {}),
   } as Record<string, string>
 })
 
@@ -156,6 +178,16 @@ onBeforeUnmount(() => {
     <div class="jc-border-beam" :class="{ 'is-active': active }" :style="beamStyle" aria-hidden="true">
       <span class="jc-border-beam__effect" />
     </div>
+    <!-- 内部光晕：内环光束与边框流光同步（同速/同位/同色），模糊柔化为内部发光 -->
+    <div
+      v-if="glow"
+      class="jc-border-beam__glow"
+      :class="{ 'is-active': active }"
+      :style="beamStyle"
+      aria-hidden="true"
+    >
+      <span class="jc-border-beam__glow-effect" />
+    </div>
   </div>
   <!-- 注入模式：原样渲染子内容，流光层注入宿主内部（不改变布局） -->
   <template v-else>
@@ -164,6 +196,15 @@ onBeforeUnmount(() => {
     <Teleport v-if="hostEl" :to="hostEl">
       <div class="jc-border-beam" :class="{ 'is-active': active }" :style="beamStyle" aria-hidden="true">
         <span class="jc-border-beam__effect" />
+      </div>
+      <div
+        v-if="glow"
+        class="jc-border-beam__glow"
+        :class="{ 'is-active': active }"
+        :style="beamStyle"
+        aria-hidden="true"
+      >
+        <span class="jc-border-beam__glow-effect" />
       </div>
     </Teleport>
   </template>
@@ -228,7 +269,54 @@ onBeforeUnmount(() => {
     background-image: var(--jc-bb-gradient, var(--jc-beam-gradient, linear-gradient(to left, #a878ff 0%, #c99fff 70%, transparent)));
     offset-anchor: 90% 50%;
     offset-distance: 0%;
-    offset-path: rect(0 auto auto 0 round var(--jc-beam-height, 12px));
+    /* 拐角圆角与光环圆角(--jc-bb-radius)一致，避免拐角处光束被甩到光环外侧而消失 */
+    offset-path: rect(0 auto auto 0 round var(--jc-bb-radius, 12px));
+    offset-rotate: auto;
+    animation-name: var(--jc-bb-anim, jc-beam-move-acc);
+    animation-duration: var(--jc-bb-duration, 6s);
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+    will-change: offset-distance;
+  }
+}
+
+/* 内部光晕层：不参与 mask 挖环，与流光共用 --jc-bb-inset（同 box → 同 offset-path → 位置严格同步），
+   blur 向内部晕染，overflow 裁剪掉外溢部分 */
+.jc-border-beam__glow {
+  display: none;
+  position: absolute;
+  inset: var(--jc-bb-inset, -1px);
+  border-radius: var(--jc-bb-radius, 0px);
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+.jc-border-beam__glow.is-active {
+  opacity: var(--jc-glow-opacity, 0.65);
+}
+.jc-border-beam__glow.is-active .jc-border-beam__glow-effect {
+  animation-play-state: running;
+}
+@supports (offset-path: rect(0 auto auto 0 round 1px)) {
+  .jc-border-beam__glow {
+    display: block;
+  }
+  .jc-border-beam__glow-effect {
+    position: absolute;
+    top: 0;
+    left: 0;
+    /* 光晕前后各外扩 4px（若隐若现的泛光）：宽度 = 流光 + 8px，offset-anchor 使外扩均匀落在头尾 */
+    width: var(--jc-glow-size, calc(var(--jc-bb-size, 100px) + 8px));
+    height: var(--jc-beam-height, 12px);
+    opacity: 1;
+    background-image: var(--jc-glow-gradient, linear-gradient(to left, transparent 0%, #5b7cff 4%, #8a58ff 45%, #a878ff 68%, transparent 100%));
+    filter: blur(var(--jc-glow-blur, 6px));
+    offset-anchor: var(--jc-glow-anchor, 87%) 50%;
+    offset-distance: 0%;
+    /* 拐角圆角与光环圆角(--jc-bb-radius)一致，避免拐角处光晕被甩到光环外侧而消失 */
+    offset-path: rect(0 auto auto 0 round var(--jc-bb-radius, 12px));
     offset-rotate: auto;
     animation-name: var(--jc-bb-anim, jc-beam-move-acc);
     animation-duration: var(--jc-bb-duration, 6s);
@@ -240,7 +328,8 @@ onBeforeUnmount(() => {
 
 /* 减少动态效果时隐藏流光 */
 @media (prefers-reduced-motion: reduce) {
-  .jc-border-beam__effect {
+  .jc-border-beam__effect,
+  .jc-border-beam__glow-effect {
     display: none;
   }
 }
