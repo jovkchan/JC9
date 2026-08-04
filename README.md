@@ -155,7 +155,7 @@ npx tauri build
 - 支持两种标准传输（对齐 MCP 接入配置规范）：**Stdio**（`command`/`args`/`env`）与 **SSE**（`url`/`headers`），均不含 `type` 字段
 - **Stdio 方式**：`command`=`node`、`args` 指向**运行时释放的 `jc9-mcp.mjs`**（内嵌模板 → exe 同目录 `mcp/`，自动写入当前地址/端口），`env` 传 `key`；通过内置 MCP Server 读写笔记/记忆（需 JC9 运行中）
 - **SSE 方式**：`http://127.0.0.1:18899/sse`（事件流）+ `http://127.0.0.1:18899/message`（同协议 HTTP POST 端点），`headers` 走 Bearer Token
-- 三种端点均使用 API Key 做认证与权限隔离（scope + 分组白名单）；server 命名采用 kebab-case（`jc9` / `jc9-sse`）
+- 三种端点均使用 API Key 做认证与权限隔离（scope + 分组白名单 + **工具白名单**，可对 16 个工具逐项开关，危险操作以红/黄/绿标识）；server 命名采用 kebab-case（`jc9` / `jc9-sse`）
 - 知识库按 `project:{id}` 分组隔离；配置存 `settings` 表 `mcp_server_config` KV
 - 笔记 CRUD 后通过 `notes:changed` 事件实时同步前端
 

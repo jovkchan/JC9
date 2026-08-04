@@ -1578,14 +1578,14 @@ fn mcp_list_api_keys(state: State<'_, Mutex<AppState>>) -> Result<Vec<ai::mcp_ap
 
 #[tauri::command]
 #[allow(non_snake_case)]
-fn mcp_add_api_key(state: State<'_, Mutex<AppState>>, key: String, label: String, scope: String, groupIds: Vec<String>) -> Result<ai::mcp_api_keys::ApiKeyRecord, String> {
-    ai::mcp_api_keys::add_key(&state.lock().map_err(|e| e.to_string())?.db.conn, &key, &label, &scope, &groupIds)
+fn mcp_add_api_key(state: State<'_, Mutex<AppState>>, key: String, label: String, scope: String, groupIds: Vec<String>, tools: Vec<String>) -> Result<ai::mcp_api_keys::ApiKeyRecord, String> {
+    ai::mcp_api_keys::add_key(&state.lock().map_err(|e| e.to_string())?.db.conn, &key, &label, &scope, &groupIds, &tools)
 }
 
 #[tauri::command]
 #[allow(non_snake_case)]
-fn mcp_update_api_key(state: State<'_, Mutex<AppState>>, id: String, label: String, scope: String, groupIds: Vec<String>) -> Result<(), String> {
-    ai::mcp_api_keys::update_key(&state.lock().map_err(|e| e.to_string())?.db.conn, &id, &label, &scope, &groupIds)
+fn mcp_update_api_key(state: State<'_, Mutex<AppState>>, id: String, label: String, scope: String, groupIds: Vec<String>, tools: Vec<String>) -> Result<(), String> {
+    ai::mcp_api_keys::update_key(&state.lock().map_err(|e| e.to_string())?.db.conn, &id, &label, &scope, &groupIds, &tools)
 }
 
 #[tauri::command]

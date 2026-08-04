@@ -9,6 +9,9 @@ pub struct ApiKeyRecord {
     pub label: String,
     pub scope: String,
     pub group_ids: Vec<String>,
+    /// 工具白名单：空 = 允许全部工具；非空 = 仅允许列表内工具
+    #[serde(default)]
+    pub tools: Vec<String>,
     pub created_at: String,
 }
 
@@ -21,10 +24,13 @@ pub fn create_table(conn: &Connection) -> Result<(), String> {
             label TEXT NOT NULL DEFAULT '',
             scope TEXT NOT NULL DEFAULT '',
             group_ids TEXT NOT NULL DEFAULT '[]',
+            tools TEXT NOT NULL DEFAULT '[]',
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         )",
         [],
     ).map_err(|e| format!("创建 mcp_api_keys 表失败: {}", e))?;
+    // 兼容已有表：补充 tools 列
+    let _ = conn.execute("ALTER TABLE mcp_api_keys ADD COLUMN tools TEXT NOT NULL DEFAULT '[]'", []);
     Ok(())
 }
 
@@ -32,17 +38,19 @@ pub fn create_table(conn: &Connection) -> Result<(), String> {
 pub fn list_keys(conn: &Arc<Mutex<Connection>>) -> Result<Vec<ApiKeyRecord>, String> {
     let conn = conn.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
-        "SELECT id, key, label, scope, group_ids, created_at FROM mcp_api_keys ORDER BY created_at"
+        "SELECT id, key, label, scope, group_ids, tools, created_at FROM mcp_api_keys ORDER BY created_at"
     ).map_err(|e| e.to_string())?;
     let rows = stmt.query_map([], |row| {
         let gids: String = row.get(4)?;
+        let tools: String = row.get(5)?;
         Ok(ApiKeyRecord {
             id: row.get(0)?,
             key: row.get(1)?,
             label: row.get(2)?,
             scope: row.get(3)?,
             group_ids: serde_json::from_str(&gids).unwrap_or_default(),
-            created_at: row.get(5)?,
+            tools: serde_json::from_str(&tools).unwrap_or_default(),
+            created_at: row.get(6)?,
         })
     }).map_err(|e| e.to_string())?;
     let mut keys = Vec::new();
@@ -51,25 +59,27 @@ pub fn list_keys(conn: &Arc<Mutex<Connection>>) -> Result<Vec<ApiKeyRecord>, Str
 }
 
 /// 添加 API Key
-pub fn add_key(conn: &Arc<Mutex<Connection>>, key: &str, label: &str, scope: &str, group_ids: &[String]) -> Result<ApiKeyRecord, String> {
+pub fn add_key(conn: &Arc<Mutex<Connection>>, key: &str, label: &str, scope: &str, group_ids: &[String], tools: &[String]) -> Result<ApiKeyRecord, String> {
     let conn = conn.lock().map_err(|e| e.to_string())?;
     let id = uuid::Uuid::new_v4().to_string();
     let gids_json = serde_json::to_string(group_ids).unwrap_or_default();
+    let tools_json = serde_json::to_string(tools).unwrap_or_default();
     let now = chrono::Utc::now().to_rfc3339();
     conn.execute(
-        "INSERT INTO mcp_api_keys (id, key, label, scope, group_ids, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![id, key, label, scope, gids_json, now],
+        "INSERT INTO mcp_api_keys (id, key, label, scope, group_ids, tools, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![id, key, label, scope, gids_json, tools_json, now],
     ).map_err(|e| format!("添加 Key 失败: {}", e))?;
-    Ok(ApiKeyRecord { id, key: key.to_string(), label: label.to_string(), scope: scope.to_string(), group_ids: group_ids.to_vec(), created_at: now })
+    Ok(ApiKeyRecord { id, key: key.to_string(), label: label.to_string(), scope: scope.to_string(), group_ids: group_ids.to_vec(), tools: tools.to_vec(), created_at: now })
 }
 
 /// 更新 API Key
-pub fn update_key(conn: &Arc<Mutex<Connection>>, id: &str, label: &str, scope: &str, group_ids: &[String]) -> Result<(), String> {
+pub fn update_key(conn: &Arc<Mutex<Connection>>, id: &str, label: &str, scope: &str, group_ids: &[String], tools: &[String]) -> Result<(), String> {
     let conn = conn.lock().map_err(|e| e.to_string())?;
     let gids_json = serde_json::to_string(group_ids).unwrap_or_default();
+    let tools_json = serde_json::to_string(tools).unwrap_or_default();
     conn.execute(
-        "UPDATE mcp_api_keys SET label=?1, scope=?2, group_ids=?3 WHERE id=?4",
-        params![label, scope, gids_json, id],
+        "UPDATE mcp_api_keys SET label=?1, scope=?2, group_ids=?3, tools=?4 WHERE id=?5",
+        params![label, scope, gids_json, tools_json, id],
     ).map_err(|e| format!("更新 Key 失败: {}", e))?;
     Ok(())
 }
@@ -86,17 +96,19 @@ pub fn delete_key(conn: &Arc<Mutex<Connection>>, id: &str) -> Result<(), String>
 pub fn get_key_by_value(conn: &Arc<Mutex<Connection>>, key_val: &str) -> Result<Option<ApiKeyRecord>, String> {
     let conn = conn.lock().map_err(|e| e.to_string())?;
     let result = conn.query_row(
-        "SELECT id, key, label, scope, group_ids, created_at FROM mcp_api_keys WHERE key=?1",
+        "SELECT id, key, label, scope, group_ids, tools, created_at FROM mcp_api_keys WHERE key=?1",
         params![key_val],
         |row| {
             let gids: String = row.get(4)?;
+            let tools: String = row.get(5)?;
             Ok(ApiKeyRecord {
                 id: row.get(0)?,
                 key: row.get(1)?,
                 label: row.get(2)?,
                 scope: row.get(3)?,
                 group_ids: serde_json::from_str(&gids).unwrap_or_default(),
-                created_at: row.get(5)?,
+                tools: serde_json::from_str(&tools).unwrap_or_default(),
+                created_at: row.get(6)?,
             })
         },
     );

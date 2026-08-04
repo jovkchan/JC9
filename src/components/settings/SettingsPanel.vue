@@ -285,9 +285,8 @@ const mcpPortInput = ref('18899')
 const mcpServerMsg = ref('')
 const mcpLoading = ref(false)
 
-// ── 配置模板（SSE / HTTP / Stdio 三种接入方式）──
+// ── 配置模板（仅 Stdio 接入方式）──
 const mcpScriptPath = ref('')
-const mcpTemplateMode = ref<'sse' | 'http' | 'stdio'>('sse')
 
 // ── 笔记分享服务 ──
 const noteShareRunning = ref(false)
@@ -351,11 +350,31 @@ interface McpServerConfigType {
 }
 
 // ── API Key 管理（独立于服务配置）──
-interface ApiKeyItem { id: string; key: string; label: string; scope: string; group_ids: string[] }
+interface ApiKeyItem { id: string; key: string; label: string; scope: string; group_ids: string[]; tools: string[] }
+// MCP 工具白名单选项（对应内置 MCP Server 的 16 个工具；risk: safe=查询/绿, medium=中危/黄, danger=删改/红；新建类=黄）
+const mcpToolOptions: { name: string; label: string; category: string; risk: 'safe' | 'medium' | 'danger'; description: string }[] = [
+  { name: 'jc9_note_search', label: '搜索笔记', category: '笔记', risk: 'safe', description: '向量语义 + 关键词混合搜索笔记，返回最匹配列表（含预览/匹配度）' },
+  { name: 'jc9_note_read', label: '读取笔记', category: '笔记', risk: 'safe', description: '读取指定笔记的完整内容（Markdown）' },
+  { name: 'jc9_note_create', label: '新建笔记', category: '笔记', risk: 'medium', description: '新建笔记，自动同步知识库并生成向量嵌入（写操作）' },
+  { name: 'jc9_note_update_title', label: '改标题', category: '笔记', risk: 'danger', description: '仅更新笔记标题（写操作）' },
+  { name: 'jc9_note_update', label: '更新笔记', category: '笔记', risk: 'danger', description: '更新笔记标题/正文/标签，自动重建向量（写操作）' },
+  { name: 'jc9_note_delete', label: '删除笔记', category: '笔记', risk: 'danger', description: '删除笔记（软删除，可在回收站恢复）' },
+  { name: 'jc9_note_list', label: '笔记列表', category: '笔记', risk: 'safe', description: '列出笔记（可按分组过滤，含内容预览）' },
+  { name: 'jc9_note_groups', label: '笔记分组', category: '笔记', risk: 'safe', description: '获取笔记分组列表' },
+  { name: 'jc9_memory_add', label: '添加记忆', category: '记忆', risk: 'medium', description: '添加 Agent 记忆，自动向量化（记忆沉淀，写操作）' },
+  { name: 'jc9_memory_update', label: '更新记忆', category: '记忆', risk: 'danger', description: '更新已有记忆（写操作）' },
+  { name: 'jc9_memory_delete', label: '删除记忆', category: '记忆', risk: 'danger', description: '物理删除记忆' },
+  { name: 'jc9_memory_list', label: '记忆列表', category: '记忆', risk: 'safe', description: '列出记忆（按 scope 隔离）' },
+  { name: 'jc9_memory_read', label: '读取记忆', category: '记忆', risk: 'safe', description: '读取记忆完整内容' },
+  { name: 'jc9_memory_compress', label: '压缩记忆', category: '记忆', risk: 'danger', description: '压缩多条记忆为一条摘要，原记忆被删除' },
+  { name: 'jc9_database_stats', label: '诊断统计', category: '诊断', risk: 'safe', description: '数据库/向量索引诊断统计（只读）' },
+  { name: 'jc9_reindex', label: '重建向量', category: '诊断', risk: 'medium', description: '重建全部知识条目向量嵌入（耗时，重操作）' },
+]
+const mcpToolCategories = ['笔记', '记忆', '诊断']
 const showApiKeyManager = ref(false)
 const showApiKeyForm = ref(false)
 const editingApiKeyId = ref('') // '' = 添加新 Key
-const newApiKey = ref({ key: '', label: '', scope: '', groupIds: [] as string[] })
+const newApiKey = ref({ key: '', label: '', scope: '', groupIds: [] as string[], tools: [] as string[] })
 const mcpApiKeys = ref<ApiKeyItem[]>([])
 
 function generateApiKey() {
@@ -364,7 +383,7 @@ function generateApiKey() {
 
 function openAddApiKey() {
   editingApiKeyId.value = ''
-  newApiKey.value = { key: '', label: '', scope: '', groupIds: [] }
+  newApiKey.value = { key: '', label: '', scope: '', groupIds: [], tools: mcpToolOptions.map(o => o.name) }
   showApiKeyForm.value = true
 }
 
@@ -374,7 +393,7 @@ function openApiKeyManager() {
 
 function openEditApiKey(ak: ApiKeyItem) {
   editingApiKeyId.value = ak.id
-  newApiKey.value = { key: ak.key, label: ak.label, scope: ak.scope, groupIds: [...ak.group_ids] }
+  newApiKey.value = { key: ak.key, label: ak.label, scope: ak.scope, groupIds: [...ak.group_ids], tools: [...(ak.tools || [])] }
   showApiKeyForm.value = true
 }
 
@@ -385,14 +404,21 @@ function toggleApiKeyGroup(gid: string) {
   else arr.push(gid)
 }
 
+function toggleApiKeyTool(name: string) {
+  const arr = newApiKey.value.tools
+  const idx = arr.indexOf(name)
+  if (idx >= 0) arr.splice(idx, 1)
+  else arr.push(name)
+}
+
 async function saveApiKey() {
   const f = newApiKey.value
   const key = f.key || generateApiKey()
   try {
     if (editingApiKeyId.value) {
-      await invoke('mcp_update_api_key', { id: editingApiKeyId.value, label: f.label, scope: f.scope, groupIds: [...f.groupIds] })
+      await invoke('mcp_update_api_key', { id: editingApiKeyId.value, label: f.label, scope: f.scope, groupIds: [...f.groupIds], tools: [...f.tools] })
     } else {
-      await invoke('mcp_add_api_key', { key, label: f.label, scope: f.scope, groupIds: [...f.groupIds] })
+      await invoke('mcp_add_api_key', { key, label: f.label, scope: f.scope, groupIds: [...f.groupIds], tools: [...f.tools] })
     }
     await loadMcpApiKeys()
   } catch (e) { console.error('保存 Key 失败:', e) }
@@ -492,47 +518,17 @@ function handleConfigExpand(e: Event) {
   }
 }
 
-const mcpTemplateHint = computed(() => {
-  switch (mcpTemplateMode.value) {
-    case 'sse': return '标准 SSE 传输：客户端连 /sse 拉事件流 + POST /message 发请求（url + headers，需 API Key）'
-    case 'http': return '同协议的 HTTP 端点：直接 POST /message（JSON-RPC over HTTP，url + headers，需 API Key）'
-    case 'stdio': return '标准 Stdio 传输：command=node、args 指向释放的 jc9-mcp.mjs（启动时自动写入当前地址/端口），env 传 key（对齐 MCP 接入规范）'
-    default: return ''
-  }
-})
-
-const mcpConfigPreview = computed(() => {
-  const base = mcpServerUrl.value || 'http://127.0.0.1:18899'
+// 可复制的单 server 配置（键值对，粘贴到已有 mcpServers 中即可）
+const mcpServerEntryPreview = computed(() => {
   const key = showMcpKey.value ? (mcpApiKeys.value[0]?.key ?? '') : 'YOUR_API_KEY'
-  const headers = { Authorization: `Bearer ${key}` }
-  switch (mcpTemplateMode.value) {
-    case 'http':
-      return JSON.stringify({
-        mcpServers: {
-          'jc9-http': { url: `${base}/message`, headers }
-        }
-      }, null, 2)
-    case 'stdio': {
-      const scriptPath = mcpScriptPath.value || '<释放的 jc9-mcp.mjs 绝对路径>'
-      return JSON.stringify({
-        mcpServers: {
-          jc9: { command: 'node', args: [scriptPath], env: { key } }
-        }
-      }, null, 2)
-    }
-    case 'sse':
-    default:
-      return JSON.stringify({
-        mcpServers: {
-          'jc9-sse': { url: `${base}/sse`, headers }
-        }
-      }, null, 2)
-  }
+  const scriptPath = mcpScriptPath.value || '<释放的 jc9-mcp.mjs 绝对路径>'
+  const server = { command: 'node', args: [scriptPath], env: { key } }
+  return `"jc9": ${JSON.stringify(server, null, 2)}`
 })
 
 function copyMcpConfigJson() {
-  navigator.clipboard.writeText(mcpConfigPreview.value)
-  status.pushMessage('MCP 配置 JSON 已复制', 'success')
+  navigator.clipboard.writeText(mcpServerEntryPreview.value)
+  status.pushMessage('MCP server 配置已复制', 'success')
 }
 
 function copyMcpUrl() {
@@ -1033,21 +1029,16 @@ async function compressMemories() {
                 <input v-model="mcpPortInput" class="mcp-port-input" type="number" min="1024" max="65535" @change="mcpPortInput = Math.max(1024, Math.min(65535, Number(mcpPortInput) || 18899)).toString()" />
               </div>
 
-              <!-- 第3行：配置模板（SSE / HTTP / Stdio 三种接入方式）-->
+              <!-- 第3行：配置模板（仅 Stdio 接入方式）-->
               <details class="mcp-config-details" @toggle="handleConfigExpand">
                 <summary>
                   配置模板（点击展开）
                   <button class="mcp-copy-btn" @click.stop.prevent="copyMcpConfigJson" title="复制配置 JSON">复制</button>
                 </summary>
                 <div class="mcp-config-preview">
-                  <div class="mcp-tpl-tabs">
-                    <button :class="['mcp-tpl-tab', { active: mcpTemplateMode === 'sse' }]" @click="mcpTemplateMode = 'sse'">SSE</button>
-                    <button :class="['mcp-tpl-tab', { active: mcpTemplateMode === 'http' }]" @click="mcpTemplateMode = 'http'">HTTP</button>
-                    <button :class="['mcp-tpl-tab', { active: mcpTemplateMode === 'stdio' }]" @click="mcpTemplateMode = 'stdio'">Stdio</button>
-                  </div>
-                  <p style="margin:6px 0 4px;font-size:10px"><b>VS Code / Cline / Claude Desktop 配置：</b>{{ mcpTemplateHint }}</p>
-                  <pre>{{ mcpConfigPreview }}</pre>
-                  <p style="margin:4px 0 0;font-size:10px;color:var(--jc-text-secondary)">将以上 JSON 添加到目标工具的 mcpServers 字段即可连接（对齐 MCP 接入配置规范：stdio 用 command/args/env，SSE 用 url/headers，均不含 type）。三种方式都需 API Key：SSE/HTTP 走 headers 的 Bearer Token，Stdio 走 env 的 key；权限与所选 Key 绑定。</p>
+                  <p style="margin:0 0 4px;font-size:10px"><b>VS Code / Cline / Claude Desktop 配置（Stdio，推荐）：</b>command=node、args 指向释放的 jc9-mcp.mjs（自动写入当前地址/端口），env 传 key（对齐 MCP 接入规范，均不含 type）</p>
+                  <JcTextarea :model-value="mcpServerEntryPreview" readonly mono :spellcheck="false" :rows="12" />
+                  <p style="margin:4px 0 0;font-size:10px;color:var(--jc-text-secondary)">全选上方内容复制，粘贴到目标工具的 mcpServers 字段中即可。通过 env 的 key 认证，权限与所选 Key 绑定；脚本由 JC9 启动时释放到可执行文件同目录 mcp/ 下。</p>
                 </div>
               </details>
             </div>
@@ -1069,6 +1060,8 @@ async function compressMemories() {
                   <div v-for="ak in keys" :key="ak.id" class="api-key-item" style="display:flex;align-items:center;gap:8px;padding:5px 6px;font-size:11px;border:1px solid var(--jc-border-default);border-radius:4px;margin-bottom:3px">
                     <code style="color:var(--jc-color-success);font-size:10px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ ak.key }}</code>
                     <span style="color:var(--jc-text-highlight);font-size:10px;white-space:nowrap">{{ ak.label }}</span>
+                    <span v-if="ak.tools && ak.tools.length" style="font-size:10px;color:var(--jc-text-secondary);white-space:nowrap" :title="ak.tools.join(', ')">工具 {{ ak.tools.length }}/16</span>
+                    <span v-else style="font-size:10px;color:var(--jc-color-success);white-space:nowrap">全部工具</span>
                     <button class="mcp-copy-btn" @click="copyText(ak.key)" title="复制">复制</button>
                     <button class="btn-sm" @click="openEditApiKey(ak)">编辑</button>
                     <button class="btn-sm btn-danger" @click="removeApiKey(ak)">删除</button>
@@ -1105,11 +1098,35 @@ async function compressMemories() {
                   </div>
                   <span style="font-size:10px;color:var(--jc-text-secondary);margin-top:2px">{{ newApiKey.groupIds.length === 0 ? '空=访问所有分组' : '已选 ' + newApiKey.groupIds.length + ' 个根分组' }}</span>
                 </div>
-                <div class="form-actions" style="margin-top:8px">
-                  <button class="footer-btn-cancel" @click="showApiKeyForm = false">取消</button>
-                  <button class="footer-btn-save" @click="saveApiKey">{{ editingApiKeyId ? '保存' : '生成并添加' }}</button>
+                <div class="form-group">
+                  <label>工具权限（开关：开=允许该工具；默认全开=允许全部；颜色：<span class="risk-dot" style="background:#52c41a"></span>查询 <span class="risk-dot" style="background:#faad14"></span>中危 <span class="risk-dot" style="background:#ff4d4f"></span>危险）</label>
+                  <div class="mcp-tool-list" style="margin-top:4px">
+                    <template v-for="cat in mcpToolCategories" :key="cat">
+                      <div class="mcp-tool-cat">{{ cat }}</div>
+                      <div v-for="t in mcpToolOptions.filter(o => o.category === cat)" :key="t.name"
+                        class="mcp-tool-row"
+                        :title="t.description"
+                        @click="toggleApiKeyTool(t.name)">
+                        <span class="mcp-tool-toggle" :class="['risk-' + t.risk, { on: newApiKey.tools.includes(t.name) }]">
+                          <span class="mcp-tool-knob"></span>
+                        </span>
+                        <span class="mcp-tool-name">{{ t.label }}</span>
+                        <span class="mcp-tool-code">{{ t.name }}</span>
+                      </div>
+                    </template>
+                  </div>
+                  <span style="font-size:10px;color:var(--jc-text-secondary);margin-top:2px">{{ newApiKey.tools.length === 0 ? '全关 = 不限制（允许全部）' : '已选 ' + newApiKey.tools.length + ' 个工具' }}</span>
                 </div>
               </div>
+              <template #footer>
+                <template v-if="showApiKeyForm">
+                  <button class="footer-btn-cancel" @click="showApiKeyForm = false">取消</button>
+                  <button class="footer-btn-save" @click="saveApiKey">{{ editingApiKeyId ? '保存' : '生成并添加' }}</button>
+                </template>
+                <template v-else>
+                  <button class="footer-btn-cancel" @click="showApiKeyManager = false">关闭</button>
+                </template>
+              </template>
             </JcModal>
 
           <!-- 笔记分享服务器（独立端口配置） -->
@@ -1557,17 +1574,6 @@ async function compressMemories() {
 .mcp-config-preview {
   margin-top: 6px; background: var(--jc-bg-elevated); padding: 8px; border-radius: 4px;
   font-size: 10px; line-height: 1.6;
-  pre {
-    background: var(--jc-bg-input); padding: 6px; border-radius: 3px; overflow-x: auto;
-    white-space: pre-wrap; margin: 0; font-size: 10px;
-  }
-}
-.mcp-tpl-tabs { display: flex; gap: 4px; margin-bottom: 2px; }
-.mcp-tpl-tab {
-  background: var(--jc-bg-input); border: 1px solid var(--jc-border-default); color: var(--jc-text-secondary);
-  font-size: 10px; padding: 2px 8px; border-radius: 3px; cursor: pointer; transition: all 0.15s;
-  &:hover { border-color: var(--jc-color-accent); color: var(--jc-color-accent); }
-  &.active { background: rgba(138, 88, 255, 0.15); border-color: var(--jc-color-accent); color: var(--jc-color-accent); }
 }
 .mcp-key-text { max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
 .mcp-copy-btn { background: none; border: 1px solid var(--jc-border-default); color: var(--jc-text-secondary); font-size: 10px; padding: 1px 6px; border-radius: 3px; cursor: pointer; flex-shrink: 0; &:hover { border-color: var(--jc-color-accent); color: var(--jc-color-accent); } }
@@ -1576,6 +1582,13 @@ async function compressMemories() {
 .mcp-port-hint { font-size: 9px; color: var(--jc-text-secondary); }
 .mcp-group-chips { display:flex; flex-wrap:wrap; gap:4px; }
 .mcp-chip { font-size:10px; padding:2px 6px; border-radius:3px; background:var(--jc-bg-input); border:1px solid var(--jc-border-default); color:var(--jc-text-secondary); cursor:pointer; &.active { background:rgba(63,185,80,0.15); border-color:#3fb950; color:#3fb950; } &:hover { border-color:var(--jc-color-accent); } }
+.risk-dot { display:inline-block; width:8px; height:8px; border-radius:50%; vertical-align:middle; margin:0 2px 0 4px; }
+.mcp-tool-list { display:flex; flex-direction:column; gap:2px; max-height:220px; overflow-y:auto; padding:4px 6px; border:1px solid var(--jc-border-default); border-radius:4px; background:var(--jc-bg-input); }
+.mcp-tool-cat { font-size:10px; color:var(--jc-text-secondary); font-weight:600; margin:6px 0 2px; }
+.mcp-tool-row { display:flex; align-items:center; gap:8px; padding:3px 6px; border-radius:3px; cursor:pointer; &:hover { background:var(--jc-bg-elevated); } }
+.mcp-tool-name { font-size:11px; color:var(--jc-text-primary); flex-shrink:0; }
+.mcp-tool-code { font-size:9px; color:var(--jc-text-secondary); opacity:0.7; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mcp-tool-toggle { position:relative; width:28px; height:16px; border-radius:8px; background:var(--jc-bg-elevated); border:1px solid var(--jc-border-default); flex-shrink:0; transition:background 0.2s; .mcp-tool-knob { position:absolute; top:1px; left:1px; width:12px; height:12px; border-radius:50%; background:var(--jc-text-secondary); transition:left 0.2s, background 0.2s; } &.on { .mcp-tool-knob { left:13px; background:#fff; } } &.risk-safe.on { background:#52c41a; border-color:#52c41a; } &.risk-medium.on { background:#faad14; border-color:#faad14; } &.risk-danger.on { background:#ff4d4f; border-color:#ff4d4f; } }
 .mcp-config-actions { display: flex; gap: 6px; align-items: center; margin-top: 4px; }
 .mcp-start-btn { background: var(--jc-color-success); color: #fff; border: none; padding: 4px 14px; border-radius: 4px; font-size: 11px; font-weight: 600; cursor: pointer; &:hover { opacity: 0.9; } &:disabled { opacity: 0.5; cursor: not-allowed; } }
 .mcp-stop-btn { background: #f85149; color: #fff; border: none; padding: 4px 14px; border-radius: 4px; font-size: 11px; font-weight: 600; cursor: pointer; &:hover { opacity: 0.9; } &:disabled { opacity: 0.5; cursor: not-allowed; } }

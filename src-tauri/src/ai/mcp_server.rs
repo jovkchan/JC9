@@ -111,16 +111,7 @@ impl McpServer {
         let host = config.host.clone();
         let start_port = config.port;
 
-        // 从数据库加载 API Keys
-        let api_keys = if let Some(ref db) = self.db_conn {
-            db_list_keys(db).unwrap_or_else(|e| {
-                println!("⚠️  加载 API Keys 失败: {}", e);
-                vec![]
-            })
-        } else {
-            vec![]
-        };
-        println!("🔑 加载了 {} 个 API Key", api_keys.len());
+        // API Keys 采用动态管理：每次请求实时从数据库读取（设置面板改 Key 立即生效，无需重启）
 
         // 尝试绑定端口：从配置端口开始，失败则 +1 重试，最多试 10 个
         let max_attempts = 10;
@@ -166,7 +157,6 @@ impl McpServer {
             knowledge_base: kb,
             db_conn: db,
             sse_clients,
-            api_keys: Arc::new(RwLock::new(api_keys)),
             app_handle,
         });
 
@@ -216,7 +206,6 @@ pub struct AppState {
     pub knowledge_base: Option<Arc<KnowledgeBase>>,
     pub db_conn: Option<Arc<std::sync::Mutex<Connection>>>,
     pub sse_clients: Arc<RwLock<HashMap<String, mpsc::Sender<Result<Event, String>>>>>,
-    pub api_keys: Arc<RwLock<Vec<ApiKeyRecord>>>,
     pub app_handle: Option<AppHandle>,
 }
 
@@ -224,6 +213,7 @@ pub struct AppState {
 struct RequestContext {
     group_ids: Vec<String>,  // 此请求的隔离分组（空=不过滤，用全局）
     scope: String,           // 此请求的 scope（用于记忆隔离）
+    tools: Vec<String>,      // 此请求允许的工具白名单（空=全部允许）
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -262,6 +252,14 @@ fn check_auth(headers: &HeaderMap, params: &HashMap<String, String>, api_keys: &
     None
 }
 
+/// 动态加载 API Keys：每次请求实时从数据库读取，设置面板改 Key 立即生效（无需重启）
+fn load_api_keys(state: &Arc<AppState>) -> Vec<ApiKeyRecord> {
+    match state.db_conn.as_ref() {
+        Some(db) => db_list_keys(db).unwrap_or_default(),
+        None => vec![],
+    }
+}
+
 // ══════════════════════════════════════════════════════════════
 // SSE 端点
 // ══════════════════════════════════════════════════════════════
@@ -271,7 +269,7 @@ async fn handle_sse(
     headers: HeaderMap,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, String>>>, StatusCode> {
-    if check_auth(&headers, &params, &state.api_keys.read().await).is_none() {
+    if check_auth(&headers, &params, &load_api_keys(&state)).is_none() {
         return Err(StatusCode::UNAUTHORIZED);
     }
     let client_id = uuid::Uuid::new_v4().to_string();
@@ -306,9 +304,9 @@ async fn handle_message(
     Query(params): Query<HashMap<String, String>>,
     Json(body): Json<serde_json::Value>,
 ) -> (StatusCode, Json<Value>) {
-    // 动态认证：匹配请求 key → 获取其 group_ids + scope
+    // 动态认证：每次请求实时从数据库读取 Key（改 Key 立即生效）
     let auth = {
-        let keys = state.api_keys.read().await;
+        let keys = load_api_keys(&state);
         check_auth(&headers, &params, &keys)
     };
     if auth.is_none() {
@@ -318,6 +316,7 @@ async fn handle_message(
     let ctx = RequestContext {
         group_ids: ak.group_ids,
         scope: ak.scope,
+        tools: ak.tools,
     };
     let msg: McpMessage = match serde_json::from_value(body) {
         Ok(m) => m,
@@ -554,6 +553,16 @@ async fn handle_tools_list() -> Result<Value, String> {
 async fn handle_tools_call(state: &Arc<AppState>, ctx: &RequestContext, msg: &McpMessage) -> Result<Value, String> {
     let params = msg.params.as_ref().ok_or("缺少参数")?;
     let tool_name = params["name"].as_str().ok_or("缺少工具名称")?;
+
+    // 工具白名单校验：ctx.tools 非空时，仅允许列表内的工具
+    if !ctx.tools.is_empty() && !ctx.tools.iter().any(|t| t == tool_name) {
+        return Err(format!(
+            "当前 API Key 未授权调用工具: {}（仅允许: {}）",
+            tool_name,
+            ctx.tools.join(", ")
+        ));
+    }
+
     let args = params["arguments"].clone();
     let args = if args.is_null() { json!({}) } else { args };
 
@@ -1408,14 +1417,14 @@ pub async fn run_stdio_server() -> Result<(), String> {
         knowledge_base: Some(kb),
         db_conn: Some(db_conn),
         sse_clients: Arc::new(RwLock::new(HashMap::new())),
-        api_keys: Arc::new(RwLock::new(vec![])),
         app_handle: None,
     });
 
-    // 使用 Key 绑定的 scope + 分组白名单做权限隔离（与 SSE/HTTP 完全一致）
+    // 使用 Key 绑定的 scope + 分组白名单 + 工具白名单做权限隔离（与 SSE/HTTP 完全一致）
     let ctx = RequestContext {
         group_ids: record.group_ids,
         scope: record.scope,
+        tools: record.tools,
     };
 
     eprintln!("🧠 JC9 MCP (stdio) 已启动（scope={:?} 分组={:?}），等待 stdin...", ctx.scope, ctx.group_ids);

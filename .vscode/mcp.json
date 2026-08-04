@@ -1,8 +1,25 @@
 {
 	"servers": {
-		"jc9": {
-			"type": "http",
-			"url": "http://127.0.0.1:19799/sse?api_key=d67be810cc68ee7db15be823ba7dbbf8"
-		}
+		 "jc9": {
+      "command": "node",
+      "args": [
+        "D:\\code\\qidong\\JC9\\src-tauri\\target\\debug\\mcp\\jc9-mcp.mjs"
+      ],
+      "env": {
+        "key": "2e9efe911b34e556d285fcf4dfe42067"
+      }
+    },
+    "jc9-sse": {
+      "url": "http://127.0.0.1:19799/sse",
+      "headers": {
+        "Authorization": "Bearer 2e9efe911b34e556d285fcf4dfe42067"
+      }
+    },
+    "jc9-http": {
+      "url": "http://127.0.0.1:19799/message",
+      "headers": {
+        "Authorization": "Bearer 2e9efe911b34e556d285fcf4dfe42067"
+      }
+    }
 	}
 }
