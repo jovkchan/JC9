@@ -11,6 +11,7 @@ import JcModal from '@/components/ui/JcModal.vue'
 import JcInput from '@/components/ui/JcInput.vue'
 import JcSelect from '@/components/ui/JcSelect.vue'
 import JcTextarea from '@/components/ui/JcTextarea.vue'
+import JcBorderBeam from '@/components/ui/JcBorderBeam.vue'
 import { useEffectConfig } from '@/stores/effectConfig'
 
 const formatOptions = [
@@ -881,12 +882,21 @@ async function compressMemories() {
           <!-- 效果预览卡片：实时展示 JC 组件流光/光晕 -->
           <div class="effects-preview-card">
             <div class="effects-card-title">🎬 效果预览（实时）</div>
-            <div class="effects-preview-grid">
-              <JcInput beam glow placeholder="输入框 · 聚焦查看" />
-              <JcSelect beam glow :model-value="'option'" :options="[{ label: '选择器', value: 'option' }]" />
-              <JcTextarea beam glow class="span-2" :rows="2" placeholder="多行文本 · 聚焦查看" />
-            </div>
-            <div class="effects-preview-hint">聚焦任一组件即可查看边框流光 + 内部光晕</div>
+            <!-- 带效果的卡片：流光卡片包容组件，整体展示边框流光 + 内部光晕 -->
+            <JcBorderBeam glow trigger="always" :size-ratio="0.35">
+              <div class="effects-card-demo">
+                <div class="effects-card-demo-head">
+                  <span class="effects-card-demo-title">流光卡片</span>
+                  <span class="effects-card-demo-sub">边框流光 + 内部光晕 · 组件包容在内</span>
+                </div>
+                <div class="effects-preview-grid">
+                  <JcInput beam glow placeholder="输入框 · 聚焦查看" />
+                  <JcSelect beam glow :model-value="'option'" :options="[{ label: '选择器', value: 'option' }]" />
+                  <JcTextarea beam glow class="span-2" :rows="2" placeholder="多行文本 · 聚焦查看" />
+                </div>
+              </div>
+            </JcBorderBeam>
+            <div class="effects-preview-hint">查看卡片内组件，体验边框流光 + 内部光晕</div>
           </div>
 
           <div class="effects-card">
@@ -1791,7 +1801,6 @@ async function compressMemories() {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
-  margin-top: 8px;
   .span-2 { grid-column: span 2; }
 }
 .effects-preview-hint {
@@ -1799,6 +1808,31 @@ async function compressMemories() {
   color: var(--jc-text-secondary);
   opacity: 0.8;
   margin-top: 8px;
+}
+/* 带效果卡片：JcBorderBeam 注入宿主（流光层自带 overflow:hidden 自裁，宿主无需裁剪）；包容组件整体演示 */
+.effects-card-demo {
+  position: relative;
+  border-radius: 12px;
+  background: var(--jc-bg-panel);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+.effects-card-demo-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.effects-card-demo-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--jc-text-highlight);
+}
+.effects-card-demo-sub {
+  font-size: 11px;
+  color: var(--jc-text-secondary);
 }
 
 // 分页

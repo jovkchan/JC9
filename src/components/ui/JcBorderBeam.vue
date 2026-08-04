@@ -131,8 +131,9 @@ const beamStyle = computed(() => {
     '--jc-bb-anim': props.beamAccelerate ? 'jc-beam-move-acc' : 'var(--jc-beam-anim, jc-beam-move)',
     // 内部光晕：与流光共用 --jc-bb-inset（同 box → 同 offset-path → 位置严格同步），blur 向内部晕染；
     // 光晕 = 流光 + 两端各 4px 淡出泛光（宽度/锚点由 glowSize/glowAnchor 决定）
-    '--jc-glow-blur': props.glowBlur !== undefined ? unit(props.glowBlur) : 'var(--jc-glow-blur, 6px)',
-    '--jc-glow-opacity': props.glowOpacity !== undefined ? String(props.glowOpacity) : 'var(--jc-glow-opacity, 0.65)',
+    // 未显式传参时不输出 --jc-glow-blur/--jc-glow-opacity（避免自引用 var 循环写死 fallback），继承 <html> 全局值
+    ...(props.glowBlur !== undefined ? { '--jc-glow-blur': unit(props.glowBlur) } : {}),
+    ...(props.glowOpacity !== undefined ? { '--jc-glow-opacity': String(props.glowOpacity) } : {}),
     '--jc-glow-size': `${glowSize}px`,
     '--jc-glow-anchor': glowAnchor,
     ...(glowGradient.value ? { '--jc-glow-gradient': glowGradient.value } : {}),

@@ -148,8 +148,10 @@ export function useBeam(opts: UseBeamOptions) {
       '--jc-beam-duration': duration !== undefined ? `${duration}s` : beamDurationRef.value,
       ...(glow
         ? {
-            '--jc-glow-blur': blur !== undefined ? unit(blur) : 'var(--jc-glow-blur, 6px)',
-            '--jc-glow-opacity': glowOpacity !== undefined ? String(glowOpacity) : 'var(--jc-glow-opacity, 0.65)',
+            // 未显式传参时不输出 --jc-glow-blur/--jc-glow-opacity（避免自引用 var 循环写死 fallback），
+            // 让光晕层继承 <html> 上的全局值（设置 → 动画效果 → 光晕大小/透明度）
+            ...(blur !== undefined ? { '--jc-glow-blur': unit(blur) } : {}),
+            ...(glowOpacity !== undefined ? { '--jc-glow-opacity': String(glowOpacity) } : {}),
             '--jc-glow-size': `${glowSize}px`,
             '--jc-glow-anchor': `${((0.9 * size + glowPad) / glowSize) * 100}%`,
             ...(glowGradient.value ? { '--jc-glow-gradient': glowGradient.value } : {}),
