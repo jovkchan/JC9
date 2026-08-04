@@ -8,18 +8,6 @@
       "env": {
         "key": "2e9efe911b34e556d285fcf4dfe42067"
       }
-    },
-    "jc9-sse": {
-      "url": "http://127.0.0.1:19799/sse",
-      "headers": {
-        "Authorization": "Bearer 2e9efe911b34e556d285fcf4dfe42067"
-      }
-    },
-    "jc9-http": {
-      "url": "http://127.0.0.1:19799/message",
-      "headers": {
-        "Authorization": "Bearer 2e9efe911b34e556d285fcf4dfe42067"
-      }
     }
 	}
 }
