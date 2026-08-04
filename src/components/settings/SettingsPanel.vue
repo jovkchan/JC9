@@ -1327,11 +1327,16 @@ async function compressMemories() {
 **Why**: 为什么
 **Where**: 涉及文件
 **Learned**: 踩坑记录" style="margin-top:6px" />
-                  <div style="display:flex;gap:6px;margin-top:8px;justify-content:flex-end">
-                    <button class="footer-btn-cancel" @click="closeMemoryModal">取消</button>
-                    <button class="footer-btn-save" @click="saveMemory">{{ memoryForm.id ? '更新' : '创建' }}</button>
-                  </div>
                 </div>
+              </template>
+              <template #footer>
+                <template v-if="memoryModalMode === 'edit'">
+                  <button class="footer-btn-cancel" @click="closeMemoryModal">取消</button>
+                  <button class="footer-btn-save" @click="saveMemory">{{ memoryForm.id ? '更新' : '创建' }}</button>
+                </template>
+                <template v-else>
+                  <button class="footer-btn-cancel" @click="closeMemoryModal">关闭</button>
+                </template>
               </template>
             </JcModal>
         </div>

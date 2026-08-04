@@ -368,8 +368,11 @@ onUnmounted(() => { destroy() })
     <JcModal v-model:open="showBrowserDialog" title="🌐 打开浏览器" width="440">
       <div class="browser-modal-body">
         <input v-model="browserUrlInput" class="browser-url-input" placeholder="输入 URL..." @keyup.enter="handleBrowserConfirm" @click.stop />
-        <button class="browser-go-btn" @click="handleBrowserConfirm">打开</button>
       </div>
+      <template #footer>
+        <button class="footer-btn-cancel" @click="showBrowserDialog = false">取消</button>
+        <button class="footer-btn-save" @click="handleBrowserConfirm">打开</button>
+      </template>
     </JcModal>
 
     <!-- ═══ Approval Overlay ═══ -->
