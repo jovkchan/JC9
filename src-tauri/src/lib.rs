@@ -172,6 +172,14 @@ fn get_db_path() -> Result<String, String> {
     database::get_db_path().map(|p| p.to_string_lossy().to_string())
 }
 
+/// 返回当前可执行文件绝对路径（供 Stdio MCP 配置模板的 command 使用）
+#[tauri::command]
+fn get_current_exe() -> Result<String, String> {
+    std::env::current_exe()
+        .map(|p| p.to_string_lossy().to_string())
+        .map_err(|e| e.to_string())
+}
+
 /// 诊断：返回完整数据库状态 JSON
 #[allow(dead_code)]
 #[tauri::command]
@@ -1426,6 +1434,41 @@ async fn ai_reconnect_mcp_servers(
 // JC9 MCP Server 管理命令（让其他 AI Agent 连接）
 // ══════════════════════════════════════════════════════════════
 
+/// 准备 MCP stdio 代理脚本：把内嵌模板释放到 exe 同目录 mcp/ 下，
+/// 并动态写入当前 MCP Server 的实际地址（host:port，端口被占时已自动 +1）。
+/// 返回释放后脚本的绝对路径（供外部 MCP 客户端以 `node <脚本>` 方式接入）。
+#[tauri::command]
+async fn ai_prepare_mcp_script(state: State<'_, Mutex<AppState>>) -> Result<String, String> {
+    // 当前 MCP Server 实际地址（先取出引用再 await，避免 std MutexGuard 跨 await）
+    let base_url = {
+        let mcp_server = {
+            let app_state = state.lock().map_err(|e| e.to_string())?;
+            app_state.mcp_server.clone()
+        };
+        let server = mcp_server.lock().await;
+        let cfg = server.get_config().await;
+        format!("http://{}:{}", cfg.host, cfg.port)
+    };
+
+    // 目标：exe 同目录下的 mcp/ 子目录（与 vec0.dll 释放位置同级）
+    let exe_dir = std::env::current_exe()
+        .map_err(|e| format!("无法定位可执行文件: {}", e))?
+        .parent()
+        .map(|p| p.to_path_buf())
+        .ok_or_else(|| "无法定位可执行文件目录".to_string())?;
+    let target_dir = exe_dir.join("mcp");
+    std::fs::create_dir_all(&target_dir).map_err(|e| format!("创建 mcp 目录失败: {}", e))?;
+    let target_path = target_dir.join("jc9-mcp.mjs");
+
+    // 内嵌模板 → 动态替换地址占位符 → 写入
+    let template = include_str!("../../scripts/jc9-mcp.mjs");
+    let script = template.replace("__JC9_MCP_BASE_URL__", &base_url);
+    std::fs::write(&target_path, script).map_err(|e| format!("写入 MCP 脚本失败: {}", e))?;
+
+    println!("📦 已释放 MCP stdio 脚本到 {}（地址 {}）", target_path.display(), base_url);
+    Ok(target_path.to_string_lossy().to_string())
+}
+
 /// 获取 MCP Server 配置
 #[tauri::command]
 async fn ai_get_mcp_server_config(state: State<'_, Mutex<AppState>>) -> Result<ai::mcp_server::McpServerConfig, String> {
@@ -2051,6 +2094,17 @@ fn resolve_asset_path(url: String) -> Result<String, String> {
     Ok(file_path.to_string_lossy().to_string())
 }
 
+/// 以 stdio 模式运行内置 MCP Server（供外部 MCP 客户端接入笔记/记忆）。
+/// 不启动 GUI，通过 stdin/stdout 以逐行 JSON-RPC 通信。
+/// 由 `jc9 mcp` 子命令触发（见 main.rs）。
+pub fn run_mcp_stdio() {
+    let rt = tokio::runtime::Runtime::new().expect("创建 tokio runtime 失败");
+    if let Err(e) = rt.block_on(ai::mcp_server::run_stdio_server()) {
+        eprintln!("❌ MCP stdio server 错误: {}", e);
+        std::process::exit(1);
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let db = Database::new().expect("无法初始化数据库");
@@ -2413,6 +2467,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_db_path,
+            get_current_exe,
             db_debug,
             get_startup_logs,
             get_ai_config,
@@ -2511,6 +2566,7 @@ pub fn run() {
             ai_start_mcp_server,
             ai_stop_mcp_server,
             ai_get_mcp_server_status,
+            ai_prepare_mcp_script,
             ai_reindex_knowledge,
             mcp_list_api_keys,
             mcp_add_api_key,

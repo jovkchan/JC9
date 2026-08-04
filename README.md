@@ -21,7 +21,7 @@
    - **多模式对话**：支持 CRAFT（全执行）/ ASK（只读问答）/ PLAN（规划模式）三种 Chat Mode，以及多会话管理、自动命名与历史持久化。
 -  **富文本笔记编辑器**：基于 TipTap / Yiitap 移植的强大 WYSIWYG 编辑器，支持 Markdown / 纯文本 / 富文本多模式，含增强表格（合并拆分 / 底色 / 列宽）、Mermaid 图表、KaTeX 公式、图片、Callout、多列布局、版本历史（50 条快照）与撤销恢复、笔记链接（`jclink://`）与在线分享。
 -  **本地记忆与知识库**：SQLite + sqlite-vec 本地向量库，混合语义搜索（向量 + FTS5 全文），支持笔记自动同步入库、Agent 记忆沉淀（`jc9_memory_*`）、按项目 scope 隔离与记忆压缩。
--  **内置 MCP Server**：自带 MCP Server（`127.0.0.1:19799`，SSE + Bearer Token），暴露文件操作与知识库操作工具，支持外部 MCP 客户端连接；同时内置 MCP 客户端可接入第三方 MCP 服务器。
+-  **内置 MCP Server**：自带 MCP Server，暴露笔记与记忆操作工具，支持 **SSE**（`127.0.0.1:18899` + Bearer Token）与 **Stdio**（`node <释放的 jc9-mcp.mjs>`，运行时内嵌释放）两种方式被外部 MCP 客户端（Claude Desktop / VS Code 等）接入；同时内置 MCP 客户端可接入第三方 MCP 服务器。
 -  **积木式自动化编辑器**：可视化 Canvas 拖拽编程，通过「开始 / 命令 / 条件 / 延迟 / 变量设置 / 结束」等积木块连线编排自动化工作流，支持 50 步撤销 / 重做、主题感知渲染与端口连线校验。
 -  **自研可移植 UI 组件库**：`src/components/ui` 下自研一套对齐 Ant Design 设计规范（色彩 / 字体 / 8px 布局 / 暗黑模式 / 三级阴影）的 `Jc*` 组件体系（按钮 / 输入 / 选择 / 弹窗 / 右键菜单 / Toast 等 20+ 组件），全项目工具与表单已统一收编。
 
@@ -151,10 +151,49 @@ npx tauri build
 
 ### 🔌 内置 MCP Server
 
-- 运行于 `127.0.0.1:19799`（默认），SSE 传输 + Bearer Token 认证（自动生成）
-- 暴露 12 个工具：文件操作（6）+ 知识库操作（6）
+- 暴露 **16 个工具**：笔记操作（8）+ 记忆操作（6）+ 诊断（2），让外部 AI 读写 JC9 的笔记与记忆
+- 支持两种标准传输（对齐 MCP 接入配置规范）：**Stdio**（`command`/`args`/`env`）与 **SSE**（`url`/`headers`），均不含 `type` 字段
+- **Stdio 方式**：`command`=`node`、`args` 指向**运行时释放的 `jc9-mcp.mjs`**（内嵌模板 → exe 同目录 `mcp/`，自动写入当前地址/端口），`env` 传 `key`；通过内置 MCP Server 读写笔记/记忆（需 JC9 运行中）
+- **SSE 方式**：`http://127.0.0.1:18899/sse`（事件流）+ `http://127.0.0.1:18899/message`（同协议 HTTP POST 端点），`headers` 走 Bearer Token
+- 三种端点均使用 API Key 做认证与权限隔离（scope + 分组白名单）；server 命名采用 kebab-case（`jc9` / `jc9-sse`）
 - 知识库按 `project:{id}` 分组隔离；配置存 `settings` 表 `mcp_server_config` KV
 - 笔记 CRUD 后通过 `notes:changed` 事件实时同步前端
+
+外部工具接入示例（对齐 MCP 接入配置规范，如 VS Code 的 mcp.json / Claude Desktop）：
+
+**方式一：Stdio（本地进程，推荐）**
+
+```json
+{
+  "mcpServers": {
+    "jc9": {
+      "command": "node",
+      "args": ["D:/code/qidong/JC9/src-tauri/target/release/mcp/jc9-mcp.mjs"],
+      "env": {
+        "key": "在设置 → MCP → API Key 管理中生成"
+      }
+    }
+  }
+}
+```
+
+> `jc9-mcp.mjs` 由 JC9 启动时从内嵌模板释放到可执行文件同目录的 `mcp/` 下，并自动写入当前 MCP Server 的实际地址（端口被占会自动 +1，释放文件随之更新）。
+
+**方式二：SSE（远程 URL）**
+
+```json
+{
+  "mcpServers": {
+    "jc9-sse": {
+      "url": "http://127.0.0.1:18899/sse",
+      "headers": {
+        "Authorization": "Bearer 在设置 → MCP → API Key 管理中生成"
+      }
+    }
+  }
+}
+```
+```
 
 ### 🎨 自研 UI 组件库
 

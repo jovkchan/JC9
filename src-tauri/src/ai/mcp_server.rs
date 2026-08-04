@@ -19,11 +19,13 @@ use futures_util::stream::Stream;
 use rusqlite::{params, Connection};
 use tower_http::cors::CorsLayer;
 use tauri::{AppHandle, Emitter};
+use tokio::io::{AsyncBufReadExt, BufReader};
 
 use super::mcp_types::*;
 use super::knowledge_base::KnowledgeBase;
 use super::types::*;
 use super::mcp_api_keys::{ApiKeyRecord, list_keys as db_list_keys};
+use crate::database;
 
 // ══════════════════════════════════════════════════════════════
 // MCP Server 配置
@@ -1370,4 +1372,116 @@ async fn cmd_memory_compress(state: &Arc<AppState>, args: &Value) -> Result<Valu
         kb.add_entry(KbEntry { id: format!("memory_{}", mid), title: "记忆压缩".into(), content: mc, entry_type: KbEntryType::ConfigNote, tags: vec!["memory".into(),"compressed".into()], source_session: None, confidence: 1.0, is_draft: false, created_at: Utc::now(), updated_at: Utc::now(), embedding: None }).await;
     });
     Ok(json!({"content":[{"type":"text","text":format!("✅ 已压缩 {} 条记忆 → {}", ids.len(), new_id)}],"id":new_id}))
+}
+
+// ══════════════════════════════════════════════════════════════
+// Stdio 传输 — 供外部 MCP 客户端（Claude Desktop / VS Code 等）
+// 通过 command/args 方式启动接入，读写 JC9 的笔记与记忆
+// 用法：jc9 mcp   （stdin/stdout 逐行 JSON-RPC 通信）
+// ══════════════════════════════════════════════════════════════
+
+/// 运行 MCP stdio 服务器（阻塞直到 stdin 关闭）。
+/// 复用与 HTTP/SSE 模式完全相同的笔记/记忆工具逻辑，
+/// 但以新行分隔的 JSON-RPC 在标准输入/输出上通信。
+pub async fn run_stdio_server() -> Result<(), String> {
+    // 认证：必须通过 env key 传入，与 SSE/HTTP 使用同一份 API Key（含权限隔离）。
+    // 优先读 `key`（社区 stdio 配置标准），兼容旧名 `JC9_MCP_KEY`。
+    let key = std::env::var("key")
+        .or_else(|_| std::env::var("JC9_MCP_KEY"))
+        .map_err(|_| {
+        "未设置 key 环境变量。请先在 JC9 设置 → MCP → API Key 管理中生成一个 Key，\
+         并在外部工具配置的 env 中填入 key。".to_string()
+    })?;
+
+    // 初始化数据库与知识库（与 GUI 模式共用同一份数据）
+    let db = database::Database::new().map_err(|e| format!("数据库初始化失败: {}", e))?;
+    let db_conn = db.conn.clone();
+
+    // 校验 Key 并获取其权限（scope + 分组白名单）
+    let record = super::mcp_api_keys::get_key_by_value(&db_conn, &key)?
+        .ok_or_else(|| {
+            "无效的 key：该 Key 不存在或已被删除。请在 JC9 设置的 API Key 管理中重新生成。".to_string()
+        })?;
+
+    let kb = Arc::new(KnowledgeBase::new(db_conn.clone()));
+    let state = Arc::new(AppState {
+        knowledge_base: Some(kb),
+        db_conn: Some(db_conn),
+        sse_clients: Arc::new(RwLock::new(HashMap::new())),
+        api_keys: Arc::new(RwLock::new(vec![])),
+        app_handle: None,
+    });
+
+    // 使用 Key 绑定的 scope + 分组白名单做权限隔离（与 SSE/HTTP 完全一致）
+    let ctx = RequestContext {
+        group_ids: record.group_ids,
+        scope: record.scope,
+    };
+
+    eprintln!("🧠 JC9 MCP (stdio) 已启动（scope={:?} 分组={:?}），等待 stdin...", ctx.scope, ctx.group_ids);
+
+    let stdin = tokio::io::stdin();
+    let mut reader = BufReader::new(stdin).lines();
+
+    while let Some(line) = reader.next_line().await.map_err(|e| format!("读取 stdin 失败: {}", e))? {
+        let line = line.trim();
+        if line.is_empty() { continue; }
+
+        let msg: McpMessage = match McpMessage::from_json(line) {
+            Ok(m) => m,
+            Err(e) => {
+                let body = json!({"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":format!("JSON 解析错误: {}", e)}});
+                write_stdio(&body.to_string())?;
+                continue;
+            }
+        };
+
+        let method = msg.method.as_deref().unwrap_or("");
+        let msg_id = msg.id;
+
+        let result = match method {
+            "initialize" => Ok(json!({"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"jc9-mcp-server","version":"1.0.0"}})),
+            "ping" => Ok(json!({})),
+            "tools/list" => handle_tools_list().await,
+            "tools/call" => handle_tools_call(&state, &ctx, &msg).await,
+            _ => {
+                if let Some(id) = msg_id {
+                    let body = json!({"jsonrpc":"2.0","id":id,"error":{"code":-32601,"message":format!("未知方法:{}", method)}});
+                    write_stdio(&body.to_string())?;
+                }
+                continue;
+            }
+        };
+
+        match result {
+            Ok(response) => {
+                let body = if let Some(id) = msg_id {
+                    json!({"jsonrpc":"2.0","id":id,"result":response})
+                } else {
+                    json!({"jsonrpc":"2.0"})
+                };
+                write_stdio(&body.to_string())?;
+            }
+            Err(err_msg) => {
+                let body = if let Some(id) = msg_id {
+                    json!({"jsonrpc":"2.0","id":id,"error":{"code":-32000,"message":err_msg}})
+                } else {
+                    json!({"jsonrpc":"2.0"})
+                };
+                write_stdio(&body.to_string())?;
+            }
+        }
+    }
+
+    eprintln!("🧠 JC9 MCP (stdio) 已退出（stdin 关闭）");
+    Ok(())
+}
+
+/// 写一行 JSON 到 stdout 并刷新（UTF-8）
+fn write_stdio(line: &str) -> Result<(), String> {
+    use std::io::Write;
+    let mut out = std::io::stdout();
+    out.write_all(line.as_bytes()).map_err(|e| format!("写入 stdout 失败: {}", e))?;
+    out.write_all(b"\n").map_err(|e| format!("写入 stdout 失败: {}", e))?;
+    out.flush().map_err(|e| format!("刷新 stdout 失败: {}", e))
 }

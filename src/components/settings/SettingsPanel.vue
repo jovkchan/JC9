@@ -60,6 +60,8 @@ onMounted(async () => {
   await loadMcpServerStatus()
   await loadNoteShareConfig()
   await loadNoteShareStatus()
+  // 释放 MCP stdio 代理脚本（内嵌模板 → exe 同目录 mcp/，自动写入当前地址/端口）
+  await refreshMcpScript()
 })
 
 const win = getCurrentWindow()
@@ -283,6 +285,10 @@ const mcpPortInput = ref('18899')
 const mcpServerMsg = ref('')
 const mcpLoading = ref(false)
 
+// ── 配置模板（SSE / HTTP / Stdio 三种接入方式）──
+const mcpScriptPath = ref('')
+const mcpTemplateMode = ref<'sse' | 'http' | 'stdio'>('sse')
+
 // ── 笔记分享服务 ──
 const noteShareRunning = ref(false)
 const noteSharePortInput = ref('8899')
@@ -472,21 +478,56 @@ async function stopMcpServer() {
 
 // (regenerateMcpKey removed — keys managed independently via add/edit/delete)
 
-function handleConfigExpand(e: Event) {
-  const details = e.target as HTMLDetailsElement
-  if (details?.open) loadMcpServerStatus()
+// 基于当前 exe 路径动态释放 MCP stdio 代理脚本并返回其绝对路径
+async function refreshMcpScript() {
+  try { mcpScriptPath.value = await invoke<string>('ai_prepare_mcp_script') } catch { /* 忽略 */ }
 }
 
+function handleConfigExpand(e: Event) {
+  const details = e.target as HTMLDetailsElement
+  if (details?.open) {
+    loadMcpServerStatus()
+    // 展开配置模板时基于当前 exe 路径刷新脚本地址（端口/地址变化会重新写入）
+    refreshMcpScript()
+  }
+}
+
+const mcpTemplateHint = computed(() => {
+  switch (mcpTemplateMode.value) {
+    case 'sse': return '标准 SSE 传输：客户端连 /sse 拉事件流 + POST /message 发请求（url + headers，需 API Key）'
+    case 'http': return '同协议的 HTTP 端点：直接 POST /message（JSON-RPC over HTTP，url + headers，需 API Key）'
+    case 'stdio': return '标准 Stdio 传输：command=node、args 指向释放的 jc9-mcp.mjs（启动时自动写入当前地址/端口），env 传 key（对齐 MCP 接入规范）'
+    default: return ''
+  }
+})
+
 const mcpConfigPreview = computed(() => {
+  const base = mcpServerUrl.value || 'http://127.0.0.1:18899'
   const key = showMcpKey.value ? (mcpApiKeys.value[0]?.key ?? '') : 'YOUR_API_KEY'
-  return JSON.stringify({
-    mcpServers: {
-      jc9: {
-        type: 'http',
-        url: `${mcpServerUrl.value}/sse?api_key=${key}`
-      }
+  const headers = { Authorization: `Bearer ${key}` }
+  switch (mcpTemplateMode.value) {
+    case 'http':
+      return JSON.stringify({
+        mcpServers: {
+          'jc9-http': { url: `${base}/message`, headers }
+        }
+      }, null, 2)
+    case 'stdio': {
+      const scriptPath = mcpScriptPath.value || '<释放的 jc9-mcp.mjs 绝对路径>'
+      return JSON.stringify({
+        mcpServers: {
+          jc9: { command: 'node', args: [scriptPath], env: { key } }
+        }
+      }, null, 2)
     }
-  }, null, 2)
+    case 'sse':
+    default:
+      return JSON.stringify({
+        mcpServers: {
+          'jc9-sse': { url: `${base}/sse`, headers }
+        }
+      }, null, 2)
+  }
 })
 
 function copyMcpConfigJson() {
@@ -992,16 +1033,21 @@ async function compressMemories() {
                 <input v-model="mcpPortInput" class="mcp-port-input" type="number" min="1024" max="65535" @change="mcpPortInput = Math.max(1024, Math.min(65535, Number(mcpPortInput) || 18899)).toString()" />
               </div>
 
-              <!-- 第3行：配置模板 -->
+              <!-- 第3行：配置模板（SSE / HTTP / Stdio 三种接入方式）-->
               <details class="mcp-config-details" @toggle="handleConfigExpand">
                 <summary>
                   配置模板（点击展开）
                   <button class="mcp-copy-btn" @click.stop.prevent="copyMcpConfigJson" title="复制配置 JSON">复制</button>
                 </summary>
                 <div class="mcp-config-preview">
-                  <p style="margin:0 0 4px;font-size:10px"><b>VS Code / Cline 配置：</b></p>
+                  <div class="mcp-tpl-tabs">
+                    <button :class="['mcp-tpl-tab', { active: mcpTemplateMode === 'sse' }]" @click="mcpTemplateMode = 'sse'">SSE</button>
+                    <button :class="['mcp-tpl-tab', { active: mcpTemplateMode === 'http' }]" @click="mcpTemplateMode = 'http'">HTTP</button>
+                    <button :class="['mcp-tpl-tab', { active: mcpTemplateMode === 'stdio' }]" @click="mcpTemplateMode = 'stdio'">Stdio</button>
+                  </div>
+                  <p style="margin:6px 0 4px;font-size:10px"><b>VS Code / Cline / Claude Desktop 配置：</b>{{ mcpTemplateHint }}</p>
                   <pre>{{ mcpConfigPreview }}</pre>
-                  <p style="margin:4px 0 0;font-size:10px;color:var(--jc-text-secondary)">将以上 JSON 添加到目标工具的 MCP 配置文件中即可连接。</p>
+                  <p style="margin:4px 0 0;font-size:10px;color:var(--jc-text-secondary)">将以上 JSON 添加到目标工具的 mcpServers 字段即可连接（对齐 MCP 接入配置规范：stdio 用 command/args/env，SSE 用 url/headers，均不含 type）。三种方式都需 API Key：SSE/HTTP 走 headers 的 Bearer Token，Stdio 走 env 的 key；权限与所选 Key 绑定。</p>
                 </div>
               </details>
             </div>
@@ -1515,6 +1561,13 @@ async function compressMemories() {
     background: var(--jc-bg-input); padding: 6px; border-radius: 3px; overflow-x: auto;
     white-space: pre-wrap; margin: 0; font-size: 10px;
   }
+}
+.mcp-tpl-tabs { display: flex; gap: 4px; margin-bottom: 2px; }
+.mcp-tpl-tab {
+  background: var(--jc-bg-input); border: 1px solid var(--jc-border-default); color: var(--jc-text-secondary);
+  font-size: 10px; padding: 2px 8px; border-radius: 3px; cursor: pointer; transition: all 0.15s;
+  &:hover { border-color: var(--jc-color-accent); color: var(--jc-color-accent); }
+  &.active { background: rgba(138, 88, 255, 0.15); border-color: var(--jc-color-accent); color: var(--jc-color-accent); }
 }
 .mcp-key-text { max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
 .mcp-copy-btn { background: none; border: 1px solid var(--jc-border-default); color: var(--jc-text-secondary); font-size: 10px; padding: 1px 6px; border-radius: 3px; cursor: pointer; flex-shrink: 0; &:hover { border-color: var(--jc-color-accent); color: var(--jc-color-accent); } }

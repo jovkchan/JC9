@@ -4,6 +4,7 @@ version = "1.0.0"
 description = "jc9 项目管理器"
 authors = ["jovkchan"]
 edition = "2021"
+default-run = "jc9"
 
 [lib]
 name = "jc9_lib"
