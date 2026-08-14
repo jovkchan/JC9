@@ -115,12 +115,14 @@ function fieldValue(f: FieldDef) {
           <!-- 调用工作流：入口块（手动触发）下拉 + 粘贴兜底（无需手填块 ID） -->
           <div v-if="f.type === 'text' && f.key === 'entry' && targetTriggerOptions.length" class="ins-auto-row">
             <JcSelect
+              beam glow
               :model-value="asString(fieldValue(f))"
               :options="targetTriggerOptions"
               placeholder="不填 = 用目标的「开始」"
               @update:model-value="(v) => set(f.key, String(v))"
             />
             <JcInput
+              beam glow
               :model-value="asString(fieldValue(f))"
               placeholder="或粘贴块 ID（右键「复制块 ID」）"
               @update:model-value="(v) => set(f.key, String(v))"
@@ -128,8 +130,7 @@ function fieldValue(f: FieldDef) {
           </div>
           <!-- 文本（工作目录：可点选；凭据 ID：只读） -->
           <div v-else-if="f.type === 'text' || f.type === 'var'" class="ins-dir-row">
-            <JcInput
-              :model-value="asString(fieldValue(f))"
+            <JcInput              beam glow              :model-value="asString(fieldValue(f))"
               :placeholder="f.placeholder"
               :disabled="f.key === 'credentialId'"
               @update:model-value="(v) => set(f.key, String(v))"
@@ -139,6 +140,7 @@ function fieldValue(f: FieldDef) {
           <!-- 多行文本 / 环境变量 -->
           <JcTextarea
             v-else-if="f.type === 'textarea' || f.type === 'env'"
+            beam glow
             :model-value="asString(fieldValue(f))"
             :placeholder="f.placeholder"
             :rows="f.type === 'env' ? 3 : 4"
@@ -147,6 +149,7 @@ function fieldValue(f: FieldDef) {
           <!-- 数字（JC 组件） -->
           <JcInput
             v-else-if="f.type === 'number'"
+            beam glow
             type="number"
             :model-value="asString(fieldValue(f))"
             :placeholder="f.placeholder"
@@ -155,6 +158,7 @@ function fieldValue(f: FieldDef) {
           <!-- Shell -->
           <JcSelect
             v-else-if="f.type === 'shell'"
+            beam glow
             :model-value="asString(fieldValue(f))"
             :options="SHELL_OPTIONS"
             @update:model-value="(v) => set(f.key, String(v))"
@@ -162,12 +166,14 @@ function fieldValue(f: FieldDef) {
           <!-- 工作积木选择（调用工作流）：下拉选已有 + 文本粘贴 ID 兜底 -->
           <div v-else-if="f.type === 'automation'" class="ins-auto-row">
             <JcSelect
+              beam glow
               :model-value="asString(fieldValue(f))"
               :options="automationOptions"
               :placeholder="f.placeholder"
               @update:model-value="(v) => set(f.key, String(v))"
             />
             <JcInput
+              beam glow
               :model-value="asString(fieldValue(f))"
               placeholder="或粘贴 ID（列表/编辑器右键复制）"
               @update:model-value="(v) => set(f.key, String(v))"
@@ -176,6 +182,7 @@ function fieldValue(f: FieldDef) {
           <!-- 下拉 -->
           <JcSelect
             v-else-if="f.type === 'select'"
+            beam glow
             :model-value="asString(fieldValue(f))"
             :options="(f.options ?? []).map(o => ({ label: String(o.label), value: o.value as string | number }))"
             @update:model-value="(v) => set(f.key, String(v))"
