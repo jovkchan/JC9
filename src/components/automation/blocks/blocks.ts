@@ -170,6 +170,26 @@ export const BLOCK_DEFS: BlockDef[] = [
     compatRules: [],
   },
   {
+    type: 'notify',
+    category: 'notify',
+    label: '通知',
+    color: '#faad14',
+    inputs: [flowIn()],
+    outputs: [flowOut()],
+    // 统一通知通道：引擎发系统通知（官方插件，跨平台）+ emit notify 事件（前端 Toast / 通知中心）
+    fields: [
+      { key: 'title', label: '标题', type: 'text', required: true, placeholder: '如 构建完成', interpolatable: true },
+      { key: 'body', label: '内容', type: 'textarea', placeholder: '通知正文，可引用 {{last.stdout}}', interpolatable: true },
+      { key: 'level', label: '级别', type: 'select', default: 'info', options: [
+        { label: '信息', value: 'info' },
+        { label: '成功', value: 'success' },
+        { label: '警告', value: 'warn' },
+        { label: '错误', value: 'error' },
+      ] },
+    ],
+    compatRules: [],
+  },
+  {
     type: 'workspace',
     category: 'env',
     label: '工作区',

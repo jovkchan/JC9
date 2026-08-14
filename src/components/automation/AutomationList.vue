@@ -21,7 +21,7 @@ const importText = ref('')
 
 async function pickImportFile() {
   try {
-    const selected = await open({ filters: [{ name: '自动化 JSON', extensions: ['json'] }], multiple: false })
+    const selected = await open({ filters: [{ name: '工作积木 JSON', extensions: ['json'] }], multiple: false })
     if (selected && typeof selected === 'string') {
       const content = await invoke<string>('read_file_string', { path: selected })
       importText.value = content
@@ -32,14 +32,14 @@ async function pickImportFile() {
 
 function doImport() {
   const json = importText.value.trim()
-  if (!json) { status.pushMessage('请先粘贴或选择自动化 JSON', 'warn'); return }
+  if (!json) { status.pushMessage('请先粘贴或选择工作积木 JSON', 'warn'); return }
   const a = store.importAutomationJson(json)
   if (a) {
     status.pushMessage(`已导入「${a.name}」`, 'success')
     importOpen.value = false
     importText.value = ''
   } else {
-    status.pushMessage('导入失败：不是有效的自动化 JSON（需含 nodes/edges）', 'error')
+    status.pushMessage('导入失败：不是有效的工作积木 JSON（需含 nodes/edges）', 'error')
   }
 }
 
@@ -86,14 +86,14 @@ function onCtxSelect(item: JcContextMenuItem) {
 <template>
   <section class="automation-list">
     <div class="al-header">
-      <span class="al-title">自动化</span>
+      <span class="al-title">工作积木</span>
       <div class="al-header-acts">
         <JcButton size="small" @click="importOpen = true">导入</JcButton>
         <JcButton size="small" type="primary" @click="store.create()">+ 新建</JcButton>
       </div>
     </div>
     <div class="al-search">
-      <JcInput beam glow v-model="store.search" placeholder="搜索自动化" />
+      <JcInput beam glow v-model="store.search" placeholder="搜索工作积木" />
     </div>
     <div class="al-body">
       <div
@@ -110,7 +110,7 @@ function onCtxSelect(item: JcContextMenuItem) {
         <button class="al-item-run" title="运行" @click.stop="store.run(a.id)">▶</button>
       </div>
       <div v-if="store.filtered.length === 0" class="al-empty">
-        暂无自动化任务<br />点击「+ 新建」开始搭建
+        暂无工作积木任务<br />点击「+ 新建」开始搭建
       </div>
     </div>
     <div class="al-foot">
@@ -119,7 +119,7 @@ function onCtxSelect(item: JcContextMenuItem) {
     <JcContextMenu :show="ctxShow" :x="ctxPos.x" :y="ctxPos.y" :items="ctxItems" @update:show="ctxShow = $event" @select="onCtxSelect" />
 
     <!-- 导入完整 JSON -->
-    <JcModal :open="importOpen" title="导入自动化" width="520" @update:open="importOpen = $event">
+    <JcModal :open="importOpen" title="导入工作积木" width="520" @update:open="importOpen = $event">
       <JcTextarea v-model="importText" :rows="12" :spellcheck="false" placeholder='粘贴 automation JSON（含 nodes/edges）' />
       <template #footer>
         <JcButton @click="pickImportFile">从文件选择</JcButton>

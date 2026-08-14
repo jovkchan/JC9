@@ -90,6 +90,11 @@ export function blockSummary(type: string, config: Record<string, unknown>): str
       if (s(c.varName)) rows.push(`→ ${s(c.varName)}`)
       return rows
     }
+    case 'notify': {
+      const rows = one(s(c.title))
+      if (s(c.body)) rows.push(s(c.body))
+      return rows
+    }
     case 'git-clone': {
       const rows = one(s(c.repo))
       if (s(c.dir)) rows.push(`→ ${s(c.dir)}`)

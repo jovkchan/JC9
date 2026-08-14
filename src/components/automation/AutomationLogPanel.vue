@@ -34,6 +34,18 @@ const runningGraph = computed<{ nodes: import('@/types/automation').BlockNode[];
   }
   return null
 })
+/** 当前运行中的自动化（id + runId），用于停止按钮 */
+const runningInfo = computed<{ id: string; runId: string } | null>(() => {
+  for (const id in store.runState) {
+    if (store.runState[id].status === 'running') {
+      return { id, runId: store.runState[id].runId }
+    }
+  }
+  return null
+})
+function stopRunning() {
+  if (runningInfo.value) store.stop(runningInfo.value.id, runningInfo.value.runId)
+}
 /** 已完成积木 id 集合（图形高亮） */
 const doneIds = computed(() => [...new Set(store.liveSteps.filter(s => s.status === 'ok').map(s => s.blockId))])
 /** 实时命令输出区：内容追加后自动滚动到底部跟随最新 */
@@ -68,6 +80,7 @@ function blockColor(type: string) {
       <div class="alogs-acts">
         <JcSegmented :options="tabOptions" :model-value="tab" @update:model-value="tab = $event as 'run' | 'log'" />
         <JcButton size="small" @click="store.logsLoad(true)">刷新</JcButton>
+        <JcButton size="small" danger :disabled="!runningInfo" @click="stopRunning">停止</JcButton>
       </div>
     </div>
 
@@ -108,7 +121,7 @@ function blockColor(type: string) {
     <div v-show="tab === 'log'" class="alogs-view alogs-log">
       <div class="alogs-body">
         <div v-if="store.logs.length === 0" class="alogs-empty">
-          <JcEmpty description="暂无历史执行记录，运行自动化后这里会展示每个积木的执行日志" />
+          <JcEmpty description="暂无历史执行记录，运行工作积木后这里会展示每个积木的执行日志" />
         </div>
         <div v-else class="alogs-list">
           <div

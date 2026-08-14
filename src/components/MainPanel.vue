@@ -6,6 +6,7 @@ import { useNotesStore } from '@/stores/notes'
 import { useAutomationStore } from '@/stores/automation'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { useStatusStore } from '@/stores/status'
+import { notify } from '@/utils/notify'
 import TerminalView from '@/components/TerminalView.vue'
 import LogPanel from '@/components/LogPanel.vue'
 import JcModal from '@/components/ui/JcModal.vue'
@@ -363,12 +364,9 @@ function checkReminders() {
       if (notifiedTasks.has(taskKey)) continue
 
       if (nowTimeMinute >= taskTimeStr) {
-        if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-          new Notification(`备忘待办提醒: ${note.title || '备忘'}`, {
-            body: taskDesc
-          })
-          notifiedTasks.add(taskKey)
-        }
+        // 备忘提醒统一走 notify 通道（系统通知 + Toast + 通知中心）
+        notify(`备忘待办提醒: ${note.title || '备忘'}`, taskDesc, { level: 'warn' })
+        notifiedTasks.add(taskKey)
       }
     }
   })
@@ -385,9 +383,6 @@ function handleKeyDownSearch(e: KeyboardEvent) {
 
 onMounted(() => {
   document.addEventListener('keydown', handleKeyDownSearch)
-  if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
-    Notification.requestPermission()
-  }
   checkReminders()
   reminderTimer = setInterval(checkReminders, 15000)
   // 自动化运行事件（全局：列表卡片运行态 + 实时日志面板；MainPanel 常驻，列表/编辑器共用）

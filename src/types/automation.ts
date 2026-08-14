@@ -3,7 +3,7 @@
 
 export type BlockCategory =
   | 'entry' | 'terminal' | 'platform' | 'env'
-  | 'logic' | 'variable' | 'ai' | 'credential' | 'end' | 'scm'
+  | 'logic' | 'variable' | 'ai' | 'notify' | 'credential' | 'end' | 'scm'
 
 export type PortDataType = 'flow' | 'data-string' | 'data-number' | 'data-bool' | 'credential'
 

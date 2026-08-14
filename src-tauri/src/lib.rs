@@ -12,6 +12,7 @@ use std::fs;
 use std::path::Path;
 use std::sync::Mutex;
 use tauri::{State, Manager, Emitter};
+use tauri_plugin_notification::NotificationExt;
 use chrono::{DateTime, Utc};
 
 #[cfg(target_os = "windows")]
@@ -240,6 +241,21 @@ fn get_effect_config() -> Result<String, String> {
 #[tauri::command]
 fn save_effect_config(config: String) -> Result<(), String> {
     database::save_effect_config(&config)
+}
+
+// ── 通知（系统级，跨平台 Win/macOS/Linux）──
+
+/// 统一系统通知封装：唯一调用官方 notification 插件的入口。
+/// 自动化积木引擎、其他模块的命令最终都汇聚到此（避免重复对接插件）。
+pub fn system_notify(app: &tauri::AppHandle, title: &str, body: &str) {
+    let _ = app.notification().builder().title(title).body(body).show();
+}
+
+/// 发送系统通知（前端统一入口：其他模块与自动化积木共用）
+#[tauri::command]
+fn send_notification(app: tauri::AppHandle, title: String, body: String) -> Result<(), String> {
+    system_notify(&app, &title, &body);
+    Ok(())
 }
 
 // ── 自动化（积木编辑器，F1b）──
@@ -2103,6 +2119,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(move |app| {
             // 主窗口关闭时彻底退出（防止后台线程残留）
             if let Some(win) = app.get_webview_window("main") {
@@ -2469,6 +2486,7 @@ pub fn run() {
             save_ai_config,
             get_effect_config,
             save_effect_config,
+            send_notification,
             automation_list,
             automation_save,
             automation_delete,

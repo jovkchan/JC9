@@ -167,14 +167,14 @@ function openExport() { exportOpen.value = true }
 async function copyExport() {
   try {
     await navigator.clipboard.writeText(exportText.value)
-    status.pushMessage('已复制自动化 JSON', 'success')
+    status.pushMessage('已复制工作积木 JSON', 'success')
   } catch (e) { status.pushMessage(`复制失败: ${e}`, 'error') }
 }
 
 async function saveExportFile() {
   try {
     const name = store.current?.name ? `${store.current.name}.json` : 'automation.json'
-    const filePath = await save({ filters: [{ name: '自动化 JSON', extensions: ['json'] }], defaultPath: name })
+    const filePath = await save({ filters: [{ name: '工作积木 JSON', extensions: ['json'] }], defaultPath: name })
     if (!filePath) return
     const data = Array.from(new TextEncoder().encode(exportText.value))
     await invoke('write_file_binary', { path: filePath, data })
@@ -980,7 +980,7 @@ onBeforeUnmount(() => {
     <LoginDialog v-model:open="loginOpen" :node="loginNode" />
 
     <!-- 导出完整 JSON -->
-    <JcModal :open="exportOpen" title="导出自动化" width="560" @update:open="exportOpen = $event">
+    <JcModal :open="exportOpen" title="导出工作积木" width="560" @update:open="exportOpen = $event">
       <JcTextarea :model-value="exportText" :rows="14" readonly :spellcheck="false" />
       <template #footer>
         <JcButton @click="copyExport">复制</JcButton>

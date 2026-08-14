@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 use tauri::Emitter;
 
 use crate::ai::agent_manager::AgentManager;
+use crate::system_notify;
 
 /// 事件回调（解耦 AppHandle，便于单测；必须 Sync 以便并行分支线程共享）
 type Emit<'a> = &'a (dyn Fn(&str, &Value) + Sync + 'a);
@@ -969,7 +970,7 @@ pub fn run_automation(app: &tauri::AppHandle, id: &str, entry: Option<String>, a
 
     let started_at = now_ts();
     let mut steps: Vec<StepLog> = Vec::new();
-    let result = walk(&run_id, &nodes, &edges, &start_id, &mut ctx, &mut visited, total, &cancel, emit, &mut steps, ai.as_ref());
+    let result = walk(&run_id, &nodes, &edges, &start_id, &mut ctx, &mut visited, total, &cancel, emit, &mut steps, ai.as_ref(), Some(app));
     active_runs()
         .lock()
         .map_err(|_| "运行表锁失败".to_string())?
@@ -1033,6 +1034,7 @@ pub fn walk(
     emit: Emit,
     steps: &mut Vec<StepLog>,
     ai: Option<&Arc<AgentManager>>,
+    app: Option<&tauri::AppHandle>,
 ) -> Result<(), String> {
     if !visited.insert(node_id.to_string()) {
         return Ok(()); // 防环（循环体单独传新 visited，见 loop 分支）
@@ -1371,6 +1373,22 @@ pub fn walk(
             let detail = format!("等待 {}s", secs);
             log_step(run_id, emit, steps, node_id, name, &node_label, ctx.step, "ok", started_at, Some(0), "", &detail, &ctx.cwd, &auth, None, None);
         }
+        "notify" => {
+            let title = interpolate(get_str(&config, "title"), ctx);
+            let body = interpolate(get_str(&config, "body"), ctx);
+            let level = get_str(&config, "level").to_string();
+            // 系统通知（统一封装，跨平台）——引擎直接调用，与前端其他模块走同一通道
+            if let Some(app) = app {
+                system_notify(app, &title, &body);
+            }
+            ctx.last = Some(LastResult { exit_code: 0, stdout: format!("通知: {}", title), stderr: String::new() });
+            emit("automation-event", &json!({
+                "type": "step_done", "runId": run_id, "blockId": node_id, "name": node_label,
+                "step": ctx.step, "total": total, "ts": now_ts()
+            }));
+            let detail = format!("[{}] {} — {}", level, title, body);
+            log_step(run_id, emit, steps, node_id, name, &node_label, ctx.step, "ok", started_at, Some(0), "", &detail, &ctx.cwd, &auth, None, None);
+        }
         "loop" => {
             // 循环（F2）：out 端口 → 循环体；循环体末连回 loop-in 则重复；结束后沿 done 继续
             let body_edges: Vec<&Value> = edges
@@ -1404,7 +1422,7 @@ pub fn walk(
                 let mut body_visited: HashSet<String> = HashSet::new();
                 for e in &body_edges {
                     if let Some(to) = e.get("toBlock").and_then(|t| t.as_str()) {
-                        walk(run_id, nodes, edges, to, ctx, &mut body_visited, total, cancel, emit, steps, ai)?;
+                        walk(run_id, nodes, edges, to, ctx, &mut body_visited, total, cancel, emit, steps, ai, app)?;
                     }
                 }
                 iter += 1;
@@ -1430,7 +1448,7 @@ pub fn walk(
             if branch_edges.len() == 1 {
                 let mut bv: HashSet<String> = HashSet::new();
                 if let Some(to) = branch_edges[0].get("toBlock").and_then(|t| t.as_str()) {
-                    walk(run_id, nodes, edges, to, ctx, &mut bv, total, cancel, emit, steps, ai)?;
+                    walk(run_id, nodes, edges, to, ctx, &mut bv, total, cancel, emit, steps, ai, app)?;
                 }
             } else if !branch_edges.is_empty() {
                 // 并发：每个分支独立 Ctx 副本 + 独立步骤列表，线程执行；全部完成后汇合
@@ -1444,7 +1462,7 @@ pub fn walk(
                         handles.push(s.spawn(move || -> Result<Vec<StepLog>, String> {
                             let mut bv: HashSet<String> = HashSet::new();
                             let mut bsteps: Vec<StepLog> = Vec::new();
-                            walk(run_id, nodes, edges, &to, &mut bctx, &mut bv, total, &cancel, emit, &mut bsteps, ai)?;
+                            walk(run_id, nodes, edges, &to, &mut bctx, &mut bv, total, &cancel, emit, &mut bsteps, ai, app)?;
                             Ok(bsteps)
                         }));
                     }
@@ -1543,7 +1561,7 @@ pub fn walk(
             if is_loop_back(nodes, to, e.get("toPort").and_then(|p| p.as_str())) {
                 continue;
             }
-            walk(run_id, nodes, edges, to, ctx, visited, total, cancel, emit, steps, ai)?;
+            walk(run_id, nodes, edges, to, ctx, visited, total, cancel, emit, steps, ai, app)?;
         }
     }
     Ok(())
@@ -1629,7 +1647,7 @@ mod tests {
         let cancel = Arc::new(AtomicBool::new(false));
         let mut ctx = mk_ctx(HashMap::new(), None);
         let mut visited = HashSet::new();
-        walk("t", &nodes, &edges, "loop", &mut ctx, &mut visited, nodes.len(), &cancel, emit, &mut Vec::new(), None).unwrap();
+        walk("t", &nodes, &edges, "loop", &mut ctx, &mut visited, nodes.len(), &cancel, emit, &mut Vec::new(), None, None).unwrap();
         let evs = events.lock().unwrap();
         // 3 轮迭代 + 循环体 var-set 执行 3 次 + 循环结束后 end 执行 1 次
         assert_eq!(count_event(&evs, "loop_iter", Some("loop")), 3);
@@ -1661,7 +1679,7 @@ mod tests {
         vars.insert("I".into(), json!("5"));
         let mut ctx = mk_ctx(vars, None);
         let mut visited = HashSet::new();
-        walk("t", &nodes, &edges, "loop", &mut ctx, &mut visited, nodes.len(), &cancel, emit, &mut Vec::new(), None).unwrap();
+        walk("t", &nodes, &edges, "loop", &mut ctx, &mut visited, nodes.len(), &cancel, emit, &mut Vec::new(), None, None).unwrap();
         let evs = events.lock().unwrap();
         // 第一轮 true → 循环体把 I 置 0 → 第二轮条件 false 退出 → 只执行 1 轮
         assert_eq!(count_event(&evs, "loop_iter", Some("loop")), 1);
@@ -1691,7 +1709,7 @@ mod tests {
         let cancel = Arc::new(AtomicBool::new(false));
         let mut ctx = mk_ctx(HashMap::new(), None);
         let mut visited = HashSet::new();
-        walk("t", &nodes, &edges, "par", &mut ctx, &mut visited, nodes.len(), &cancel, emit, &mut Vec::new(), None).unwrap();
+        walk("t", &nodes, &edges, "par", &mut ctx, &mut visited, nodes.len(), &cancel, emit, &mut Vec::new(), None, None).unwrap();
         let evs = events.lock().unwrap();
         // 两个分支各执行 1 次；汇合后 end 执行 1 次
         assert_eq!(count_event(&evs, "step_start", Some("a")), 1);
@@ -1717,7 +1735,7 @@ mod tests {
         let cancel2 = Arc::clone(&cancel);
         std::thread::scope(|s| {
             let h = s.spawn(move || {
-                walk("t", &nodes, &edges, "d", &mut ctx, &mut visited, nodes.len(), &cancel2, emit, &mut Vec::new(), None)
+                walk("t", &nodes, &edges, "d", &mut ctx, &mut visited, nodes.len(), &cancel2, emit, &mut Vec::new(), None, None)
             });
             std::thread::sleep(Duration::from_millis(200));
             cancel.store(true, Ordering::SeqCst);

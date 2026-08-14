@@ -16,6 +16,7 @@
     "core:window:allow-set-focus",
     "core:webview:allow-create-webview-window",
     "shell:allow-open",
-    "dialog:default"
+    "dialog:default",
+    "notification:default"
   ]
 }

@@ -28,7 +28,7 @@ function blankAutomation(): Automation {
   const now = new Date().toISOString()
   return {
     id: genId(),
-    name: '未命名自动化',
+    name: '未命名工作积木',
     description: '',
     version: 2,
     nodes: [],
@@ -269,7 +269,7 @@ export const useAutomationStore = defineStore('automation', () => {
     if (!a) return null
     const status = useStatusStore()
     if (a.nodes.length === 0) {
-      status.pushMessage('自动化为空，请先添加积木', 'warn')
+      status.pushMessage('工作积木为空，请先添加积木', 'warn')
       return null
     }
     if (isTauri()) {
@@ -623,7 +623,7 @@ export const useAutomationStore = defineStore('automation', () => {
       }))
       const imported: Automation = {
         id: genId(),
-        name: obj.name ? `${String(obj.name)}（导入）` : '导入的自动化',
+        name: obj.name ? `${String(obj.name)}（导入）` : '导入的工作积木',
         description: obj.description ?? '',
         version: 2,
         nodes,

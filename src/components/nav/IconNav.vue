@@ -22,7 +22,7 @@ const memIcon = '<svg viewBox="0 0 1024 1024" width="22" height="22" fill="curre
 
 const navItems: { key: 'projects'|'automation'|'tools'|'notes'|'memories'; icon: string; label: string; isSvg?: boolean }[] = [
   { key: 'projects',   icon: projIcon, label: '项目', isSvg: true },
-  { key: 'automation', icon: autoIcon, label: '自动化', isSvg: true },
+  { key: 'automation', icon: autoIcon, label: '工作积木', isSvg: true },
   { key: 'tools',      icon: toolIcon, label: '工具', isSvg: true },
   { key: 'notes',      icon: noteIcon, label: '笔记', isSvg: true },
   { key: 'memories',   icon: memIcon, label: '记忆', isSvg: true },

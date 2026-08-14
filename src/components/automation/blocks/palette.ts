@@ -20,6 +20,7 @@ export const PALETTE_SECTIONS: PaletteSection[] = [
   { key: 'logic', label: '逻辑', blocks: ['condition', 'delay', 'loop', 'parallel'] },
   { key: 'variable', label: '变量', blocks: ['var-set'] },
   { key: 'ai', label: 'AI', blocks: ['ai-generate'] },
+  { key: 'notify', label: '通知', blocks: ['notify'] },
   { key: 'credential', label: '权限', blocks: ['credential'] },
   { key: 'end', label: '结束', blocks: ['end'] },
 ]
