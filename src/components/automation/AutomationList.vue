@@ -6,6 +6,7 @@ import { useAutomationStore } from '@/stores/automation'
 import { useStatusStore } from '@/stores/status'
 import JcButton from '@/components/ui/JcButton.vue'
 import JcInput from '@/components/ui/JcInput.vue'
+import JcBorderBeam from '@/components/ui/JcBorderBeam.vue'
 import JcTextarea from '@/components/ui/JcTextarea.vue'
 import JcModal from '@/components/ui/JcModal.vue'
 import JcContextMenu from '@/components/ui/JcContextMenu.vue'
@@ -102,19 +103,34 @@ function onCtxSelect(item: JcContextMenuItem) {
       <JcInput beam glow v-model="store.search" placeholder="搜索工作积木" />
     </div>
     <div class="al-body">
-      <div
-        v-for="a in store.filtered"
-        :key="a.id"
-        class="al-item"
-        :class="[{ on: a.id === store.currentId }, runClass(a)]"
-        @contextmenu.prevent="openCtx($event, a.id)"
-      >
-        <div class="al-item-main">
-          <span class="al-item-name">{{ a.name }}</span>
-          <span class="al-item-desc">{{ a.description || `${a.nodes.length} 块 · ${a.edges.length} 连线` }}</span>
+      <!-- 卡片统一用 JC 组件：JcBorderBeam 流光边框——仅运行时常显，非运行态无流光（随系统「动作效果」配置开关） -->
+      <template v-for="a in store.filtered" :key="a.id">
+        <JcBorderBeam v-if="store.runStateOf(a.id)?.status === 'running'" :line-width="1.5" glow>
+          <div
+            class="al-item"
+            :class="[{ on: a.id === store.currentId }, runClass(a)]"
+            @contextmenu.prevent="openCtx($event, a.id)"
+          >
+            <div class="al-item-main">
+              <span class="al-item-name">{{ a.name }}</span>
+              <span class="al-item-desc">{{ a.description || `${a.nodes.length} 块 · ${a.edges.length} 连线` }}</span>
+            </div>
+            <button class="al-item-run" title="运行" @click.stop="store.run(a.id)">▶</button>
+          </div>
+        </JcBorderBeam>
+        <div
+          v-else
+          class="al-item"
+          :class="[{ on: a.id === store.currentId }, runClass(a)]"
+          @contextmenu.prevent="openCtx($event, a.id)"
+        >
+          <div class="al-item-main">
+            <span class="al-item-name">{{ a.name }}</span>
+            <span class="al-item-desc">{{ a.description || `${a.nodes.length} 块 · ${a.edges.length} 连线` }}</span>
+          </div>
+          <button class="al-item-run" title="运行" @click.stop="store.run(a.id)">▶</button>
         </div>
-        <button class="al-item-run" title="运行" @click.stop="store.run(a.id)">▶</button>
-      </div>
+      </template>
       <div v-if="store.filtered.length === 0" class="al-empty">
         暂无工作积木任务<br />点击「+ 新建」开始搭建
       </div>
@@ -192,24 +208,6 @@ function onCtxSelect(item: JcContextMenuItem) {
 .al-item.st-done { border-color: rgba(82, 196, 26, .55); }
 .al-item.st-failed { border-color: rgba(255, 77, 79, .65); }
 .al-item.st-stopped { border-color: rgba(250, 173, 20, .65); }
-/* 运行中：流光描边（遵循系统「动作效果」配置：总开关 html.jc-beam-off 时隐藏；速度用 --jc-beam-duration） */
-html.jc-beam-off .al-item.is-running::before { display: none; }
-.al-item.is-running::before {
-  content: '';
-  position: absolute;
-  inset: -1px;
-  border-radius: inherit;
-  padding: 1.5px;
-  background: conic-gradient(from var(--jc-al-ang, 0deg), transparent 0 330deg, var(--jc-color-accent, #8a58ff) 360deg);
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask-composite: exclude;
-  animation: al-item-flow var(--jc-beam-duration, 1.6s) linear infinite;
-  pointer-events: none;
-}
-@property --jc-al-ang { syntax: '<angle>'; initial-value: 0deg; inherits: false; }
-@keyframes al-item-flow { to { --jc-al-ang: 360deg; } }
 .al-item-main {
   flex: 1;
   min-width: 0;

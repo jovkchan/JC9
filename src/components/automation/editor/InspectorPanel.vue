@@ -85,7 +85,6 @@ const targetTriggerOptions = computed<{ label: string; value: string }[]>(() => 
 })
 
 function asString(v: unknown): string { return v == null ? '' : String(v) }
-function asNumber(v: unknown): number { const n = Number(v); return Number.isFinite(n) ? n : 0 }
 
 /** 按字段类型渲染控件 */
 function fieldValue(f: FieldDef) {
@@ -145,14 +144,13 @@ function fieldValue(f: FieldDef) {
             :rows="f.type === 'env' ? 3 : 4"
             @update:model-value="(v) => set(f.key, String(v))"
           />
-          <!-- 数字 -->
-          <input
+          <!-- 数字（JC 组件） -->
+          <JcInput
             v-else-if="f.type === 'number'"
-            class="ins-num"
             type="number"
-            :value="asNumber(fieldValue(f))"
+            :model-value="asString(fieldValue(f))"
             :placeholder="f.placeholder"
-            @input="set(f.key, (($event.target as HTMLInputElement).valueAsNumber) || 0)"
+            @update:model-value="(v) => set(f.key, Number(v) || 0)"
           />
           <!-- Shell -->
           <JcSelect
@@ -259,20 +257,6 @@ function fieldValue(f: FieldDef) {
 .ins-tip {
   font-size: 11px;
   color: var(--jc-text-tertiary, #858585);
-}
-.ins-num {
-  width: 100%;
-  height: 28px;
-  padding: 0 8px;
-  border-radius: 4px;
-  border: 1px solid var(--jc-border-strong, #555);
-  background: var(--jc-bg-input, #3c3c3c);
-  color: var(--jc-text-primary, #e6e6e6);
-  font-size: 12px;
-  outline: none;
-}
-.ins-num:focus {
-  border-color: var(--jc-color-accent, #8a58ff);
 }
 .ins-empty {
   font-size: 12px;

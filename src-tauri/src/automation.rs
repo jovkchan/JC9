@@ -48,6 +48,23 @@ fn check_cancel(cancel: &Arc<AtomicBool>) -> Result<(), String> {
     Ok(())
 }
 
+/// 终止子进程进程树（避免「杀父不杀子」：编译任务如 PowerShell→npm→node 需整树终止）
+/// Windows：taskkill /T /F 递归杀；其他平台 kill -9
+fn kill_process_tree(pid: u32) {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        let _ = StdCommand::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
+            .status();
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = StdCommand::new("kill").args(["-9", &pid.to_string()]).status();
+    }
+}
+
 /// 通用子进程执行：可中断（cancel 置位即 kill）+ 超时 kill；返回 (code, stdout, stderr)。
 /// on_out 非空时 stdout 实时分块回调（仿终端实时输出，长命令执行中即可看到进度）。
 fn run_child(
@@ -117,10 +134,12 @@ fn run_child(
             let start = Instant::now();
             loop {
                 if cancel.load(Ordering::SeqCst) {
+                    kill_process_tree(child.id());
                     let _ = child.kill();
                     break;
                 }
                 if timeout_secs > 0 && start.elapsed().as_secs() >= timeout_secs {
+                    kill_process_tree(child.id());
                     let _ = child.kill();
                     break;
                 }
