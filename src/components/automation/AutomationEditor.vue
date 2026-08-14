@@ -563,7 +563,9 @@ function drawMinimap() {
   const mmText = cssVar('--jc-text-secondary') || 'rgba(150,150,150,0.55)'
   const mmView = cssVar('--jc-text-primary') || 'rgba(255,255,255,0.9)'
   mctx.fillStyle = mmBg
+  mctx.globalAlpha = 0.5 // 背景 50% 不透明，透出下层画布（内容保持不透明）
   mctx.fillRect(0, 0, MM_W.value, MM_H.value)
+  mctx.globalAlpha = 1
   const proj = minimapProjection()
   const a = store.current
   if (!proj || !a || a.nodes.length === 0) {
@@ -1147,8 +1149,8 @@ onBeforeUnmount(() => {
         <div class="ae-canvas-wrap">
           <canvas ref="canvasRef" class="ae-canvas" tabindex="0"></canvas>
           <template v-if="mmVisible">
-            <button class="ae-mm-close" title="隐藏小地图" @click="mmVisible = false" :style="{ bottom: MM_H - 20 + 'px' }">✕</button>
-            <button class="ae-mm-zoom" title="切换小地图画幅（1×/2×）" @click="mmZoom = mmZoom === 1 ? 2 : 1" :style="{ bottom: MM_H - 20 + 'px' }">{{ mmZoom }}×</button>
+            <button class="ae-mm-close" title="隐藏小地图" @click="mmVisible = false" :style="{ bottom: MM_H - 6 + 'px', right: '12px' }">✕</button>
+            <button class="ae-mm-zoom" title="切换小地图画幅（1×/2×）" @click="mmZoom = mmZoom === 1 ? 2 : 1" :style="{ bottom: MM_H - 6 + 'px', right: '32px' }">{{ mmZoom }}×</button>
             <canvas ref="mmRef" class="ae-minimap" :style="{ width: MM_W + 'px', height: MM_H + 'px' }" @pointerdown="onMinimapDown" @pointermove="onMinimapMove" @pointerup="onMinimapUp"></canvas>
           </template>
           <button v-else class="ae-mm-toggle" title="打开小地图" @click="mmVisible = true">
@@ -1298,18 +1300,19 @@ onBeforeUnmount(() => {
   box-shadow: 0 2px 8px rgba(0,0,0,0.4);
   cursor: pointer;
   z-index: 10;
-  background: var(--jc-bg-elevated, rgba(24,24,26,0.82));
+  /* 背景由 canvas 半透明绘制；这里必须透明，否则不透明 CSS 背景会盖住透明效果 */
+  background: transparent;
   pointer-events: auto;
 }
 .ae-mm-close {
   position: absolute;
-  right: 15px;
+  right: 12px;
   width: 18px;
   height: 18px;
   border-radius: 4px;
   border: none;
-  background: rgba(255,255,255,0.12);
-  color: rgba(255,255,255,0.85);
+  background: rgba(128,128,128,0.22);
+  color: var(--jc-text-primary, #e6e6e6);
   font-size: 11px;
   line-height: 1;
   cursor: pointer;
@@ -1318,11 +1321,11 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  &:hover { background: rgba(255,255,255,0.28); }
+  &:hover { background: rgba(128,128,128,0.4); }
 }
 .ae-mm-zoom {
   position: absolute;
-  right: 36px;
+  right: 32px;
   height: 18px;
   min-width: 24px;
   padding: 0 4px;
