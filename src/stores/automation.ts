@@ -128,6 +128,22 @@ export const useAutomationStore = defineStore('automation', () => {
     useStatusStore().pushMessage(`已保存「${a.name}」`, 'success')
   }
 
+  /** 结构校验（保存/返回前提示）：返回问题列表（空 = 通过）
+   * 规则：必须有入口（start 或 manual-trigger，否则无法运行）；start 至多一个；建议有 end */
+  function structureIssues(): string[] {
+    const a = current.value
+    if (!a || a.nodes.length === 0) return []
+    const issues: string[] = []
+    const types = a.nodes.map(n => n.type)
+    const startCount = types.filter(t => t === 'start').length
+    const hasManual = types.includes('manual-trigger')
+    const hasEnd = types.includes('end')
+    if (startCount === 0 && !hasManual) issues.push('缺少「开始」或「手动触发」入口块（运行需要入口）')
+    if (startCount > 1) issues.push(`有 ${startCount} 个「开始」块（运行只取第一个）`)
+    if (!hasEnd) issues.push('缺少「结束」块（建议各分支都连到结束）')
+    return issues
+  }
+
   /** 把全部自动化的最新数据写入后端/localStorage */
   async function persist() {
     if (isTauri()) {
@@ -644,7 +660,7 @@ export const useAutomationStore = defineStore('automation', () => {
     automations, currentId, current, editing, search, filtered, dirty, canUndo, canRedo,
     credentials,
     load, open, create, remove, closeEditor, rename, addNode, addNodeAt, duplicate, run, stop,
-    beginEdit: pushHistory, undo, redo, save, persist, markDirty,
+    beginEdit: pushHistory, undo, redo, save, persist, markDirty, structureIssues,
     removeNode, addEdge, removeEdge, moveNode, updateNodeConfig, connectEdge, toggleLock,
     credentialLoad, credentialSave, credentialDelete,
     logs, logsLoad, logsPush,

@@ -156,6 +156,20 @@ export const BLOCK_DEFS: BlockDef[] = [
     compatRules: [],
   },
   {
+    type: 'call-automation',
+    category: 'logic',
+    label: '调用工作流',
+    color: '#eb2f96',
+    inputs: [flowIn()],
+    outputs: [flowOut()],
+    // 运行时把另一个工作积木作为子程序执行（共享父 ctx，日志并入父 RunLog；Rust 引擎防环 depth 上限）
+    fields: [
+      { key: 'automationId', label: '目标工作积木', type: 'automation', required: true, placeholder: '选择或粘贴工作积木 ID', interpolatable: true },
+      { key: 'entry', label: '入口块 ID', type: 'text', placeholder: '可选：指定「手动触发」块 ID', interpolatable: true },
+    ],
+    compatRules: [],
+  },
+  {
     type: 'ai-generate',
     category: 'ai',
     label: 'AI 生成',

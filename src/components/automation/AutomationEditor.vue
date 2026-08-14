@@ -110,6 +110,7 @@ const ctxItems = computed<JcContextMenuItem[]>(() => {
   if (n?.type === 'credential') {
     items.push({ label: '配置凭据', value: 'login' })
   }
+  items.push({ label: '复制块 ID', value: 'copy-block-id' })
   items.push({ label: '删除', value: 'delete', danger: true })
   return items
 })
@@ -142,6 +143,11 @@ function onCtxSelect(item: JcContextMenuItem) {
       loginNode.value = node
       loginOpen.value = true
       break
+    case 'copy-block-id':
+      navigator.clipboard.writeText(node.id)
+        .then(() => status.pushMessage(`已复制块 ID：${node.id}`, 'success'))
+        .catch(e => status.pushMessage(`复制失败: ${e}`, 'error'))
+      break
     case 'delete':
       store.removeNode(node.id)
       if (selectedId.value === node.id) selectedId.value = null
@@ -169,6 +175,68 @@ async function copyExport() {
     await navigator.clipboard.writeText(exportText.value)
     status.pushMessage('已复制工作积木 JSON', 'success')
   } catch (e) { status.pushMessage(`复制失败: ${e}`, 'error') }
+}
+
+/** 复制当前工作积木 ID（供 MCP / 外部按 ID 触发） */
+async function copyCurrentId() {
+  const id = store.current?.id
+  if (!id) return
+  try {
+    await navigator.clipboard.writeText(id)
+    status.pushMessage(`已复制工作积木 ID：${id}`, 'success')
+  } catch (e) { status.pushMessage(`复制失败: ${e}`, 'error') }
+}
+
+// ── 保存 / 返回前校验提示（缺开始/结束 + 未保存）──
+interface ConfirmBox {
+  title: string
+  items: string[]
+  confirmText: string
+  /** 提供「保存并返回」按钮（返回弹窗且存在未保存修改时） */
+  withSave?: boolean
+  onConfirm: () => void
+}
+const confirmBox = ref<ConfirmBox | null>(null)
+
+/** 保存：结构有问题（缺开始/结束）先弹确认 */
+function saveWithCheck() {
+  const issues = store.structureIssues()
+  if (issues.length > 0) {
+    confirmBox.value = {
+      title: '保存前检查',
+      items: issues,
+      confirmText: '仍要保存',
+      onConfirm: () => { confirmBox.value = null; store.save() },
+    }
+  } else {
+    store.save()
+  }
+}
+
+/** 返回：未保存修改 / 结构有问题先弹确认 */
+function backWithCheck() {
+  const items: string[] = []
+  if (store.dirty) items.push('有未保存的修改，返回后不会保留')
+  items.push(...store.structureIssues())
+  if (items.length === 0) {
+    store.closeEditor()
+    return
+  }
+  confirmBox.value = {
+    title: '返回确认',
+    items,
+    confirmText: '直接返回',
+    withSave: store.dirty,
+    onConfirm: () => { confirmBox.value = null; store.closeEditor() },
+  }
+}
+
+/** 保存并返回（返回弹窗） */
+function confirmSaveAndBack() {
+  store.save().then(() => {
+    confirmBox.value = null
+    store.closeEditor()
+  })
 }
 
 async function saveExportFile() {
@@ -423,6 +491,158 @@ function draw() {
   drawBlocks()
   drawArrows()
   drawConnectPreview()
+  drawMinimap()
+}
+
+// ── 小地图（Minimap）：右下角缩略图，点击/拖动快速定位视口；画幅（面板尺寸）1×/2× 可切换 ──
+const MM_BASE_W = 235
+const MM_BASE_H = 130
+const mmRef = ref<HTMLCanvasElement | null>(null)
+/** 小地图显示开关（可隐藏；隐藏后右下角浮动图标打开） */
+const mmVisible = ref(true)
+/** 小地图画幅（预览面板）缩放倍率：1× = 235×130，2× = 470×260；内容仍 fit 面板，画幅变大看得更清 */
+const mmZoom = ref(1)
+const MM_W = computed(() => MM_BASE_W * mmZoom.value)
+const MM_H = computed(() => MM_BASE_H * mmZoom.value)
+let mmDragging = false
+
+// 重新打开小地图时立即重绘：v-if 重建 canvas 后新画布是空白，需主动触发一次 draw
+watch(mmVisible, (v) => { if (v) schedule() })
+// 切换小地图倍率后重绘
+watch(mmZoom, () => schedule())
+
+interface MmProjection {
+  minX: number
+  minY: number
+  bw: number
+  bh: number
+  mmScale: number
+  offX: number
+  offY: number
+}
+
+/** 所有节点世界包围盒 → 小地图映射参数（无节点返回 null） */
+function minimapProjection(): MmProjection | null {
+  const a = store.current
+  if (!a || a.nodes.length === 0) return null
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  for (const n of a.nodes) {
+    const cfg = (n.config ?? {}) as Record<string, unknown>
+    const h = blockHeight(n.type, cfg)
+    if (n.x < minX) minX = n.x
+    if (n.y < minY) minY = n.y
+    if (n.x + BLOCK_W > maxX) maxX = n.x + BLOCK_W
+    if (n.y + h > maxY) maxY = n.y + h
+  }
+  const pad = 30
+  const bw = maxX - minX + pad * 2
+  const bh = maxY - minY + pad * 2
+  // 内容比例固定为基准画幅（235×130）的 fit：面板变大时图保持原大小、居中显示（不放大）
+  const mmScale = Math.min(MM_BASE_W / bw, MM_BASE_H / bh)
+  return {
+    minX: minX - pad, minY: minY - pad, bw, bh, mmScale,
+    offX: (MM_W.value - bw * mmScale) / 2,
+    offY: (MM_H.value - bh * mmScale) / 2,
+  }
+}
+
+function drawMinimap() {
+  const mc = mmRef.value
+  const cv = canvasRef.value
+  if (!mc || !cv) return
+  if (mc.width !== Math.round(MM_W.value * dpr) || mc.height !== Math.round(MM_H.value * dpr)) {
+    mc.width = Math.round(MM_W.value * dpr)
+    mc.height = Math.round(MM_H.value * dpr)
+  }
+  const mctx = mc.getContext('2d')
+  if (!mctx) return
+  mctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  mctx.clearRect(0, 0, MM_W.value, MM_H.value)
+  // 主题感知：背景/文字/视口框随明暗模式（与主画布一致）
+  const mmBg = cssVar('--jc-bg-elevated') || 'rgba(24,24,26,0.82)'
+  const mmText = cssVar('--jc-text-secondary') || 'rgba(150,150,150,0.55)'
+  const mmView = cssVar('--jc-text-primary') || 'rgba(255,255,255,0.9)'
+  mctx.fillStyle = mmBg
+  mctx.fillRect(0, 0, MM_W.value, MM_H.value)
+  const proj = minimapProjection()
+  const a = store.current
+  if (!proj || !a || a.nodes.length === 0) {
+    mctx.fillStyle = mmText
+    mctx.font = '11px system-ui'
+    mctx.textAlign = 'center'
+    mctx.fillText('暂无积木', MM_W.value / 2, MM_H.value / 2)
+    return
+  }
+  const { minX, minY, mmScale, offX, offY } = proj
+  const mm = (wx: number, wy: number) => ({ x: (wx - minX) * mmScale + offX, y: (wy - minY) * mmScale + offY })
+  // 连线标注（源块颜色半透明细线，画在色块之下）
+  const nodeById = new Map(a.nodes.map(n => [n.id, n]))
+  mctx.lineWidth = 1
+  for (const edge of a.edges) {
+    const fb = nodeById.get(edge.fromBlock), tb = nodeById.get(edge.toBlock)
+    if (!fb || !tb) continue
+    const fcfg = (fb.config ?? {}) as Record<string, unknown>
+    const tcfg = (tb.config ?? {}) as Record<string, unknown>
+    const p1 = mm(fb.x + BLOCK_W / 2, fb.y + blockHeight(fb.type, fcfg) / 2)
+    const p2 = mm(tb.x + BLOCK_W / 2, tb.y + blockHeight(tb.type, tcfg) / 2)
+    mctx.strokeStyle = getBlockColor(fb.type)
+    mctx.globalAlpha = 0.5
+    mctx.beginPath()
+    mctx.moveTo(p1.x, p1.y)
+    mctx.lineTo(p2.x, p2.y)
+    mctx.stroke()
+    mctx.globalAlpha = 1
+  }
+  // 积木色块（运行中/失败高亮）
+  for (const n of a.nodes) {
+    const cfg = (n.config ?? {}) as Record<string, unknown>
+    const h = blockHeight(n.type, cfg)
+    const color = getBlockColor(n.type)
+    const p = mm(n.x, n.y)
+    mctx.fillStyle = color
+    mctx.globalAlpha = n.id === runningId.value ? 0.95 : n.id === failId.value ? 0.7 : 0.55
+    mctx.fillRect(p.x, p.y, Math.max(2, BLOCK_W * mmScale), Math.max(2, h * mmScale))
+    mctx.globalAlpha = 1
+  }
+  // 视口矩形（当前可视区域）
+  const vx0 = -view.ox / view.scale, vy0 = -view.oy / view.scale
+  const vx1 = vx0 + cv.clientWidth / view.scale, vy1 = vy0 + cv.clientHeight / view.scale
+  const p0 = mm(vx0, vy0), p1 = mm(vx1, vy1)
+  mctx.strokeStyle = mmView
+  mctx.lineWidth = 1
+  mctx.strokeRect(p0.x, p0.y, Math.max(1, p1.x - p0.x), Math.max(1, p1.y - p0.y))
+}
+
+/** 小地图坐标 → 主视口中心平移到对应世界位置（保持缩放不变） */
+function minimapJump(mx: number, my: number) {
+  const proj = minimapProjection()
+  const cv = canvasRef.value
+  if (!proj || !cv) return
+  const wx = proj.minX + (mx - proj.offX) / proj.mmScale
+  const wy = proj.minY + (my - proj.offY) / proj.mmScale
+  view.ox = cv.clientWidth / 2 - wx * view.scale
+  view.oy = cv.clientHeight / 2 - wy * view.scale
+  store.setCanvasScale(view.scale)
+  schedule()
+}
+
+function onMinimapDown(e: PointerEvent) {
+  const mc = mmRef.value
+  if (!mc) return
+  mmDragging = true
+  mc.setPointerCapture(e.pointerId)
+  const rect = mc.getBoundingClientRect()
+  minimapJump(e.clientX - rect.left, e.clientY - rect.top)
+}
+
+function onMinimapMove(e: PointerEvent) {
+  if (!mmDragging || !mmRef.value) return
+  const rect = mmRef.value.getBoundingClientRect()
+  minimapJump(e.clientX - rect.left, e.clientY - rect.top)
+}
+
+function onMinimapUp() {
+  mmDragging = false
 }
 
 function drawGrid(w: number, h: number) {
@@ -576,6 +796,9 @@ function drawBlocks() {
   if (a.nodes.length === 0) { drawHintText(); return }
   const s = view.scale
   const ec = edgeCounts()
+  // 缩放内容分级：小尺度下隐藏文字，避免块缩小后文字挤在一起（只留色块轮廓 + 端口）
+  const showTitle = s >= 0.45
+  const showSummary = s >= 0.7
   // 主题感知：块背景/文字随明暗模式切换
   const bg = cssVar('--jc-bg-elevated') || '#2d2d30'
   const text = cssVar('--jc-text-primary') || '#e6e6e6'
@@ -620,9 +843,9 @@ function drawBlocks() {
     const title = n.type === 'credential'
       ? (String(cfg.credentialName ?? '') || '凭据')
       : (def?.label ?? n.type)
-    c.fillText(title, n.x + 14 / s, n.y + 14 / s)
-    // 配置摘要（次级色多行，超宽省略；块随行数拉高）
-    if (summary.length) {
+    if (showTitle) c.fillText(title, n.x + 14 / s, n.y + 14 / s)
+    // 配置摘要（次级色多行，超宽省略；块随行数拉高；小尺度隐藏）
+    if (showSummary && summary.length) {
       c.fillStyle = sub
       c.font = `400 ${11.5 / s}px system-ui`
       const maxW = BLOCK_W - 26 / s
@@ -900,7 +1123,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="automation-editor">
     <div class="ae-bar">
-      <JcButton size="small" @click="store.closeEditor()">← 返回</JcButton>
+      <JcButton size="small" @click="backWithCheck">← 返回</JcButton>
       <JcInput
         beam glow
         v-if="store.current"
@@ -912,8 +1135,9 @@ onBeforeUnmount(() => {
       <div class="ae-acts">
         <JcButton size="small" :disabled="!store.canUndo" @click="store.undo()">撤回</JcButton>
         <JcButton size="small" :disabled="!store.canRedo" @click="store.redo()">重做</JcButton>
-        <JcButton size="small" type="primary" @click="store.save()">保存</JcButton>
+        <JcButton size="small" type="primary" @click="saveWithCheck">保存</JcButton>
         <JcButton size="small" @click="openExport()">导出</JcButton>
+        <JcButton size="small" @click="copyCurrentId" :title="store.current?.id">复制 ID</JcButton>
         <JcButton size="small" @click="doRun()">运行</JcButton>
         <JcButton size="small" :disabled="!runningRunId" @click="doStop()">停止</JcButton>
       </div>
@@ -922,6 +1146,16 @@ onBeforeUnmount(() => {
       <div class="ae-top">
         <div class="ae-canvas-wrap">
           <canvas ref="canvasRef" class="ae-canvas" tabindex="0"></canvas>
+          <template v-if="mmVisible">
+            <button class="ae-mm-close" title="隐藏小地图" @click="mmVisible = false" :style="{ bottom: MM_H - 20 + 'px' }">✕</button>
+            <button class="ae-mm-zoom" title="切换小地图画幅（1×/2×）" @click="mmZoom = mmZoom === 1 ? 2 : 1" :style="{ bottom: MM_H - 20 + 'px' }">{{ mmZoom }}×</button>
+            <canvas ref="mmRef" class="ae-minimap" :style="{ width: MM_W + 'px', height: MM_H + 'px' }" @pointerdown="onMinimapDown" @pointermove="onMinimapMove" @pointerup="onMinimapUp"></canvas>
+          </template>
+          <button v-else class="ae-mm-toggle" title="打开小地图" @click="mmVisible = true">
+            <svg viewBox="0 0 1024 1024" width="28" height="28" xmlns="http://www.w3.org/2000/svg">
+              <path d="M356.864 577.92a31.146667 31.146667 0 0 0 25.429333 13.226667h0.085334a31.146667 31.146667 0 0 0 25.472-13.397334c28.416-40.704 121.856-175.104 131.413333-193.706666a178.56 178.56 0 0 0 19.584-80.256c0-98.474667-79.36-178.56-176.938667-178.56-97.536 0-176.896 80.085333-176.896 178.56 0 27.221333 6.485333 54.144 19.328 79.914666 10.24 20.394667 104.021333 153.813333 132.522667 194.218667z m545.109333-389.12a30.933333 30.933333 0 0 1 25.514667 6.826667c7.082667 5.973333 11.178667 14.848 11.178667 24.192V849.92a31.402667 31.402667 0 0 1-25.6 30.976l-228.949334 42.026667a31.658667 31.658667 0 0 1-14.037333-0.64l-290.048-82.218667-258.645333 40.96a30.890667 30.890667 0 0 1-25.130667-7.168 31.573333 31.573333 0 0 1-10.922667-23.978667V219.818667c0-17.408 13.994667-31.530667 31.232-31.530667 17.237333 0 31.189333 14.08 31.189334 31.530667v593.237333l208.170666-32.981333V660.906667a20.906667 20.906667 0 0 1 20.778667-20.992c11.52 0 20.821333 9.386667 20.821333 20.992v118.698666l270.592 76.714667v-263.68l-141.44-43.946667a21.034667 21.034667 0 0 1-13.738666-26.24 20.821333 20.821333 0 0 1 26.026666-13.909333l129.152 40.106667V292.949333a31.786667 31.786667 0 0 1-4.650666-1.152l-65.322667-21.930666a31.573333 31.573333 0 0 1-19.797333-39.850667 31.104 31.104 0 0 1 39.509333-19.925333l57.813333 19.370666 226.304-40.618666zM709.717333 854.186667l166.528-30.592v-258.090667l-166.528 29.269333v259.413334z m166.528-331.306667V257.365333l-166.528 29.866667v264.832l166.528-29.226667zM381.866667 188.245333c63.146667 0 114.474667 51.84 114.474666 115.541334 0 17.066667-4.522667 35.754667-12.458666 51.114666-5.461333 10.197333-52.693333 79.36-101.76 150.101334C337.066667 440.661333 286.037333 366.677333 280.106667 355.285333a115.072 115.072 0 0 1-12.672-51.498666c0-63.701333 51.370667-115.541333 114.474666-115.541334z m26.026666 161.066667a51.626667 51.626667 0 0 1-52.053333 0 52.608 52.608 0 0 1-26.026667-45.482667c0-18.773333 9.941333-36.096 26.026667-45.482666a51.626667 51.626667 0 0 1 52.053333 0c16.085333 9.386667 26.026667 26.709333 26.026667 45.482666 0 18.773333-9.941333 36.096-26.026667 45.482667z" fill="currentColor"></path>
+            </svg>
+          </button>
         </div>
         <div v-if="inspectNode" class="ae-inspector">
           <div class="ae-ins-head">
@@ -987,6 +1221,18 @@ onBeforeUnmount(() => {
         <JcButton type="primary" @click="saveExportFile">保存为文件</JcButton>
       </template>
     </JcModal>
+
+    <!-- 保存/返回前校验提示 -->
+    <JcModal :open="!!confirmBox" title="提示" width="460" @update:open="(v: boolean) => { if (!v) confirmBox = null }">
+      <ul class="ae-confirm-items">
+        <li v-for="(it, i) in confirmBox?.items ?? []" :key="i">{{ it }}</li>
+      </ul>
+      <template #footer>
+        <JcButton @click="confirmBox = null">取消</JcButton>
+        <JcButton v-if="confirmBox?.withSave" @click="confirmSaveAndBack">保存并返回</JcButton>
+        <JcButton type="primary" @click="confirmBox?.onConfirm()">{{ confirmBox?.confirmText ?? '确定' }}</JcButton>
+      </template>
+    </JcModal>
   </div>
 </template>
 
@@ -1020,6 +1266,16 @@ onBeforeUnmount(() => {
   font-size: 12px;
   line-height: 1;
 }
+.ae-confirm-items {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--jc-text-primary, #ddd);
+  font-size: 13px;
+  line-height: 1.9;
+}
+.ae-confirm-items li::marker {
+  color: var(--jc-color-warning, #ff9c6e);
+}
 .ae-canvas-wrap {
   flex: 1;
   min-width: 0;
@@ -1032,6 +1288,76 @@ onBeforeUnmount(() => {
   cursor: grab;
   touch-action: none;
   outline: none;
+}
+.ae-minimap {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(128,128,128,0.35);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  cursor: pointer;
+  z-index: 10;
+  background: var(--jc-bg-elevated, rgba(24,24,26,0.82));
+  pointer-events: auto;
+}
+.ae-mm-close {
+  position: absolute;
+  right: 15px;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: none;
+  background: rgba(255,255,255,0.12);
+  color: rgba(255,255,255,0.85);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 11;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  &:hover { background: rgba(255,255,255,0.28); }
+}
+.ae-mm-zoom {
+  position: absolute;
+  right: 36px;
+  height: 18px;
+  min-width: 24px;
+  padding: 0 4px;
+  border-radius: 4px;
+  border: none;
+  background: rgba(128,128,128,0.25);
+  color: var(--jc-text-primary, #e6e6e6);
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 11;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  &:hover { background: rgba(128,128,128,0.45); }
+}
+.ae-mm-toggle {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  border: none;
+  background: transparent;
+  color: var(--jc-text-primary, #e6e6e6);
+  cursor: pointer;
+  z-index: 10;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  &:hover { background: rgba(128,128,128,0.18); }
 }
 .ae-main {
   flex: 1;

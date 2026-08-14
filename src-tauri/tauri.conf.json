@@ -64,7 +64,7 @@
     }
   },
   "bundle": {
-    "resources": ["vec0.dll"],
+    "resources": ["vec0.dll", "icons/icon.ico", "icons/128x128.png"],
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"]
   },
   "plugins": {

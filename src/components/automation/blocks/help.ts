@@ -84,6 +84,17 @@ export const BLOCK_HELP: Record<string, BlockHelp> = {
     downstream: 'branch（琥珀多边，紫）→ 各分支起点；join（紫）→ 全部完成后继续的积木。',
     combos: ['并行 ⤵ 命令A / 命令B ⤴ join → 结束', '并行 ⤵ 命令A / 命令B ⤴ join → 循环：每轮并发'],
   },
+  'call-automation': {
+    type: 'call-automation',
+    usage: '调用另一个工作积木（子工作流）——运行时把它作为子程序执行，共享当前变量/工作目录/环境（子程序内改动会写回父流程）。目标选「工作积木」下拉或粘贴 ID（列表/编辑器右键「复制 ID」）；可选指定「手动触发」入口块 ID。',
+    when: '把大任务拆成可复用的小工作积木、多处需要执行同一段流程时；工作积木可当「函数库」被复用，配合外部触发（MCP）可被任意处调用。',
+    downstream: '流程 out → 任意带流程 in 的积木；子工作流执行完后继续向下。',
+    combos: [
+      '命令 → 调用工作流（复用「打包并发布」）→ 通知',
+      '循环 → 调用工作流：每轮调用同一子流程处理一批',
+      '条件（成功）→ 调用工作流 → 结束',
+    ],
+  },
   'var-set': {
     type: 'var-set',
     usage: '写入一个变量，供下游通过 {{变量名}} 插值引用；值可引用上一块输出（{{last.stdout}} 等）。',
@@ -302,8 +313,7 @@ export interface PlannedBlock {
 }
 
 export const PLANNED_BLOCKS: PlannedBlock[] = [
-  { section: '入口', name: '热键触发', note: '按全局热键启动任务', milestone: 'F2' },
-  { section: '终端', name: 'PowerShell / CMD / Bash / Python / Node', note: '独立块；当前由「命令」块的 Shell 字段覆盖' },
+  // 「外部触发（MCP）」已实现（F7 2026-08-14）；「调用工作流」已实现（F7 2026-08-14：call-automation 块，共享父 ctx + depth 防环）
   { section: '平台', name: 'GitLab', note: '服务操作已建；可扩展 查制品/仓库管理 等更多动作', milestone: 'F5' },
   { section: '平台', name: 'Docker', note: '已建通用操作；可扩展 registry 登录（现由 Harbor 承担）' },
   { section: '环境', name: '路径解析', note: '解析 {{var}} / 相对路径' },

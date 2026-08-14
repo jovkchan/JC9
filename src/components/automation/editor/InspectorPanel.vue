@@ -64,6 +64,26 @@ const def = computed(() => (props.node ? getBlockDef(props.node.type) : undefine
 const color = computed(() => (props.node ? getBlockColor(props.node.type) : '#888'))
 const label = computed(() => (props.node ? getBlockLabel(props.node.type) : '未选中'))
 
+/** 工作积木选择（调用工作流）：下拉来自当前已保存的工作积木 */
+const automationOptions = computed(() =>
+  store.automations.map(a => ({ label: a.name || a.id, value: a.id })),
+)
+
+/** 调用工作流：目标积木的「手动触发」块选项（供「入口块 ID」选择，无需手填块 ID） */
+const targetTriggerOptions = computed<{ label: string; value: string }[]>(() => {
+  if (def.value?.type !== 'call-automation') return []
+  const targetId = asString(draft.value['automationId'])
+  if (!targetId) return []
+  const target = store.automations.find(a => a.id === targetId)
+  if (!target) return []
+  return target.nodes
+    .filter(n => n.type === 'manual-trigger')
+    .map(n => ({
+      label: n.config?.name ? `手动触发：${String(n.config.name)}` : `手动触发：${n.id.slice(0, 8)}…`,
+      value: n.id,
+    }))
+})
+
 function asString(v: unknown): string { return v == null ? '' : String(v) }
 function asNumber(v: unknown): number { const n = Number(v); return Number.isFinite(n) ? n : 0 }
 
@@ -93,8 +113,22 @@ function fieldValue(f: FieldDef) {
             <span v-if="f.required" class="ins-req">*</span>
           </label>
 
+          <!-- 调用工作流：入口块（手动触发）下拉 + 粘贴兜底（无需手填块 ID） -->
+          <div v-if="f.type === 'text' && f.key === 'entry' && targetTriggerOptions.length" class="ins-auto-row">
+            <JcSelect
+              :model-value="asString(fieldValue(f))"
+              :options="targetTriggerOptions"
+              placeholder="不填 = 用目标的「开始」"
+              @update:model-value="(v) => set(f.key, String(v))"
+            />
+            <JcInput
+              :model-value="asString(fieldValue(f))"
+              placeholder="或粘贴块 ID（右键「复制块 ID」）"
+              @update:model-value="(v) => set(f.key, String(v))"
+            />
+          </div>
           <!-- 文本（工作目录：可点选；凭据 ID：只读） -->
-          <div v-if="f.type === 'text' || f.type === 'var'" class="ins-dir-row">
+          <div v-else-if="f.type === 'text' || f.type === 'var'" class="ins-dir-row">
             <JcInput
               :model-value="asString(fieldValue(f))"
               :placeholder="f.placeholder"
@@ -127,6 +161,20 @@ function fieldValue(f: FieldDef) {
             :options="SHELL_OPTIONS"
             @update:model-value="(v) => set(f.key, String(v))"
           />
+          <!-- 工作积木选择（调用工作流）：下拉选已有 + 文本粘贴 ID 兜底 -->
+          <div v-else-if="f.type === 'automation'" class="ins-auto-row">
+            <JcSelect
+              :model-value="asString(fieldValue(f))"
+              :options="automationOptions"
+              :placeholder="f.placeholder"
+              @update:model-value="(v) => set(f.key, String(v))"
+            />
+            <JcInput
+              :model-value="asString(fieldValue(f))"
+              placeholder="或粘贴 ID（列表/编辑器右键复制）"
+              @update:model-value="(v) => set(f.key, String(v))"
+            />
+          </div>
           <!-- 下拉 -->
           <JcSelect
             v-else-if="f.type === 'select'"
@@ -256,6 +304,14 @@ function fieldValue(f: FieldDef) {
 .ins-dir-row > :first-child {
   flex: 1;
   min-width: 0;
+}
+.ins-auto-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ins-auto-row > :first-child {
+  width: 100%;
 }
 .ins-placeholder {
   flex: 1;

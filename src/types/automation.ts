@@ -132,7 +132,7 @@ export interface CredentialInput {
 // ── 积木注册表（Schema 驱动）──
 export type FieldType =
   | 'text' | 'textarea' | 'number' | 'select' | 'switch'
-  | 'shell' | 'credential' | 'env' | 'var'
+  | 'shell' | 'credential' | 'env' | 'var' | 'automation'
 
 export interface FieldDef {
   key: string

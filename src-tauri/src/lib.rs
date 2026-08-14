@@ -12,6 +12,7 @@ use std::fs;
 use std::path::Path;
 use std::sync::Mutex;
 use tauri::{State, Manager, Emitter};
+#[cfg(not(target_os = "windows"))]
 use tauri_plugin_notification::NotificationExt;
 use chrono::{DateTime, Utc};
 
@@ -247,8 +248,46 @@ fn save_effect_config(config: String) -> Result<(), String> {
 
 /// 统一系统通知封装：唯一调用官方 notification 插件的入口。
 /// 自动化积木引擎、其他模块的命令最终都汇聚到此（避免重复对接插件）。
+/// Windows 用 tauri-winrt-notification 原生构建，显式设置 appLogoOverride（通知顶部应用图标）；
+/// 其余平台（macOS/Linux）用 tauri-plugin-notification。
 pub fn system_notify(app: &tauri::AppHandle, title: &str, body: &str) {
-    let _ = app.notification().builder().title(title).body(body).show();
+    // 通知图标：exe 同目录 icons/128x128.png（随 bundle 打包）或 icon.ico
+    let icon_path = std::env::current_exe()
+        .ok()
+        .and_then(|exe| {
+            let dir = exe.parent().unwrap_or(std::path::Path::new("."));
+            let png = dir.join("icons").join("128x128.png");
+            if png.exists() {
+                return Some(png);
+            }
+            let ico = dir.join("icons").join("icon.ico");
+            if ico.exists() {
+                return Some(ico);
+            }
+            None
+        });
+
+    #[cfg(target_os = "windows")]
+    {
+        use tauri_winrt_notification::{IconCrop, Toast};
+        let app_id = app.config().identifier.clone();
+        let mut toast = Toast::new(&app_id).title(title).text1("").text2(body);
+        if let Some(icon) = icon_path.as_deref() {
+            // Windows file URI 必须用正斜杠（file:///C:/...），反斜杠 URI 无效 → 图标空占位
+            let uri = icon.display().to_string().replace('\\', "/");
+            toast = toast.icon(std::path::Path::new(&uri), IconCrop::Square, "jc9");
+        }
+        let _ = toast.show();
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let mut builder = app.notification().builder().title(title).body(body);
+        if let Some(icon) = icon_path {
+            builder = builder.icon(icon.to_string_lossy().to_string());
+        }
+        let _ = builder.show();
+    }
 }
 
 /// 发送系统通知（前端统一入口：其他模块与自动化积木共用）

@@ -903,16 +903,21 @@ fn append_run_log(log: &RunLog) {
 
 /// 运行自动化（按 id 读取 → 校验 → walk 执行），返回 runId。
 /// entry：可选入口块 id（手动触发）；缺省找「开始」，无「开始」则找第一个「手动触发」。
-pub fn run_automation(app: &tauri::AppHandle, id: &str, entry: Option<String>, ai: Option<Arc<AgentManager>>, run_id: &str) -> Result<String, String> {
-    let run_id = run_id.to_string();
-    let content = std::fs::read_to_string(dirs_data().join("automations.json"))
-        .map_err(|e| format!("读取 automations 失败: {e}"))?;
-    let arr: Value = serde_json::from_str(&content).map_err(|e| format!("解析 automations 失败: {e}"))?;
-    let list = arr.as_array().ok_or("automations 格式错误")?;
+/// 子工作流嵌套调用最大深度（防 A→B→A 循环调用）
+const MAX_CALL_DEPTH: usize = 8;
+
+/// 解析自动化（纯函数，可从内存列表解析；顶层运行与「调用工作流」子调用共用）
+/// 返回 (name, nodes, edges, 入口块 id, 默认变量表)
+fn resolve_automation_from_list(
+    list: &[Value],
+    id: &str,
+    entry: Option<&str>,
+) -> Result<(String, Vec<Value>, Vec<Value>, String, HashMap<String, Value>), String> {
     let automation = list
         .iter()
         .find(|a| a.get("id").and_then(|i| i.as_str()) == Some(id))
-        .ok_or("未找到该自动化")?;
+        .ok_or_else(|| format!("未找到该自动化（id={}）", id))?;
+    let name = automation.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
 
     let nodes = automation.get("nodes").and_then(|n| n.as_array()).cloned().unwrap_or_default();
     let edges = automation.get("edges").and_then(|e| e.as_array()).cloned().unwrap_or_default();
@@ -920,9 +925,7 @@ pub fn run_automation(app: &tauri::AppHandle, id: &str, entry: Option<String>, a
         return Err("自动化为空，请先添加积木".into());
     }
 
-    let total = nodes.len();
-
-    // 起始变量（自动化.variables 的 value 展开）
+    // 起始变量（automation.variables 的 value 展开）
     let mut vars: HashMap<String, Value> = HashMap::new();
     if let Some(vars_obj) = automation.get("variables").and_then(|v| v.as_object()) {
         for (k, v) in vars_obj {
@@ -931,9 +934,10 @@ pub fn run_automation(app: &tauri::AppHandle, id: &str, entry: Option<String>, a
         }
     }
 
-    // 入口：显式 entry（手动触发）→ start → 第一个 manual-trigger
-    let entry_id = entry
+    // 入口：显式 entry → start → 第一个 manual-trigger
+    let entry_id: Option<String> = entry
         .filter(|s| !s.is_empty())
+        .map(String::from)
         .or_else(|| {
             nodes
                 .iter()
@@ -951,6 +955,23 @@ pub fn run_automation(app: &tauri::AppHandle, id: &str, entry: Option<String>, a
         None => return Err("缺少「开始」或「手动触发」积木".into()),
     };
 
+    Ok((name, nodes, edges, start_id, vars))
+}
+
+/// 按 id 读取并解析自动化（读 ~/.jc9/data/automations.json）
+fn resolve_automation(id: &str, entry: Option<&str>) -> Result<(String, Vec<Value>, Vec<Value>, String, HashMap<String, Value>), String> {
+    let content = std::fs::read_to_string(dirs_data().join("automations.json"))
+        .map_err(|e| format!("读取 automations 失败: {e}"))?;
+    let arr: Value = serde_json::from_str(&content).map_err(|e| format!("解析 automations 失败: {e}"))?;
+    let list = arr.as_array().ok_or("automations 格式错误")?;
+    resolve_automation_from_list(list, id, entry)
+}
+
+pub fn run_automation(app: &tauri::AppHandle, id: &str, entry: Option<String>, ai: Option<Arc<AgentManager>>, run_id: &str) -> Result<String, String> {
+    let run_id = run_id.to_string();
+    let (name0, nodes, edges, start_id, vars) = resolve_automation(id, entry.as_deref())?;
+    let total = nodes.len();
+
     let mut ctx = Ctx { vars, last: None, step: 0, cwd: String::new(), envs: HashMap::new() };
     let mut visited: HashSet<String> = HashSet::new();
     let cancel = Arc::new(AtomicBool::new(false));
@@ -964,19 +985,18 @@ pub fn run_automation(app: &tauri::AppHandle, id: &str, entry: Option<String>, a
     };
 
     emit("automation-event", &json!({
-        "type": "started", "runId": run_id, "automationId": id, "name": automation.get("name").and_then(|n| n.as_str()).unwrap_or(""),
+        "type": "started", "runId": run_id, "automationId": id, "name": name0,
         "step": 0, "total": total, "ts": now_ts()
     }));
 
     let started_at = now_ts();
     let mut steps: Vec<StepLog> = Vec::new();
-    let result = walk(&run_id, &nodes, &edges, &start_id, &mut ctx, &mut visited, total, &cancel, emit, &mut steps, ai.as_ref(), Some(app));
+    let result = walk(&run_id, &nodes, &edges, &start_id, &mut ctx, &mut visited, total, &cancel, emit, &mut steps, ai.as_ref(), Some(app), 0);
     active_runs()
         .lock()
         .map_err(|_| "运行表锁失败".to_string())?
         .remove(&run_id);
 
-    let name0 = automation.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
     let (status, err) = match result {
         Ok(()) => ("done".to_string(), None),
         Err(e) if e == STOPPED_ERR => ("stopped".to_string(), None),
@@ -1035,6 +1055,7 @@ pub fn walk(
     steps: &mut Vec<StepLog>,
     ai: Option<&Arc<AgentManager>>,
     app: Option<&tauri::AppHandle>,
+    depth: usize,
 ) -> Result<(), String> {
     if !visited.insert(node_id.to_string()) {
         return Ok(()); // 防环（循环体单独传新 visited，见 loop 分支）
@@ -1422,7 +1443,7 @@ pub fn walk(
                 let mut body_visited: HashSet<String> = HashSet::new();
                 for e in &body_edges {
                     if let Some(to) = e.get("toBlock").and_then(|t| t.as_str()) {
-                        walk(run_id, nodes, edges, to, ctx, &mut body_visited, total, cancel, emit, steps, ai, app)?;
+                        walk(run_id, nodes, edges, to, ctx, &mut body_visited, total, cancel, emit, steps, ai, app, depth)?;
                     }
                 }
                 iter += 1;
@@ -1448,7 +1469,7 @@ pub fn walk(
             if branch_edges.len() == 1 {
                 let mut bv: HashSet<String> = HashSet::new();
                 if let Some(to) = branch_edges[0].get("toBlock").and_then(|t| t.as_str()) {
-                    walk(run_id, nodes, edges, to, ctx, &mut bv, total, cancel, emit, steps, ai, app)?;
+                    walk(run_id, nodes, edges, to, ctx, &mut bv, total, cancel, emit, steps, ai, app, depth)?;
                 }
             } else if !branch_edges.is_empty() {
                 // 并发：每个分支独立 Ctx 副本 + 独立步骤列表，线程执行；全部完成后汇合
@@ -1462,7 +1483,7 @@ pub fn walk(
                         handles.push(s.spawn(move || -> Result<Vec<StepLog>, String> {
                             let mut bv: HashSet<String> = HashSet::new();
                             let mut bsteps: Vec<StepLog> = Vec::new();
-                            walk(run_id, nodes, edges, &to, &mut bctx, &mut bv, total, &cancel, emit, &mut bsteps, ai, app)?;
+                            walk(run_id, nodes, edges, &to, &mut bctx, &mut bv, total, &cancel, emit, &mut bsteps, ai, app, depth)?;
                             Ok(bsteps)
                         }));
                     }
@@ -1500,6 +1521,28 @@ pub fn walk(
                 "vars": ctx.vars, "step": ctx.step, "total": total, "ts": now_ts()
             }));
             let detail = format!("{} = {}", var_name, value);
+            log_step(run_id, emit, steps, node_id, name, &node_label, ctx.step, "ok", started_at, Some(0), "", &detail, &ctx.cwd, &auth, None, None);
+        }
+        "call-automation" => {
+            // 调用工作流（子自动化）：运行时把另一个工作积木作为子程序执行；v1 共享父 ctx（变量/工作目录/环境/上一步输出继承并写回）
+            let target_id = interpolate(get_str(&config, "automationId"), ctx);
+            if target_id.is_empty() {
+                return Err(format!("调用工作流块 {}：缺少目标自动化 ID（可在列表/编辑器右键「复制 ID」获取）", node_id));
+            }
+            if depth >= MAX_CALL_DEPTH {
+                return Err(format!("调用工作流嵌套过深（超过 {} 层），可能存在循环调用 A→B→A", MAX_CALL_DEPTH));
+            }
+            let entry_cfg = get_str(&config, "entry").to_string();
+            let (_sub_name, sub_nodes, sub_edges, sub_start, _) = resolve_automation(&target_id, if entry_cfg.is_empty() { None } else { Some(&entry_cfg) })?;
+            let sub_total = sub_nodes.len();
+            // 子图独立 visited（本块可被多次调用；防环由 depth 限制）；子图日志并入父 RunLog
+            let mut sub_visited: HashSet<String> = HashSet::new();
+            walk(run_id, &sub_nodes, &sub_edges, &sub_start, ctx, &mut sub_visited, sub_total, cancel, emit, steps, ai, app, depth + 1)?;
+            emit("automation-event", &json!({
+                "type": "step_done", "runId": run_id, "blockId": node_id, "name": node_label,
+                "exitCode": 0, "step": ctx.step, "total": total, "ts": now_ts()
+            }));
+            let detail = format!("调用工作流 {}（{} 块）", target_id, sub_nodes.len());
             log_step(run_id, emit, steps, node_id, name, &node_label, ctx.step, "ok", started_at, Some(0), "", &detail, &ctx.cwd, &auth, None, None);
         }
         "ai-generate" => {
@@ -1561,7 +1604,7 @@ pub fn walk(
             if is_loop_back(nodes, to, e.get("toPort").and_then(|p| p.as_str())) {
                 continue;
             }
-            walk(run_id, nodes, edges, to, ctx, visited, total, cancel, emit, steps, ai, app)?;
+            walk(run_id, nodes, edges, to, ctx, visited, total, cancel, emit, steps, ai, app, depth)?;
         }
     }
     Ok(())
@@ -1647,7 +1690,7 @@ mod tests {
         let cancel = Arc::new(AtomicBool::new(false));
         let mut ctx = mk_ctx(HashMap::new(), None);
         let mut visited = HashSet::new();
-        walk("t", &nodes, &edges, "loop", &mut ctx, &mut visited, nodes.len(), &cancel, emit, &mut Vec::new(), None, None).unwrap();
+        walk("t", &nodes, &edges, "loop", &mut ctx, &mut visited, nodes.len(), &cancel, emit, &mut Vec::new(), None, None, 0).unwrap();
         let evs = events.lock().unwrap();
         // 3 轮迭代 + 循环体 var-set 执行 3 次 + 循环结束后 end 执行 1 次
         assert_eq!(count_event(&evs, "loop_iter", Some("loop")), 3);
@@ -1679,7 +1722,7 @@ mod tests {
         vars.insert("I".into(), json!("5"));
         let mut ctx = mk_ctx(vars, None);
         let mut visited = HashSet::new();
-        walk("t", &nodes, &edges, "loop", &mut ctx, &mut visited, nodes.len(), &cancel, emit, &mut Vec::new(), None, None).unwrap();
+        walk("t", &nodes, &edges, "loop", &mut ctx, &mut visited, nodes.len(), &cancel, emit, &mut Vec::new(), None, None, 0).unwrap();
         let evs = events.lock().unwrap();
         // 第一轮 true → 循环体把 I 置 0 → 第二轮条件 false 退出 → 只执行 1 轮
         assert_eq!(count_event(&evs, "loop_iter", Some("loop")), 1);
@@ -1709,7 +1752,7 @@ mod tests {
         let cancel = Arc::new(AtomicBool::new(false));
         let mut ctx = mk_ctx(HashMap::new(), None);
         let mut visited = HashSet::new();
-        walk("t", &nodes, &edges, "par", &mut ctx, &mut visited, nodes.len(), &cancel, emit, &mut Vec::new(), None, None).unwrap();
+        walk("t", &nodes, &edges, "par", &mut ctx, &mut visited, nodes.len(), &cancel, emit, &mut Vec::new(), None, None, 0).unwrap();
         let evs = events.lock().unwrap();
         // 两个分支各执行 1 次；汇合后 end 执行 1 次
         assert_eq!(count_event(&evs, "step_start", Some("a")), 1);
@@ -1735,7 +1778,7 @@ mod tests {
         let cancel2 = Arc::clone(&cancel);
         std::thread::scope(|s| {
             let h = s.spawn(move || {
-                walk("t", &nodes, &edges, "d", &mut ctx, &mut visited, nodes.len(), &cancel2, emit, &mut Vec::new(), None, None)
+                walk("t", &nodes, &edges, "d", &mut ctx, &mut visited, nodes.len(), &cancel2, emit, &mut Vec::new(), None, None, 0)
             });
             std::thread::sleep(Duration::from_millis(200));
             cancel.store(true, Ordering::SeqCst);
@@ -1743,6 +1786,54 @@ mod tests {
             assert!(res.is_err());
             assert_eq!(res.unwrap_err(), STOPPED_ERR);
         });
+    }
+
+    #[test]
+    fn test_resolve_automation_from_list_finds_entry_and_vars() {
+        let list = json!([
+            {
+                "id": "a1", "name": "子流程",
+                "variables": { "X": { "type": "string", "value": "hi" } },
+                "nodes": [
+                    { "id": "start1", "type": "start" },
+                    { "id": "m1", "type": "manual-trigger" },
+                    { "id": "e1", "type": "end" },
+                ],
+                "edges": [],
+            }
+        ]);
+        let list = list.as_array().unwrap().clone();
+        // 默认入口：start
+        let (name0, nodes, _, start_id, vars) = resolve_automation_from_list(&list, "a1", None).unwrap();
+        assert_eq!(name0, "子流程");
+        assert_eq!(start_id, "start1");
+        assert_eq!(nodes.len(), 3);
+        assert_eq!(vars.get("X").and_then(|v| v.as_str()), Some("hi"));
+        // 显式 entry 优先（手动触发）
+        let (_, _, _, start_id2, _) = resolve_automation_from_list(&list, "a1", Some("m1")).unwrap();
+        assert_eq!(start_id2, "m1");
+        // 找不到 id → 报错
+        assert!(resolve_automation_from_list(&list, "nope", None).is_err());
+    }
+
+    #[test]
+    fn test_call_automation_depth_guard_prevents_loop() {
+        // call-automation 块在 depth 已达上限时，在读取磁盘前就返回「嵌套过深」——防 A→B→A 循环调用
+        let nodes = json!([
+            { "id": "call", "type": "call-automation", "config": { "automationId": "self" } },
+        ]);
+        let nodes = nodes.as_array().unwrap().clone();
+        let edges: Vec<Value> = Vec::new();
+        let events: Arc<StdMutex<Vec<(String, Value)>>> = Arc::new(StdMutex::new(Vec::new()));
+        let ev = Arc::clone(&events);
+        let emit: Emit = &move |name: &str, payload: &Value| {
+            ev.lock().unwrap().push((name.to_string(), payload.clone()));
+        };
+        let cancel = Arc::new(AtomicBool::new(false));
+        let mut ctx = mk_ctx(HashMap::new(), None);
+        let mut visited = HashSet::new();
+        let err = walk("t", &nodes, &edges, "call", &mut ctx, &mut visited, nodes.len(), &cancel, emit, &mut Vec::new(), None, None, MAX_CALL_DEPTH).unwrap_err();
+        assert!(err.contains("嵌套过深"), "got: {}", err);
     }
 }
 

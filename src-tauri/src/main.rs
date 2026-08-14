@@ -47,7 +47,7 @@ mod windows_setup {
             // ① 应用名（通知顶部显示的名称）
             let display_name_v = wide("DisplayName");
             let display_name = wide(DISPLAY_NAME);
-            RegSetKeyValueW(
+            let rc1 = RegSetKeyValueW(
                 HKEY_CURRENT_USER,
                 sub_key.as_ptr(),
                 display_name_v.as_ptr(),
@@ -56,19 +56,36 @@ mod windows_setup {
                 (display_name.len() * 2) as u32,
             );
 
-            // ② 图标（exe 内嵌图标，`,0` 表示第一个图标）
-            if let Ok(exe) = std::env::current_exe() {
-                let icon_uri_v = wide("IconUri");
-                let icon_uri = wide(&format!("{},0", exe.to_string_lossy()));
-                RegSetKeyValueW(
-                    HKEY_CURRENT_USER,
-                    sub_key.as_ptr(),
-                    icon_uri_v.as_ptr(),
-                    REG_SZ,
-                    icon_uri.as_ptr() as *const u8,
-                    (icon_uri.len() * 2) as u32,
-                );
-            }
+            // ② 图标：优先 exe 同目录 icons/128x128.png（独立 PNG，Windows Toast 最稳），
+            //    其次 icons/icon.ico（ICO 内嵌 PNG 可能有兼容问题），最后回退 exe 内嵌图标
+            let icon_uri = std::env::current_exe()
+                .map(|exe| {
+                    let dir = exe.parent().unwrap_or(std::path::Path::new("."));
+                    let png = dir.join("icons").join("128x128.png");
+                    if png.exists() {
+                        return png.display().to_string();
+                    }
+                    let ico = dir.join("icons").join("icon.ico");
+                    if ico.exists() {
+                        return ico.display().to_string();
+                    }
+                    format!("{},0", exe.display())
+                })
+                .unwrap_or_default();
+            let icon_uri_v = wide("IconUri");
+            let icon_uri_w = wide(&icon_uri);
+            let rc2 = RegSetKeyValueW(
+                HKEY_CURRENT_USER,
+                sub_key.as_ptr(),
+                icon_uri_v.as_ptr(),
+                REG_SZ,
+                icon_uri_w.as_ptr() as *const u8,
+                (icon_uri_w.len() * 2) as u32,
+            );
+            eprintln!(
+                "[jc9] AUMID 注册: DisplayName={} (rc={}), IconUri={} (rc={})",
+                DISPLAY_NAME, rc1, icon_uri, rc2
+            );
         }
     }
 }

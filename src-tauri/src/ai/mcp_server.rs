@@ -541,6 +541,18 @@ async fn handle_tools_list() -> Result<Value, String> {
                     },
                     "required": ["ids"]
                 }
+            },
+            {
+                "name": "jc9_automation_run",
+                "description": "外部触发：按工作积木ID运行一个自动化任务（JC9「自动化」板块的积木式任务）。ID 可在 JC9 自动化列表/编辑器右键「复制 ID」获取。可选 entry 指定「手动触发」块 ID，从该入口运行；缺省用「开始」块或第一个「手动触发」块。运行为异步（立即返回 runId），结果通过 automation-event / automation_logs 查询。注意：AI 生成块在此模式下不可用（未注入模型）。",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type":"string","description":"工作积木 ID（在 JC9 自动化列表/编辑器右键「复制 ID」获取）"},
+                        "entry": {"type":"string","description":"可选：手动触发块 ID，从该入口运行"}
+                    },
+                    "required": ["id"]
+                }
             }
         ]
     }))
@@ -583,8 +595,41 @@ async fn handle_tools_call(state: &Arc<AppState>, ctx: &RequestContext, msg: &Mc
         "jc9_memory_list" => cmd_memory_list(state, ctx, &args).await,
         "jc9_memory_read" => cmd_memory_read(state, &args).await,
         "jc9_memory_compress" => cmd_memory_compress(state, &args).await,
+        "jc9_automation_run" => cmd_automation_run(state, &args).await,
         _ => Err(format!("未知工具: {}", tool_name)),
     }
+}
+
+// ══════════════════════════════════════════════════════════════
+// cmd_automation_run — 外部触发：按工作积木 ID 运行自动化任务
+// ══════════════════════════════════════════════════════════════
+
+async fn cmd_automation_run(state: &Arc<AppState>, args: &Value) -> Result<Value, String> {
+    let id = args["id"].as_str().ok_or("缺少 id 参数（工作积木 ID，可在 JC9 自动化列表/编辑器右键「复制 ID」获取）")?;
+    // 预校验 id 是否存在，立即给调用方明确反馈（未找到直接报错，不异步吞掉）
+    let exists = crate::database::get_automations()
+        .ok()
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|v| v.as_array().cloned())
+        .map(|list| list.iter().any(|a| a.get("id").and_then(|i| i.as_str()) == Some(id)))
+        .unwrap_or(false);
+    if !exists {
+        return Err(format!("未找到 ID 为 {} 的工作积木", id));
+    }
+    let entry = args["entry"].as_str().map(|s| s.to_string());
+    let app = state.app_handle.clone().ok_or("MCP Server 未绑定应用句柄")?;
+    let run_id = crate::automation::new_run_id();
+    let run_id2 = run_id.clone();
+    let id2 = id.to_string();
+    let app2 = app.clone();
+    std::thread::spawn(move || {
+        let _ = crate::automation::run_automation(&app2, &id2, entry, None, &run_id2);
+    });
+    Ok(json!({
+        "runId": run_id,
+        "status": "started",
+        "message": format!("已触发工作积木 {}（运行中）", id)
+    }))
 }
 
 // ══════════════════════════════════════════════════════════════

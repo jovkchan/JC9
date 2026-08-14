@@ -85,6 +85,13 @@ export function blockSummary(type: string, config: Record<string, unknown>): str
       if (vt && vt !== 'string') rows.push(`类型 ${vt}`)
       return rows
     }
+    case 'call-automation': {
+      const id = s(c.automationId)
+      const short = id.length > 16 ? `${id.slice(0, 16)}…` : id
+      const rows = one(short ? `调用 ${short}` : '')
+      if (s(c.entry)) rows.push(`入口 ${s(c.entry)}`)
+      return rows
+    }
     case 'ai-generate': {
       const rows = nonEmptyLines(s(c.prompt), MAX_SUMMARY_LINES - 1)
       if (s(c.varName)) rows.push(`→ ${s(c.varName)}`)

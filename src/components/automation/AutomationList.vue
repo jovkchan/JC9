@@ -52,6 +52,7 @@ const ctxItems: JcContextMenuItem[] = [
   { label: '运行', value: 'run' },
   { label: '编辑', value: 'edit' },
   { label: '复制', value: 'duplicate' },
+  { label: '复制 ID', value: 'copy-id' },
   { label: '删除', value: 'delete', danger: true },
 ]
 
@@ -78,6 +79,11 @@ function onCtxSelect(item: JcContextMenuItem) {
   if (item.value === 'run') store.run(id)
   else if (item.value === 'edit') store.open(id)
   else if (item.value === 'duplicate') { const c = store.duplicate(id); if (c) store.open(c.id) }
+  else if (item.value === 'copy-id') {
+    navigator.clipboard.writeText(id)
+      .then(() => status.pushMessage(`已复制工作积木 ID：${id}`, 'success'))
+      .catch(e => status.pushMessage(`复制失败: ${e}`, 'error'))
+  }
   else if (item.value === 'delete') store.remove(id)
   closeCtx()
 }

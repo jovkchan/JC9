@@ -18,6 +18,8 @@ tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
+# Windows Toast 原生构建（appLogoOverride 应用图标；插件桌面端不支持顶部图标）
+tauri-winrt-notification = "0.7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 portable-pty = "0.8"
