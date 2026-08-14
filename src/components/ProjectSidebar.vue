@@ -1,27 +1,22 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { useProjectStore } from '@/stores/project'
-import { useStatusStore } from '@/stores/status'
-import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import CommandDialog from '@/components/CommandDialog.vue'
 import NoteSidebar from '@/components/notes/NoteSidebar.vue'
 import type { Command } from '@/types'
 import JcContextMenu from '@/components/ui/JcContextMenu.vue'
-import JcModal from '@/components/ui/JcModal.vue'
 import JcButton from '@/components/ui/JcButton.vue'
 import JcInput from '@/components/ui/JcInput.vue'
-import JcSelect from '@/components/ui/JcSelect.vue'
-import JcTextarea from '@/components/ui/JcTextarea.vue'
 import type { JcContextMenuItem } from '@/components/ui'
 
 const props = withDefaults(defineProps<{
   /** 如果设置，强制只显示该面板，隐藏 tab 栏 */
-  forcedTab?: 'projects' | 'workflows' | 'tools' | 'notes'
+  forcedTab?: 'projects' | 'tools' | 'notes'
 }>(), { forcedTab: undefined })
 
 const store = useProjectStore()
-const activeTab = ref<'projects' | 'workflows' | 'tools' | 'notes'>('projects')
+const activeTab = ref<'projects' | 'tools' | 'notes'>('projects')
 
 /** 实际生效的 tab：forcedTab 优先级最高，否则用内部 activeTab */
 const effectiveTab = computed(() => props.forcedTab ?? activeTab.value)
@@ -181,16 +176,6 @@ function onCmdCtxSelect(item: JcContextMenuItem) {
   else if (item.value === 'renameCmd') ctxRenameCmd()
   else if (item.value === 'delCmd') ctxDelCmd()
 }
-const wfCtxItems = computed<JcContextMenuItem[]>(() => [
-  { label: '编辑', value: 'edit' },
-  { label: wfCtxItem.value?.favorite ? '取消收藏' : '收藏', value: 'fav' },
-  { label: '删除', value: 'del', danger: true },
-])
-function onWfCtxSelect(item: JcContextMenuItem) {
-  if (item.value === 'edit') wfCtxEdit()
-  else if (item.value === 'fav') wfCtxFav()
-  else if (item.value === 'del') wfCtxDel()
-}
 
 function ctxEditCmd() {
   if (cmdCtxCmd.value) {
@@ -234,414 +219,6 @@ function ctxDelCmd() {
     store.removeCommand(cmdCtxPid.value, cmdCtxCmd.value.id)
   }
   closeCmdCtx()
-}
-
-// ── 工作流 JSON 模板 ──
-const WORKFLOW_TEMPLATE_JSON = JSON.stringify({
-  name: "编译并运行",
-  description: "先编译项目，编译成功后再启动",
-  category: "Tauri",
-  steps: [
-    { name: "编译", command: "cargo build", workingDir: "src-tauri" },
-    { name: "运行", command: "npx tauri dev", workingDir: "." }
-  ]
-}, null, 2)
-
-// ---- Workflows (多命令顺序执行，替代旧快捷方式) ----
-const showWfDlg = ref(false)
-const wfEditId = ref('')
-const wfName = ref('')
-const wfDesc = ref('')
-const wfCat = ref('')
-const wfSteps = ref<Array<{ name: string; command: string; workingDir: string }>>([{ name: '', command: '', workingDir: '' }])
-const wfJsonMode = ref(false)
-const wfJsonText = ref('')
-const aiGenerating = ref(false)
-const wfAiProvider = ref('')
-const wfAiEndpoint = ref('')
-const wfAiKey = ref('')
-const wfAiModel = ref('')
-const wfModelList = ref<string[]>([])
-const wfModelMap = ref<Record<string, { provider: string; endpoint: string; apiKey: string; model: string }>>({})
-/** 模型列表已加载（缓存，避免每次打开工作流对话框重复读配置） */
-const wfModelsLoaded = ref(false)
-const wfAiMsg = ref('')
-const stepAiIdx = ref(-1)
-const stepAiInput = ref('')
-
-const WORKFLOW_SCHEMA_EXAMPLE = `{
-  "name": "编译并运行",
-  "description": "先编译项目，编译成功后再启动",
-  "category": "Tauri",
-  "steps": [
-    { "name": "编译", "command": "cargo build", "workingDir": "src-tauri" },
-    { "name": "运行", "command": "npx tauri dev", "workingDir": "." }
-  ]
-}`
-
-function openWfDlg(editId?: string) {
-  showWfDlg.value = true
-  wfJsonMode.value = false
-  // 从 JSON 加载模型列表
-  loadWfModels()
-  if (editId) {
-    const w = store.workflows.find(x => x.id === editId)
-    if (w) {
-      wfEditId.value = editId
-      wfName.value = w.name
-      wfDesc.value = w.description
-      wfCat.value = w.category
-      wfSteps.value = w.steps.map(s => ({ ...s }))
-      wfJsonText.value = JSON.stringify({ name: w.name, description: w.description, category: w.category, steps: w.steps }, null, 2)
-      return
-    }
-  }
-  // 新建：预填模板
-  wfEditId.value = ''
-  const tpl = JSON.parse(WORKFLOW_TEMPLATE_JSON)
-  wfName.value = tpl.name
-  wfDesc.value = tpl.description
-  wfCat.value = tpl.category
-  wfSteps.value = tpl.steps.map((s: any) => ({ ...s }))
-  wfJsonText.value = WORKFLOW_TEMPLATE_JSON
-}
-
-function applyJsonToForm() {
-  try {
-    const parsed = JSON.parse(wfJsonText.value)
-    wfName.value = parsed.name || ''
-    wfDesc.value = parsed.description || ''
-    wfCat.value = parsed.category || ''
-    wfSteps.value = (parsed.steps || []).map((s: any) => ({
-      name: s.name || '',
-      command: s.command || '',
-      workingDir: s.workingDir || ''
-    }))
-    wfJsonMode.value = false
-  } catch (e) {
-    useStatusStore().pushMessage(`JSON 格式错误: ${e}`, 'error')
-  }
-}
-
-function syncFormToJson() {
-  wfJsonText.value = JSON.stringify({
-    name: wfName.value,
-    description: wfDesc.value,
-    category: wfCat.value,
-    steps: wfSteps.value.filter(s => s.command.trim())
-  }, null, 2)
-  wfJsonMode.value = true
-}
-
-function addStep() {
-  wfSteps.value.push({ name: '', command: '', workingDir: '' })
-}
-
-function removeStep(idx: number) {
-  wfSteps.value.splice(idx, 1)
-}
-
-async function pickWfDir(step: { workingDir: string }) {
-  const dir = await open({ directory: true, multiple: false, title: '选择工作目录' })
-  if (dir && typeof dir === 'string') step.workingDir = dir
-}
-
-async function loadWfModels() {
-  if (wfModelsLoaded.value) return
-  try {
-    const json = await invoke<string>('get_ai_config')
-    const cfg = JSON.parse(json)
-    const modelsRaw = cfg['notes-ai-models']
-    if (modelsRaw) {
-      const models = JSON.parse(modelsRaw)
-      const labels: string[] = []
-      const map: Record<string, { provider: string; endpoint: string; apiKey: string; model: string }> = {}
-      for (const m of models) {
-        const subModels = (m.model || '').split(',').map((s: string) => s.trim()).filter(Boolean)
-        for (const sm of subModels) {
-          labels.push(`${m.name} (${sm})`)
-          map[`${m.name} (${sm})`] = { provider: m.provider, endpoint: m.endpoint, apiKey: m.apiKey || '', model: sm }
-        }
-      }
-      wfModelList.value = labels
-      wfModelMap.value = map
-      // 默认选中第一个
-      if (labels.length > 0) {
-        wfAiModel.value = labels[0]
-        selectWfModel(labels[0])
-      }
-    }
-    // fallback: 从单个配置读
-    if (wfModelList.value.length === 0) {
-      const p = cfg['notes-ai-provider'] || 'deepseek'
-      const e = cfg['notes-ai-endpoint'] || 'https://api.deepseek.com'
-      const k = cfg['notes-ai-apikey'] || ''
-      const mo = cfg['notes-ai-model'] || 'deepseek-v4-pro'
-      wfAiProvider.value = p
-      wfAiEndpoint.value = e
-      wfAiKey.value = k
-      wfAiModel.value = `${p} ${mo}`
-    }
-    wfModelsLoaded.value = true
-  } catch { /* ignore */ }
-}
-
-function selectWfModel(label: string) {
-  const m = wfModelMap.value[label]
-  if (m) {
-    wfAiProvider.value = m.provider
-    wfAiEndpoint.value = m.endpoint
-    wfAiKey.value = m.apiKey
-    // wfAiModel 由 v-model 管理，这里只记录实际模型名供 AI 调用
-  }
-}
-
-async function aiGenerateWorkflow() {
-  wfAiMsg.value = ''
-  const desc = wfDesc.value.trim()
-  if (!desc) {
-    wfAiMsg.value = '⚠️ 请先填写「说明」'
-    return
-  }
-  const provider = wfAiProvider.value || 'deepseek'
-  const endpoint = wfAiEndpoint.value || 'https://api.deepseek.com'
-  const apiKey = wfAiKey.value
-  const selectedCfg = wfModelMap.value[wfAiModel.value]
-  const model = selectedCfg?.model || ''
-
-  if (!apiKey && provider !== 'ollama') {
-    wfAiMsg.value = '⚠️ 该模型未配置 API Key'
-    return
-  }
-  if (!model && !wfAiModel.value) {
-    wfAiMsg.value = '⚠️ 请选择一个模型'
-    return
-  }
-  aiGenerating.value = true
-  wfAiMsg.value = '⏳ 正在生成...'
-  try {
-    // 系统环境信息
-    const ua = navigator.userAgent
-    const isWin = ua.includes('Windows')
-    const isWin11 = ua.includes('Windows NT 10.0') && ua.includes('.0') // Win11 also reports NT 10.0
-    const osName = isWin
-      ? (isWin11 ? 'Windows 11' : (ua.match(/Windows NT (\d+\.\d+)/)?.[1] === '10.0' ? 'Windows 10' : 'Windows'))
-      : (ua.includes('Mac') ? 'macOS' : (ua.includes('Linux') ? 'Linux' : 'Unknown'))
-    const arch = ua.includes('Win64') || ua.includes('x64') ? 'x86_64' : (ua.includes('ARM') ? 'ARM64' : 'x86')
-
-    const prompt = `你是一个工作流 JSON 生成器。根据用户的描述，生成符合以下 schema 的 JSON：
-
-## 运行环境
-- 操作系统：${osName} (${arch})
-- 默认 Shell：PowerShell（也兼容 cmd.exe）
-- 可用工具：git, node, npm, npx, cargo, rustc, go, python, robocopy, xcopy, curl, tar, 7z
-- 路径分隔符：\\（PowerShell 中路径可直接使用）
-- 换行符：CRLF (\\r\\n)
-- 编码：UTF-8
-
-## JSON Schema
-{
-  "name": "工作流名称",
-  "description": "描述",
-  "category": "分类",
-  "steps": [
-    { "name": "步骤名", "command": "要执行的命令", "workingDir": "工作目录" }
-  ]
-}
-
-## 示例
-${WORKFLOW_SCHEMA_EXAMPLE}
-
-## 用户需求
-${desc}
-
-## 约束
-- 只输出 JSON，不要包含任何解释、代码块标记或其他文字
-- 确保 steps 数组至少有一项
-- 使用 PowerShell 语法（如 Copy-Item 而非 copy，New-Item 而非 mkdir）
-- 文件名含空格或特殊字符时请用双引号包裹路径
-- PowerShell 中路径的反斜杠无需转义`
-
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-    if (provider !== 'ollama') headers['Authorization'] = `Bearer ${apiKey}`
-
-    const body = provider === 'ollama'
-      ? JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], stream: false })
-      : JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], temperature: 0.3, stream: false })
-
-    const responseText = await invoke<string>('proxy_ai_request', {
-      url: provider === 'ollama' ? `${endpoint}/api/chat` : `${endpoint}/chat/completions`,
-      method: 'POST',
-      headers: Object.entries(headers),
-      body,
-    })
-
-    // 解析 AI 响应
-    let jsonStr = ''
-    if (provider === 'ollama') {
-      const parsed = JSON.parse(responseText)
-      jsonStr = parsed.message?.content || ''
-    } else {
-      const parsed = JSON.parse(responseText)
-      jsonStr = parsed.choices?.[0]?.message?.content || ''
-    }
-
-    // 提取 JSON（去掉可能的代码块标记）
-    const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/) || jsonStr.match(/{[\s\S]*}/)
-    const cleanJson = jsonMatch ? jsonMatch[1] || jsonMatch[0] : jsonStr
-
-    // 验证 JSON 合法性
-    const parsed = JSON.parse(cleanJson)
-    if (!parsed.steps || !Array.isArray(parsed.steps)) {
-      throw new Error('生成的 JSON 缺少 steps 数组')
-    }
-
-    // 填充到表单
-    wfJsonText.value = JSON.stringify(parsed, null, 2)
-    wfName.value = parsed.name || wfName.value
-    wfDesc.value = parsed.description || wfDesc.value
-    wfCat.value = parsed.category || wfCat.value
-    wfSteps.value = (parsed.steps || []).map((s: any) => ({
-      name: s.name || '',
-      command: s.command || '',
-      workingDir: s.workingDir || ''
-    }))
-
-    useStatusStore().pushMessage('✅ 工作流 JSON 已生成', 'success')
-    wfAiMsg.value = ''
-  } catch (e) {
-    useStatusStore().pushMessage(`AI 生成失败: ${e}`, 'error')
-    wfAiMsg.value = `❌ ${e}`
-  } finally {
-    aiGenerating.value = false
-  }
-}
-
-const stepAiMsg = ref('')
-
-async function aiGenStep(step: { name: string; command: string; workingDir: string }) {
-  const desc = stepAiInput.value.trim()
-  if (!desc) { stepAiMsg.value = '⚠️ 输入描述'; return }
-  stepAiMsg.value = '⏳ 生成中...'
-  const provider = wfAiProvider.value || 'deepseek'
-  const endpoint = wfAiEndpoint.value || 'https://api.deepseek.com'
-  const apiKey = wfAiKey.value
-  const selectedCfg = wfModelMap.value[wfAiModel.value]
-  const model = selectedCfg?.model || ''
-  if (!apiKey && provider !== 'ollama') { stepAiMsg.value = '⚠️ 未配置 Key'; return }
-
-  const prompt = `你是一个命令生成助手。用户需要一条在 Windows PowerShell 中执行的命令。
-原命令（如果有）：${step.command || '无'}
-用户需求：${desc}
-
-请只输出命令本身，不要包含解释、代码块标记或其他文字。命令应在 PowerShell 中可执行。`
-
-  try {
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-    if (provider !== 'ollama') headers['Authorization'] = `Bearer ${apiKey}`
-    const body = provider === 'ollama'
-      ? JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], stream: false })
-      : JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], temperature: 0.3, stream: false })
-    const url = provider === 'ollama' ? `${endpoint}/api/chat` : `${endpoint}/chat/completions`
-    const text = await invoke<string>('proxy_ai_request', { url, method: 'POST', headers: Object.entries(headers), body })
-    const parsed = JSON.parse(text)
-    const raw = provider === 'ollama' ? (parsed.message?.content || '') : (parsed.choices?.[0]?.message?.content || '')
-    const cmd = raw.replace(/```[\s\S]*?```/g, '').replace(/`([^`]+)`/g, '$1').trim().split('\n')[0].trim()
-    if (cmd) { step.command = cmd; stepAiIdx.value = -1; stepAiMsg.value = ''; useStatusStore().pushMessage('✅ 命令已生成', 'success') }
-    else { stepAiMsg.value = '⚠️ AI 未返回有效命令' }
-  } catch (e) { stepAiMsg.value = `❌ ${e}` }
-}
-
-function saveWf() {
-  let n = wfName.value.trim()
-  if (!n) { useStatusStore().pushMessage('请输入工作流名称', 'warn'); return }
-  let steps = wfSteps.value.filter(s => s.command.trim())
-  if (wfJsonMode.value) {
-    try {
-      const parsed = JSON.parse(wfJsonText.value)
-      n = parsed.name || n
-      steps = (parsed.steps || []).filter((s: any) => s.command)
-    } catch { useStatusStore().pushMessage('JSON 格式错误', 'error'); return }
-  }
-  if (steps.length === 0) { useStatusStore().pushMessage('请至少添加一个命令步骤', 'warn'); return }
-  if (wfEditId.value) {
-    // 直接替换整个 workflow 对象（强制触发响应式更新）
-    const idx = store.workflows.findIndex(x => x.id === wfEditId.value)
-    if (idx >= 0) {
-      store.workflows[idx] = {
-        ...store.workflows[idx],
-        name: n,
-        description: wfDesc.value.trim(),
-        category: wfCat.value.trim() || '自定义',
-        steps
-      }
-      // 立即持久化
-      invoke('save_workflows', { workflowsJson: JSON.stringify(store.workflows) }).catch(e => console.error(e))
-    }
-    useStatusStore().pushMessage(`工作流「${n}」已保存`, 'success')
-  } else {
-    store.addWorkflow({
-      name: n,
-      description: wfDesc.value.trim(),
-      category: wfCat.value.trim() || '自定义',
-      steps
-    })
-  }
-  showWfDlg.value = false
-}
-
-const wfSearch = ref('')
-const wfTab = ref<'all' | 'freq' | 'fav'>('all')
-const expandedCat = ref('')
-
-const wfCats = computed(() => [...new Set(store.workflows.map(w => w.category))])
-
-function wfsByCat(cat: string) {
-  return store.workflows.filter(w => w.category === cat && matchesSearch(w))
-}
-
-function matchesSearch(w: { name: string; description: string; steps: Array<{ command: string }> }) {
-  const q = wfSearch.value
-  if (!q) return true
-  return w.name.includes(q) || w.description.includes(q) || w.steps.some(s => s.command.includes(q))
-}
-
-const filteredFreq = computed(() =>
-  store.frequentWorkflows.filter(w => matchesSearch(w))
-)
-
-const filteredFav = computed(() =>
-  store.favWorkflows.filter(w => matchesSearch(w))
-)
-
-// Context menu
-const wfCtxShow = ref(false)
-const wfCtxPos = ref({ x: 0, y: 0 })
-const wfCtxItem = ref<import('@/types').Workflow | null>(null)
-
-function openWfCtx(e: MouseEvent, w: import('@/types').Workflow) {
-  e.preventDefault()
-  wfCtxPos.value = { x: e.clientX, y: e.clientY }
-  wfCtxItem.value = w
-  wfCtxShow.value = true
-}
-
-function closeWfCtx() { wfCtxShow.value = false }
-
-function wfCtxEdit() {
-  const w = wfCtxItem.value
-  if (w) openWfDlg(w.id)
-  closeWfCtx()
-}
-
-function wfCtxDel() {
-  if (wfCtxItem.value) store.removeWorkflow(wfCtxItem.value.id)
-  closeWfCtx()
-}
-
-function wfCtxFav() {
-  if (wfCtxItem.value) store.toggleWfFav(wfCtxItem.value.id)
-  closeWfCtx()
 }
 
 const allTools = [
@@ -701,7 +278,7 @@ const recentUsedTools = computed(() => {
   return store.recentTools.map(type => allTools.find(t => t.type === type)).filter(Boolean) as typeof allTools
 })
 
-function switchTab(tab: 'projects'|'workflows'|'tools'|'notes') {
+function switchTab(tab: 'projects'|'tools'|'notes') {
   activeTab.value = tab
   store.sidebarTab = tab
 }
@@ -709,13 +286,10 @@ function switchTab(tab: 'projects'|'workflows'|'tools'|'notes') {
 function handleGlobalClick() {
   closeProjCtx()
   closeCmdCtx()
-  closeWfCtx()
 }
 
 onMounted(() => {
   document.addEventListener('click', handleGlobalClick)
-  // 预加载工作流 AI 模型列表（打开对话框时直接命中缓存，响应更快）
-  loadWfModels()
 })
 
 onUnmounted(() => {
@@ -728,7 +302,6 @@ onUnmounted(() => {
    
     <div v-if="!forcedTab" class="tabs" role="tablist">
       <div :class="['tab',{on:activeTab==='projects'}]" role="tab" :aria-selected="activeTab==='projects'" tabindex="0" @click="switchTab('projects')" @keyup.enter="switchTab('projects')">项目</div>
-      <div :class="['tab',{on:activeTab==='workflows'}]" role="tab" :aria-selected="activeTab==='workflows'" tabindex="0" @click="switchTab('workflows')" @keyup.enter="switchTab('workflows')">快捷</div>
       <div :class="['tab',{on:activeTab==='tools'}]" role="tab" :aria-selected="activeTab==='tools'" tabindex="0" @click="switchTab('tools')" @keyup.enter="switchTab('tools')">工具</div>
       <div :class="['tab',{on:activeTab==='notes'}]" role="tab" :aria-selected="activeTab==='notes'" tabindex="0" @click="switchTab('notes')" @keyup.enter="switchTab('notes')">笔记</div>
     </div>
@@ -771,48 +344,6 @@ onUnmounted(() => {
         <div v-if="store.projects.length===0&&!showAdd" class="empty">点击 + 添加项目</div>
       </div>
       <CommandDialog ref="cmdDialogRef" :project-id="dialogProjectId" :editing="editingCmd" @close="editingCmd=null" />
-    </div>
-
-    <!-- Workflows (多命令顺序执行) -->
-    <div v-show="effectiveTab==='workflows'" class="panel" style="display:flex;flex-direction:column">
-      <div class="bar">
-        <JcButton size="small" @click="openWfDlg()">+ 新建工作流</JcButton>
-        <span v-if="store.workflowRunning" class="wf-badge">运行中...</span>
-      </div>
-      <div class="tabs">
-        <div :class="['tab',{on:wfTab==='all'}]" @click="wfTab='all'">全部</div>
-        <div :class="['tab',{on:wfTab==='freq'}]" @click="wfTab='freq'">常用</div>
-        <div :class="['tab',{on:wfTab==='fav'}]" @click="wfTab='fav'">收藏</div>
-      </div>
-      <div style="flex:1;overflow-y:auto">
-        <template v-if="wfTab==='all'">
-          <div v-for="cat in wfCats" :key="cat" style="border-bottom:1px solid var(--jc-border-default)">
-            <div class="scat" @click="expandedCat = expandedCat===cat?'':cat">{{ expandedCat===cat?'▾':'▸'}} {{ cat }}</div>
-            <div v-if="expandedCat===cat">
-              <div v-for="w in wfsByCat(cat)" :key="w.id" class="sc" @click="store.runWorkflow(w.id)" @contextmenu="openWfCtx($event,w)">
-                <span class="fav-star" v-if="w.favorite">★</span>
-                <span class="scc">{{ w.name }}</span>
-                <span class="scd">{{ w.steps.length }}步</span>
-              </div>
-            </div>
-          </div>
-        </template>
-        <template v-if="wfTab==='freq'">
-          <div v-for="w in filteredFreq" :key="w.id" class="sc" @click="store.runWorkflow(w.id)" @contextmenu="openWfCtx($event,w)">
-            <span class="fav-star" v-if="w.favorite">★</span>
-            <span class="scc">{{ w.name }}</span><span class="scd">{{ w.useCount }}次</span>
-          </div>
-        </template>
-        <template v-if="wfTab==='fav'">
-          <div v-for="w in filteredFav" :key="w.id" class="sc" @click="store.runWorkflow(w.id)" @contextmenu="openWfCtx($event,w)">
-            <span class="fav-star">★</span>
-            <span class="scc">{{ w.name }}</span>
-          </div>
-        </template>
-      </div>
-      <div style="padding:4px 6px;border-top:1px solid var(--jc-border-default);flex-shrink:0">
-        <JcInput beam glow v-model="wfSearch" placeholder="搜索工作流..." size="small" />
-      </div>
     </div>
 
     <!-- Tools -->
@@ -930,72 +461,6 @@ onUnmounted(() => {
 
     <JcContextMenu :show="projCtxShow" :x="projCtxPos.x" :y="projCtxPos.y" :items="projCtxItems" @select="onProjCtxSelect" @update:show="projCtxShow = $event" />
     <JcContextMenu :show="cmdCtxShow" :x="cmdCtxPos.x" :y="cmdCtxPos.y" :items="cmdCtxItems" @select="onCmdCtxSelect" @update:show="cmdCtxShow = $event" />
-    <!-- 工作流编辑对话框 -->
-    <JcModal v-model:open="showWfDlg" width="560" :title="wfEditId ? '编辑工作流' : '新建工作流'">
-      <template #title>
-        <span style="display:inline-flex;gap:8px">
-          {{ wfEditId ? '编辑工作流' : '新建工作流' }}
-          <JcButton size="small" @click="wfJsonMode ? applyJsonToForm() : syncFormToJson()">
-            {{ wfJsonMode ? '📋 应用 JSON' : '✏ JSON 编辑' }}
-          </JcButton>
-        </span>
-      </template>
-            <template v-if="!wfJsonMode">
-              <div class="fld"><label>名称</label><JcInput beam glow v-model="wfName" placeholder="如: 编译并运行" autofocus /></div>
-              <div class="fld"><label>分类</label><JcInput beam glow v-model="wfCat" placeholder="如: Go / Tauri" /></div>
-              <div class="fld">
-                <label>说明</label>
-                <div style="display:flex;gap:4px">
-                  <JcInput beam glow v-model="wfDesc" placeholder="描述需求，让 AI 生成工作流" style="flex:1;min-width:0" />
-                  <JcButton size="small" @click="aiGenerateWorkflow" :disabled="aiGenerating" style="white-space:nowrap">
-                    {{ aiGenerating ? '⏳...' : '🤖 AI 生成' }}
-                  </JcButton>
-                </div>
-                <div style="display:flex;gap:4px;margin-top:4px;align-items:center">
-                  <JcSelect beam glow v-if="wfModelList.length > 0" v-model="wfAiModel" :options="wfModelList.map((l) => ({ label: l, value: l }))" size="small" style="flex:1;min-width:0" @change="selectWfModel(wfAiModel)" />
-                  <span v-else style="font-size:10px;color:var(--jc-text-secondary)">未找到模型配置，请先在设置中添加</span>
-                </div>
-                <div v-if="wfAiMsg" style="margin-top:4px;font-size:11px;color:var(--jc-text-highlight)">{{ wfAiMsg }}</div>
-              </div>
-              <div class="wf-section-label">命令步骤（顺序执行）</div>
-              <div v-for="(step, idx) in wfSteps" :key="idx" class="wf-step-card">
-                <div class="wf-step-header">
-                  <span class="wf-step-num">#{{ idx+1 }}</span>
-                  <JcInput beam glow v-model="step.name" placeholder="步骤名称" style="flex:1;min-width:0" />
-                  <JcButton size="small" danger @click="removeStep(idx)">✕</JcButton>
-                </div>
-                <JcTextarea v-model="step.command" beam glow :beam-size-ratio="0.6" :rows="2" placeholder="命令（如 go build -o app.exe .）" />
-                <JcButton size="small" @click="stepAiIdx = idx; stepAiInput = step.command">🤖 AI</JcButton>
-                <div class="wf-step-footer">
-                  <JcInput beam glow v-model="step.workingDir" placeholder="工作目录（点击📁选择）" style="flex:1;min-width:0" />
-                  <JcButton size="small" @click="pickWfDir(step)">📁</JcButton>
-                </div>
-                <div v-if="stepAiIdx === idx" class="wf-step-ai-box">
-                  <JcInput beam glow v-model="stepAiInput" placeholder="描述需要的命令" style="flex:1;min-width:0;font-size:11px" />
-                  <JcButton size="small" @click="aiGenStep(step)">生成</JcButton>
-                  <JcButton size="small" @click="stepAiIdx = -1">✕</JcButton>
-                </div>
-              </div>
-              <JcButton block @click="addStep">+ 添加步骤</JcButton>
-            </template>
-            <template v-else>
-              <div class="fld"><label>名称</label><JcInput beam glow v-model="wfName" placeholder="工作流名称" /></div>
-              <div class="fld"><label>说明</label><JcInput beam glow v-model="wfDesc" placeholder="描述需求，让 AI 生成 JSON" /></div>
-              <div style="margin-top:6px">
-                <div class="wf-section-label">JSON 定义</div>
-                <JcTextarea v-model="wfJsonText" mono beam glow :beam-size-ratio="0.6" :rows="12" :spellcheck="false" />
-                <JcButton block style="margin-top:4px" @click="aiGenerateWorkflow" :disabled="aiGenerating">
-                  {{ aiGenerating ? '⏳ 生成中...' : 'AI 按描述生成' }}
-                </JcButton>
-              </div>
-            </template>
-      <template #footer>
-        <JcButton @click="showWfDlg=false">取消</JcButton>
-        <JcButton type="primary" @click="saveWf">{{ wfEditId ? '保存' : '创建' }}</JcButton>
-      </template>
-    </JcModal>
-    <!-- 工作流右键菜单 -->
-    <JcContextMenu :show="wfCtxShow" :x="wfCtxPos.x" :y="wfCtxPos.y" :items="wfCtxItems" @select="onWfCtxSelect" @update:show="wfCtxShow = $event" />
   </aside>
 </template>
 
@@ -1063,15 +528,6 @@ input { @include input-base; }
   label { font-size:11px; color:var(--jc-text-secondary); text-transform:uppercase; letter-spacing:.5px; }
   input { @include input-base; padding:6px 10px; font-size:13px; }
 }
-
-// ── 工作流对话框（Teleport 到 body，用 :global 确保样式穿透）──
-:global(.wf-step-card) { border:1px solid var(--jc-border-default); border-radius:4px; padding:6px; margin-bottom:4px; }
-:global(.wf-step-header) { display:flex; gap:4px; align-items:center; margin-bottom:4px; }
-:global(.wf-step-num) { font-size:10px; color:var(--jc-text-secondary); }
-:global(.wf-step-footer) { margin-top:4px; display:flex; gap:4px; align-items:center; }
-:global(.wf-step-ai-box) { display:flex; gap:4px; align-items:center; margin-top:4px; }
-:global(.wf-section-label) { font-size:11px; font-weight:600; color:var(--jc-text-highlight); margin:8px 0 4px; }
-:global(.wf-acts) { margin-top:8px; }
 
 .acts { display:flex; justify-content:flex-end; gap:8px; margin-top:4px; }
 .search-bar {

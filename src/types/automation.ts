@@ -3,7 +3,7 @@
 
 export type BlockCategory =
   | 'entry' | 'terminal' | 'platform' | 'env'
-  | 'logic' | 'variable' | 'credential' | 'end'
+  | 'logic' | 'variable' | 'ai' | 'credential' | 'end' | 'scm'
 
 export type PortDataType = 'flow' | 'data-string' | 'data-number' | 'data-bool' | 'credential'
 
@@ -24,6 +24,51 @@ export interface BlockNode {
   x: number
   y: number
   config: Record<string, unknown>  // 由积木 schema 校验
+  /** 固定位置：锁定后不可拖拽（右键「固定」切换） */
+  locked?: boolean
+}
+
+/** 积木「登录」配置：绑定凭据后执行前先鉴权（见方案 §6） */
+export interface LoginConfig {
+  credentialId: string
+  credentialName: string
+  credentialKind?: CredentialKind
+  /** 登录目标平台/主机（docker/gitlab/jenkins/harbor/k8s/ssh） */
+  platform?: string
+}
+
+// ── 执行日志（结构化，每个积木执行都记录；引擎写入 automation_logs.json，最新在前）──
+export interface RunStepLog {
+  blockId: string
+  blockType: string
+  name: string
+  index: number
+  status: 'ok' | 'fail'
+  startedAt: number
+  endedAt: number
+  durationMs: number
+  exitCode: number | null
+  stdoutTail: string
+  /** 实际执行内容（已插值）：命令 / git / curl / 网址 / 程序等 */
+  detail: string
+  cwd: string
+  /** 鉴权信息（凭据名，不含明文） */
+  auth: string
+  iteration?: number
+  branch?: number
+}
+
+export interface RunLog {
+  id: string
+  automationId: string
+  automationName: string
+  entry: string
+  status: 'done' | 'failed' | 'stopped'
+  startedAt: number
+  endedAt: number
+  durationMs: number
+  error: string | null
+  steps: RunStepLog[]
 }
 
 export interface Edge {
@@ -100,6 +145,8 @@ export interface FieldDef {
   /** 是否支持 {{var}} / {{last.*}} 插值提示 */
   interpolatable?: boolean
   help?: string
+  /** 路径/文件字段的选择器：dir = 目录选择；file = 文件选择 */
+  picker?: 'dir' | 'file'
 }
 
 export interface PortCompatibility {

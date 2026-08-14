@@ -1,9 +1,9 @@
 import { defineStore } from 'pinia'
-import { ref, computed, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useStatusStore } from '@/stores/status'
-import type { Command, Project, RunningStatus, Workflow } from '@/types'
+import type { Command, Project, RunningStatus } from '@/types'
 
 function genId() { return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 9)}` }
 
@@ -30,10 +30,9 @@ export const useProjectStore = defineStore('project', () => {
   const activeMemoryIndex = ref(-1)
   const activeTabType = ref<'term'|'doc'|'tool'|'note'|'memory'>('term')
 
-  const workflows = ref<Workflow[]>([])
   const pendingInput = ref('')
   const recentTools = ref<string[]>(JSON.parse(localStorage.getItem('jc9-recent-tools') || '[]'))
-  const sidebarTab = ref<'projects'|'workflows'|'automation'|'tools'|'notes'|'memories'>('projects')
+  const sidebarTab = ref<'projects'|'automation'|'tools'|'notes'|'memories'>('projects')
 
   // ── 模块标签状态持久化（切换模块后恢复上次激活的标签）──
   const moduleTabState = ref<Record<string, { type: string; index: number; docIndex: number; toolIndex: number; memoryIndex: number }>>({})
@@ -53,7 +52,7 @@ export const useProjectStore = defineStore('project', () => {
     if (state) {
       // 校验保存的状态与当前模块匹配，避免之前 bug 导致的脏数据
       const typeOk = (
-        (tab === 'projects' || tab === 'workflows') ? (state.type === 'term' || state.type === 'doc') :
+        tab === 'projects' ? (state.type === 'term' || state.type === 'doc') :
         tab === 'tools' ? state.type === 'tool' :
         tab === 'notes' ? state.type === 'note' :
         tab === 'memories' ? state.type === 'memory' :
@@ -77,7 +76,7 @@ export const useProjectStore = defineStore('project', () => {
       // notes 交给 MainPanel 处理
     } else if (tab === 'memories' && memoryTabs.value.length > 0) {
       activeTabType.value = 'memory'; activeMemoryIndex.value = 0
-    } else if ((tab === 'projects' || tab === 'workflows') && runningTabs.value.length > 0) {
+    } else if (tab === 'projects' && runningTabs.value.length > 0) {
       activeTabType.value = 'term'; activeTabIndex.value = 0
     } else {
       activeTabType.value = 'term'
@@ -91,121 +90,6 @@ export const useProjectStore = defineStore('project', () => {
     restoreModuleState(newTab)
   })
   const mainMode = ref<'main' | 'ai'>('main')
-  const workflowRunning = ref(false)
-  const workflowProgress = ref<{ step: number; total: number; name: string; status: string; stdout: string; stderr: string } | null>(null)
-
-  // ── 工作流加载/保存 ──
-  async function loadWorkflows() {
-    try {
-      const json = await invoke<string>('get_workflows')
-      workflows.value = JSON.parse(json)
-    } catch (e) {
-      console.error(e)
-      useStatusStore().pushMessage(`加载工作流失败: ${e}`, 'error')
-    }
-  }
-
-  async function persistWorkflows() {
-    try {
-      await invoke('save_workflows', { workflowsJson: JSON.stringify(workflows.value) })
-    } catch (e) {
-      console.error(e)
-    }
-  }
-
-  function addWorkflow(w: Omit<Workflow, 'id'>) {
-    const item: Workflow = { ...w, id: genId() }
-    workflows.value.push(item)
-    persistWorkflows()
-  }
-
-  function removeWorkflow(id: string) {
-    workflows.value = workflows.value.filter(w => w.id !== id)
-    persistWorkflows()
-  }
-
-  function updateWorkflow(id: string, data: Partial<Workflow>) {
-    const w = workflows.value.find(x => x.id === id)
-    if (w) { Object.assign(w, data); persistWorkflows() }
-  }
-
-  function toggleWfFav(id: string) {
-    const w = workflows.value.find(x => x.id === id)
-    if (w) { w.favorite = !w.favorite; persistWorkflows() }
-  }
-
-  const frequentWorkflows = computed(() =>
-    [...workflows.value].filter(w => (w.useCount || 0) > 0).sort((a, b) => (b.useCount || 0) - (a.useCount || 0))
-  )
-  const favWorkflows = computed(() => workflows.value.filter(w => w.favorite))
-
-  // ── 工作流执行 ──
-  async function runWorkflow(id: string) {
-    const w = workflows.value.find(x => x.id === id)
-    if (!w || w.steps.length === 0) return
-    if (workflowRunning.value) {
-      useStatusStore().pushMessage('已有工作流正在运行', 'warn')
-      return
-    }
-
-    w.useCount = (w.useCount || 0) + 1
-    persistWorkflows()
-    workflowRunning.value = true
-    workflowProgress.value = null
-
-    // 创建工作流终端标签页
-    const wfProcessId = `workflow-${id.slice(0, 8)}`
-    const wfFullKey = cmdKey('workflow', wfProcessId)
-    const existing = runningTabs.value.findIndex(t => t.commandId === wfProcessId)
-    if (existing >= 0) {
-      activeTabIndex.value = existing
-    } else {
-      runningTabs.value.push({
-        projectId: 'workflow',
-        projectName: '工作流',
-        commandId: wfProcessId,
-        commandName: w.name,
-        command: `工作流: ${w.steps.length} 步`
-      })
-      activeTabIndex.value = runningTabs.value.length - 1
-    }
-    activeTabType.value = 'term'
-    // 重置输出缓冲区并标记运行中
-    outputMap.value[wfFullKey] = []
-    runningMap.value[wfFullKey] = 'running'
-    delete decodersMap[wfFullKey]
-    textBufferMap[wfFullKey] = ''
-
-    // 监听进度事件
-    const unlisten = await listen<any>('workflow-event', (event) => {
-      workflowProgress.value = event.payload
-      const p = event.payload
-      if (p.type === 'step_start') {
-        useStatusStore().pushMessage(`▶ 步骤 ${p.step}/${p.total}: ${p.name}`, 'info')
-        // 标记 PTY 进程 ID 以便 terminal 显示输出
-        if (p.processId) {
-          runningMap.value[p.processId] = 'running'
-        }
-      } else if (p.type === 'step_fail') {
-        useStatusStore().pushMessage(`❌ 步骤 ${p.step}/${p.total}: ${p.name}`, 'error')
-      } else if (p.type === 'workflow_done') {
-        useStatusStore().pushMessage(`🏁 工作流「${w.name}」执行完成`, 'success')
-        workflowRunning.value = false
-        workflowProgress.value = null
-        runningMap.value[wfFullKey] = 'stopped'
-      }
-    })
-
-    try {
-      await invoke('run_workflow', { tabId: wfFullKey, steps: w.steps })
-    } catch (e) {
-      runningMap.value[wfFullKey] = 'stopped'
-      useStatusStore().pushMessage(`工作流执行失败: ${e}`, 'error')
-      workflowRunning.value = false
-    } finally {
-      unlisten()
-    }
-  }
 
   let _defaultTerminalStarted = false
   function startDefaultTerminal() {
@@ -428,7 +312,6 @@ export const useProjectStore = defineStore('project', () => {
     _unlistenPty = await listen<{ processId: string; data: number[] }>('pty-output', (e) => {
       bufferPtyOutput(e.payload.processId, e.payload.data)
     })
-    await loadWorkflows()
   }
   function destroyListeners() { _unlistenExit?.(); _unlistenPty?.() }
 
@@ -485,5 +368,5 @@ export const useProjectStore = defineStore('project', () => {
     }
   }
 
-  return { projects, selectedProjectId, runningMap, outputMap, logStatsMap, runningTabs, docTabs, toolTabs, memoryTabs, activeTabIndex, activeDocIndex, activeToolIndex, activeMemoryIndex, activeTabType, workflows, pendingInput, frequentWorkflows, favWorkflows, recentTools, clearTermSignal, sidebarTab, mainMode, workflowRunning, workflowProgress, loadProjects, saveProjects, addProject, removeProject, updateProjectName, addCommand, removeCommand, updateCommand, startCommand, stopCommand, restartCommand, closeTab, closeDocTab, openDoc, openDocFromText, clearOutput, clearLogStats, getOutput, initListeners, destroyListeners, cmdKey, detectProject, bufferPtyOutput, loadWorkflows, addWorkflow, removeWorkflow, updateWorkflow, toggleWfFav, runWorkflow, startDefaultTerminal, openTool, closeToolTab, openMemoryTab, closeMemoryTab, toggleMemoryEdit, sendToTerminal, getRunningTerminals, startQuickTerminal }
+  return { projects, selectedProjectId, runningMap, outputMap, logStatsMap, runningTabs, docTabs, toolTabs, memoryTabs, activeTabIndex, activeDocIndex, activeToolIndex, activeMemoryIndex, activeTabType, pendingInput, recentTools, clearTermSignal, sidebarTab, mainMode, loadProjects, saveProjects, addProject, removeProject, updateProjectName, addCommand, removeCommand, updateCommand, startCommand, stopCommand, restartCommand, closeTab, closeDocTab, openDoc, openDocFromText, clearOutput, clearLogStats, getOutput, initListeners, destroyListeners, cmdKey, detectProject, bufferPtyOutput, startDefaultTerminal, openTool, closeToolTab, openMemoryTab, closeMemoryTab, toggleMemoryEdit, sendToTerminal, getRunningTerminals, startQuickTerminal }
 })

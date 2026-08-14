@@ -1092,39 +1092,14 @@ pub fn save_effect_config(config: &str) -> Result<(), String> {
     fs::write(&path, config).map_err(|e| format!("保存 effect-config 失败: {e}"))
 }
 
-// ── 工作流（多命令顺序执行，替代旧快捷方式）──
+// ── 自动化（积木编辑器，F1b）──
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkflowStep {
-    pub name: String,
-    pub command: String,
-    #[serde(default)]
-    pub working_dir: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
-pub struct Workflow {
-    pub id: String,
-    pub name: String,
-    pub description: String,
-    pub category: String,
-    pub steps: Vec<WorkflowStep>,
-    #[serde(default)]
-    pub favorite: bool,
-    #[serde(default)]
-    pub use_count: i32,
-}
-
-/// 读取工作流列表（~/.jc9/data/workflows.json）
-pub fn get_workflows() -> Result<String, String> {
-    let path = dirs_data().join("workflows.json");
+/// 读取自动化列表（~/.jc9/data/automations.json）
+pub fn get_automations() -> Result<String, String> {
+    let path = dirs_data().join("automations.json");
     if path.exists() {
-        fs::read_to_string(&path).map_err(|e| format!("读取 workflows 失败: {e}"))
+        fs::read_to_string(&path).map_err(|e| format!("读取 automations 失败: {e}"))
     } else {
-        // 首次使用：写入默认空列表
         let default = "[]";
         if let Some(parent) = path.parent() {
             let _ = fs::create_dir_all(parent);
@@ -1134,11 +1109,126 @@ pub fn get_workflows() -> Result<String, String> {
     }
 }
 
-/// 保存工作流列表到 JSON
-pub fn save_workflows_json(workflows_json: &str) -> Result<(), String> {
-    let path = dirs_data().join("workflows.json");
+/// 保存自动化列表（整表 JSON）
+pub fn save_automations_json(automations_json: &str) -> Result<(), String> {
+    let path = dirs_data().join("automations.json");
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    fs::write(&path, workflows_json).map_err(|e| format!("保存 workflows 失败: {e}"))
+    fs::write(&path, automations_json).map_err(|e| format!("保存 automations 失败: {e}"))
 }
+
+/// 删除单个自动化（读 → 按 id 过滤 → 写回）
+pub fn delete_automation(id: &str) -> Result<(), String> {
+    let path = dirs_data().join("automations.json");
+    let content = if path.exists() {
+        fs::read_to_string(&path).unwrap_or_else(|_| "[]".to_string())
+    } else {
+        "[]".to_string()
+    };
+    let arr: serde_json::Value =
+        serde_json::from_str(&content).map_err(|e| format!("解析 automations 失败: {e}"))?;
+    let filtered: Vec<serde_json::Value> = arr
+        .as_array()
+        .map(|xs| {
+            xs.iter()
+                .filter(|v| v.get("id").and_then(|i| i.as_str()) != Some(id))
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+    let out = serde_json::to_string(&filtered).map_err(|e| e.to_string())?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    fs::write(&path, out).map_err(|e| format!("删除 automations 失败: {e}"))
+}
+
+// ── 凭据（登录，F1b 前端壳明文 JSON；F3 字段级 AES-GCM 加密）──
+
+/// 读取凭据列表（~/.jc9/data/credentials.json，仅掩码）
+pub fn get_credentials() -> Result<String, String> {
+    let path = dirs_data().join("credentials.json");
+    if path.exists() {
+        fs::read_to_string(&path).map_err(|e| format!("读取 credentials 失败: {e}"))
+    } else {
+        let default = "[]";
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let _ = fs::write(&path, default);
+        Ok(default.to_string())
+    }
+}
+
+/// 保存凭据列表（整表 JSON）
+pub fn save_credentials_json(credentials_json: &str) -> Result<(), String> {
+    let path = dirs_data().join("credentials.json");
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    fs::write(&path, credentials_json).map_err(|e| format!("保存 credentials 失败: {e}"))
+}
+
+/// 按 id 新增/更新一条凭据（敏感字段 AES-GCM 加密后落盘；F3）
+pub fn upsert_credential(credential_json: &str) -> Result<(), String> {
+    let key = crate::credential_crypto::load_or_create_key()?;
+    let mut record: serde_json::Value = serde_json::from_str(credential_json)
+        .map_err(|e| format!("解析凭据失败: {e}"))?;
+    // 敏感字段加密（password/token/kubeconfig），明文不落盘
+    if let Some(fields) = record.get_mut("fields").and_then(|f| f.as_object_mut()) {
+        for k in crate::credential_crypto::sensitive_fields() {
+            if let Some(v) = fields.get(*k) {
+                if let Some(s) = v.as_str() {
+                    if !s.is_empty() && !crate::credential_crypto::is_encrypted(s) {
+                        let enc = crate::credential_crypto::encrypt_field(&key, s)?;
+                        fields.insert(k.to_string(), serde_json::Value::String(enc));
+                    }
+                }
+            }
+        }
+    }
+    let path = dirs_data().join("credentials.json");
+    let content = if path.exists() {
+        fs::read_to_string(&path).unwrap_or_else(|_| "[]".to_string())
+    } else {
+        "[]".to_string()
+    };
+    let mut arr: Vec<serde_json::Value> =
+        serde_json::from_str(&content).map_err(|e| format!("解析 credentials 失败: {e}"))?;
+    let id = record.get("id").and_then(|i| i.as_str()).unwrap_or("");
+    arr.retain(|c| c.get("id").and_then(|i| i.as_str()) != Some(id));
+    arr.push(record);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let out = serde_json::to_string(&arr).map_err(|e| e.to_string())?;
+    fs::write(&path, out).map_err(|e| format!("保存 credentials 失败: {e}"))
+}
+
+/// 删除单个凭据（读 → 按 id 过滤 → 写回）
+pub fn delete_credential(id: &str) -> Result<(), String> {
+    let path = dirs_data().join("credentials.json");
+    let content = if path.exists() {
+        fs::read_to_string(&path).unwrap_or_else(|_| "[]".to_string())
+    } else {
+        "[]".to_string()
+    };
+    let arr: serde_json::Value =
+        serde_json::from_str(&content).map_err(|e| format!("解析 credentials 失败: {e}"))?;
+    let filtered: Vec<serde_json::Value> = arr
+        .as_array()
+        .map(|xs| {
+            xs.iter()
+                .filter(|v| v.get("id").and_then(|i| i.as_str()) != Some(id))
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+    let out = serde_json::to_string(&filtered).map_err(|e| e.to_string())?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    fs::write(&path, out).map_err(|e| format!("删除 credentials 失败: {e}"))
+}
+

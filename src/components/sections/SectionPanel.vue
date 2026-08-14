@@ -13,9 +13,9 @@ const autoStore = useAutomationStore()
 
 <template>
   <section class="section-panel">
-    <!-- 项目/快捷/工具 复用 ProjectSidebar 的 panel -->
+    <!-- 项目/工具 复用 ProjectSidebar 的 panel -->
     <ProjectSidebar
-      v-if="store.sidebarTab === 'projects' || store.sidebarTab === 'workflows' || store.sidebarTab === 'tools'"
+      v-if="store.sidebarTab === 'projects' || store.sidebarTab === 'tools'"
       :forced-tab="store.sidebarTab"
     />
     <!-- 自动化：列表视图显示自动化列表；编辑视图隐藏列表、显示积木面板 -->

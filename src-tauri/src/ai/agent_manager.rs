@@ -5,7 +5,7 @@ use chrono::Utc;
 use rusqlite::Connection;
 
 use super::types::*;
-use super::llm::{LlmProvider, MockLlmProvider, OpenAiProvider};
+use super::llm::{LlmMessage, LlmProvider, MockLlmProvider, OpenAiProvider};
 use super::blackboard::SharedBlackboard;
 use super::approval::ApprovalQueue;
 use super::worker_manager::WorkerManager;
@@ -20,6 +20,8 @@ use super::browser::BrowserManager;
 pub struct AgentManager {
     sessions: Arc<RwLock<Vec<AiSession>>>,
     provider: Arc<tokio::sync::RwLock<Arc<dyn LlmProvider>>>,
+    /// 是否配置了真实 LLM（否则为本地 Mock，AI 积木需提示未配置）
+    configured: Arc<std::sync::atomic::AtomicBool>,
     blackboard: Arc<SharedBlackboard>,
     approval_queue: Arc<ApprovalQueue>,
     knowledge_base: Arc<KnowledgeBase>,
@@ -50,6 +52,7 @@ impl AgentManager {
         let workspace_root_lock = Arc::new(tokio::sync::RwLock::new(workspace_root.clone()));
 
         // 默认使用本地 Mock 验证闭环，检测到环境变量则使用 OpenAi 
+        let configured = Arc::new(std::sync::atomic::AtomicBool::new(std::env::var("OPENAI_API_KEY").is_ok()));
         let provider_raw: Arc<dyn LlmProvider> = if let Ok(key) = std::env::var("OPENAI_API_KEY") {
             let base_url = std::env::var("OPENAI_BASE_URL").ok();
             let model = std::env::var("OPENAI_MODEL").ok();
@@ -101,6 +104,7 @@ impl AgentManager {
             tracer,
             browser_manager,
             conn,
+            configured,
         }
     }
 
@@ -217,6 +221,26 @@ impl AgentManager {
         self.workspace_root.clone()
     }
 
+    /// 是否已配置真实 LLM（false = 本地 Mock，AI 积木应提示未配置）
+    pub fn is_configured(&self) -> bool {
+        self.configured.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// AI 积木 / 通用生成：给定 system + user 提示，一次性返回生成文本（复用全局 provider）
+    pub async fn generate_text(&self, system: &str, user: &str) -> Result<String, String> {
+        let provider = self.provider.read().await.clone();
+        let msgs = vec![
+            LlmMessage::system(system.to_string()),
+            LlmMessage::user(user.to_string()),
+        ];
+        let resp = provider.chat(&msgs, &[]).await.map_err(|e| format!("AI 调用失败: {}", e))?;
+        let content = resp.content.trim().to_string();
+        if content.is_empty() {
+            return Err("AI 未返回内容".into());
+        }
+        Ok(content)
+    }
+
     pub async fn set_reasoning_effort(&self, effort: String) {
         let eff = if effort.is_empty() || effort == "off" { None } else { Some(effort) };
         self.provider.read().await.set_reasoning_effort(eff).await;
@@ -246,6 +270,7 @@ impl AgentManager {
         ));
         *self.provider.write().await = new_provider;
         *self.worker_manager.write().await = new_wm;
+        self.configured.store(true, std::sync::atomic::Ordering::SeqCst);
         println!("🔄 [Agent] LLM 成功重新配置切换为 {}/{}", provider_name, model);
     }
 

@@ -7,6 +7,27 @@ function flowIn(id = 'in'): Port {
 function flowOut(id = 'out'): Port {
   return { id, direction: 'out', color: '#8a58ff', dataType: 'flow' }
 }
+/** 凭据端口（专属金色，dataType='credential'）：凭据块 out → 目标块 in */
+function credPort(dir: 'in' | 'out', id: string): Port {
+  return { id, direction: dir, color: '#faad14', dataType: 'credential' }
+}
+
+/** 凭据类型/平台选项（LoginDialog / InspectorPanel 共用） */
+export const CRED_KIND_OPTIONS = [
+  { label: '用户名+密码', value: 'basic' },
+  { label: 'Personal Access Token', value: 'pat' },
+  { label: 'API Token', value: 'token' },
+  { label: 'SSH 私钥', value: 'ssh-key' },
+  { label: 'Kubeconfig', value: 'kubeconfig' },
+]
+export const CRED_PLATFORM_OPTIONS = [
+  { label: 'Docker', value: 'docker' },
+  { label: 'GitLab', value: 'gitlab' },
+  { label: 'Jenkins', value: 'jenkins' },
+  { label: 'Harbor', value: 'harbor' },
+  { label: 'K8S', value: 'k8s' },
+  { label: 'SSH', value: 'ssh' },
+]
 
 /**
  * 积木注册表（Schema 驱动：InspectorPanel + AI 生成 + Canvas 渲染共用）
@@ -24,18 +45,31 @@ export const BLOCK_DEFS: BlockDef[] = [
     compatRules: [],
   },
   {
+    type: 'manual-trigger',
+    category: 'entry',
+    label: '手动触发',
+    color: '#fa8c16',
+    // 第二入口：无「开始」时从它启动；画布可对多个手动触发块分别触发各分支（F2）
+    inputs: [],
+    outputs: [flowOut()],
+    fields: [
+      { key: 'name', label: '触发名称', type: 'text', placeholder: '如 手动部署' },
+    ],
+    compatRules: [],
+  },
+  {
     type: 'command',
     category: 'terminal',
     label: '命令',
     color: '#8a58ff',
-    inputs: [flowIn()],
+    inputs: [flowIn(), credPort('in', 'cred-in')],
     outputs: [flowOut()],
     fields: [
       { key: 'command', label: '命令', type: 'textarea', required: true, placeholder: '例如 npm run build', interpolatable: true },
       { key: 'shell', label: 'Shell', type: 'shell', default: 'powershell' },
-      { key: 'cwd', label: '工作目录', type: 'text', placeholder: '{{cwd}} 或绝对路径', interpolatable: true },
-      { key: 'env', label: '环境变量', type: 'env', placeholder: 'KEY=VALUE' },
-      { key: 'timeoutSecs', label: '超时(秒)', type: 'number', default: 60 },
+      // 工作目录由「工作区」块统一设置（链路 cwd），命令块无需配置
+      { key: 'env', label: '环境变量', type: 'env', placeholder: 'KEY=VALUE', help: '设置子进程环境（区别于流程变量：流程变量用「变量赋值」+ {{var}} 插值；env 供命令运行时读取，如 PATH / CI_TOKEN）' },
+      { key: 'timeoutSecs', label: '超时(秒)', type: 'number', default: 0, placeholder: '0 = 不限时' },
       { key: 'onFail', label: '失败策略', type: 'select', default: 'stop', options: [{ label: '停止', value: 'stop' }, { label: '继续', value: 'continue' }] },
     ],
     compatRules: [],
@@ -71,6 +105,41 @@ export const BLOCK_DEFS: BlockDef[] = [
     compatRules: [],
   },
   {
+    type: 'loop',
+    category: 'logic',
+    label: '循环',
+    color: '#fa541c',
+    // 图模型（F2）：in → 进入循环；out → 循环体；循环体末连回 loop-in 则重复；结束后沿 done 走
+    inputs: [flowIn('in'), flowIn('loop-in')],
+    outputs: [flowOut('out'), flowOut('done')],
+    fields: [
+      { key: 'mode', label: '方式', type: 'select', default: 'for', options: [
+        { label: '按次数', value: 'for' },
+        { label: '按条件', value: 'while' },
+      ] },
+      { key: 'count', label: '次数', type: 'number', default: 3, interpolatable: true },
+      { key: 'left', label: '条件左值', type: 'text', placeholder: '{{var}} / {{last.*}}', interpolatable: true },
+      { key: 'op', label: '比较', type: 'select', default: '==', options: [
+        { label: '==', value: '==' }, { label: '!=', value: '!=' },
+        { label: '>', value: '>' }, { label: '<', value: '<' },
+        { label: '包含', value: 'contains' },
+      ] },
+      { key: 'right', label: '条件右值', type: 'text', interpolatable: true },
+    ],
+    compatRules: [],
+  },
+  {
+    type: 'parallel',
+    category: 'logic',
+    label: '并行',
+    color: '#00b96b',
+    // 图模型（F2）：in → branch（多出边=多分支并发）→ 全部完成后沿 join 汇合继续
+    inputs: [flowIn()],
+    outputs: [{ ...flowOut('branch'), multi: true }, flowOut('join')],
+    fields: [],
+    compatRules: [],
+  },
+  {
     type: 'var-set',
     category: 'variable',
     label: '变量赋值',
@@ -87,6 +156,81 @@ export const BLOCK_DEFS: BlockDef[] = [
     compatRules: [],
   },
   {
+    type: 'ai-generate',
+    category: 'ai',
+    label: 'AI 生成',
+    color: '#722ed1',
+    inputs: [flowIn()],
+    outputs: [flowOut()],
+    // F4 AI 积木：自然语言描述需求 → AI 生成文本 → 写入变量（下游块 {{var}} 引用）
+    fields: [
+      { key: 'prompt', label: '需求', type: 'textarea', required: true, interpolatable: true, placeholder: '用自然语言描述，可引用 {{last.stdout}} / {{cwd}}，如：查看工作区 GIT 变更，生成一句中文提交信息' },
+      { key: 'varName', label: '输出变量', type: 'var', placeholder: '如 COMMIT_MSG，留空则不保存' },
+    ],
+    compatRules: [],
+  },
+  {
+    type: 'workspace',
+    category: 'env',
+    label: '工作区',
+    color: '#13c2c2',
+    inputs: [flowIn()],
+    outputs: [flowOut()],
+    // 环境块：设置链路上下文 cwd，下游命令块未指定工作目录时继承（见方案 §4.5）
+    fields: [
+      { key: 'path', label: '路径', type: 'text', required: true, placeholder: '工作区绝对路径', interpolatable: true, picker: 'dir' },
+      { key: 'name', label: '名称', type: 'text', placeholder: '如 frontend 项目' },
+    ],
+    compatRules: [],
+  },
+  {
+    type: 'env',
+    category: 'env',
+    label: '环境变量',
+    color: '#597ef7',
+    inputs: [flowIn()],
+    outputs: [flowOut()],
+    // 环境块：设置一组链路环境变量，下游命令继承（可一行一个、多个命令共享）；命令块自身 env 叠加且覆盖
+    fields: [
+      { key: 'env', label: '变量（KEY=VALUE）', type: 'env', required: true, placeholder: '一行一个，如 NODE_ENV=production', interpolatable: true },
+    ],
+    compatRules: [],
+  },
+  {
+    type: 'open-url',
+    category: 'terminal',
+    label: '打开网址',
+    color: '#2f54eb',
+    inputs: [flowIn()],
+    outputs: [flowOut()],
+    // 单一职责：用系统默认（或指定）浏览器打开 URL；不执行程序
+    fields: [
+      { key: 'url', label: '网址', type: 'text', required: true, placeholder: 'https://...', interpolatable: true },
+      { key: 'browser', label: '浏览器', type: 'select', default: 'default', options: [
+        { label: '系统默认', value: 'default' },
+        { label: 'Chrome', value: 'chrome' },
+        { label: 'Edge', value: 'edge' },
+        { label: 'Firefox', value: 'firefox' },
+      ] },
+    ],
+    compatRules: [],
+  },
+  {
+    type: 'launch',
+    category: 'terminal',
+    label: '启动程序',
+    color: '#eb2f96',
+    inputs: [flowIn()],
+    outputs: [flowOut()],
+    // 单一职责：启动可执行程序 + 参数 + 工作目录；与「打开网址」分离
+    fields: [
+      { key: 'program', label: '程序', type: 'text', required: true, placeholder: 'exe / 命令路径', interpolatable: true, picker: 'file' },
+      { key: 'args', label: '参数', type: 'text', placeholder: '空格分隔参数', interpolatable: true },
+      { key: 'wait', label: '等待完成', type: 'switch', default: false },
+    ],
+    compatRules: [],
+  },
+  {
     type: 'end',
     category: 'end',
     label: '结束',
@@ -94,6 +238,243 @@ export const BLOCK_DEFS: BlockDef[] = [
     inputs: [flowIn()],
     outputs: [],
     fields: [],
+    compatRules: [],
+  },
+  // ── GIT 积木组（通用，远端由 git remote / clone URL 决定，不绑定 GitHub/GitLab）──
+  {
+    type: 'git-clone',
+    category: 'scm',
+    label: 'Git 克隆',
+    color: '#f05033',
+    inputs: [flowIn()],
+    outputs: [flowOut()],
+    fields: [
+      { key: 'repo', label: '仓库地址', type: 'text', required: true, placeholder: 'git@gitlab:xx.git 或 https://...', interpolatable: true },
+      { key: 'dir', label: '目标目录', type: 'text', placeholder: '留空 = 工作区', picker: 'dir' },
+      { key: 'branch', label: '分支', type: 'text', placeholder: '可选' },
+    ],
+    compatRules: [],
+  },
+  {
+    type: 'git-status',
+    category: 'scm',
+    label: 'Git 查看变更',
+    color: '#f05033',
+    inputs: [flowIn()],
+    outputs: [flowOut()],
+    // 查看变更：输出到 {{last.stdout}} 供下游引用（如 AI 生成提交信息 / 变更说明）
+    fields: [
+      { key: 'action', label: '查看', type: 'select', default: 'status', options: [
+        { label: '变更清单 (git status --short)', value: 'status' },
+        { label: '未提交差异 (git diff)', value: 'diff' },
+        { label: '最近提交 (git log -5 --oneline)', value: 'log' },
+      ] },
+      { key: 'path', label: '路径过滤', type: 'text', placeholder: '可选：仅该路径', interpolatable: true },
+    ],
+    compatRules: [],
+  },
+  {
+    type: 'git-commit',
+    category: 'scm',
+    label: 'Git 提交',
+    color: '#f05033',
+    inputs: [flowIn()],
+    outputs: [flowOut()],
+    fields: [
+      { key: 'message', label: '提交信息', type: 'textarea', required: true, placeholder: '可由 AI 生成', interpolatable: true },
+      { key: 'addAll', label: '全部暂存', type: 'switch', default: true },
+    ],
+    compatRules: [],
+  },
+  {
+    type: 'git-push',
+    category: 'scm',
+    label: 'Git 推送',
+    color: '#f05033',
+    inputs: [flowIn()],
+    outputs: [flowOut()],
+    fields: [
+      { key: 'remote', label: '远端', type: 'text', default: 'origin', placeholder: 'origin' },
+      { key: 'branch', label: '分支', type: 'text', placeholder: '留空 = 当前分支' },
+    ],
+    compatRules: [],
+  },
+  {
+    type: 'git-pull',
+    category: 'scm',
+    label: 'Git 拉取',
+    color: '#f05033',
+    inputs: [flowIn()],
+    outputs: [flowOut()],
+    fields: [
+      { key: 'remote', label: '远端', type: 'text', default: 'origin', placeholder: 'origin' },
+      { key: 'branch', label: '分支', type: 'text', placeholder: '留空 = 当前分支' },
+    ],
+    compatRules: [],
+  },
+  {
+    type: 'git-branch',
+    category: 'scm',
+    label: 'Git 分支',
+    color: '#f05033',
+    inputs: [flowIn()],
+    outputs: [flowOut()],
+    fields: [
+      { key: 'action', label: '操作', type: 'select', default: 'checkout', options: [
+        { label: '切换', value: 'checkout' },
+        { label: '新建', value: 'create' },
+        { label: '删除', value: 'delete' },
+        { label: '列出', value: 'list' },
+        { label: '合并', value: 'merge' },
+      ] },
+      { key: 'name', label: '分支名', type: 'text', interpolatable: true },
+    ],
+    compatRules: [],
+  },
+  {
+    type: 'git-tag',
+    category: 'scm',
+    label: 'Git 标签',
+    color: '#f05033',
+    inputs: [flowIn()],
+    outputs: [flowOut()],
+    fields: [
+      { key: 'action', label: '操作', type: 'select', default: 'create', options: [
+        { label: '创建', value: 'create' },
+        { label: '删除', value: 'delete' },
+        { label: '列出', value: 'list' },
+      ] },
+      { key: 'tag', label: '标签名', type: 'text', interpolatable: true },
+      { key: 'message', label: '附注', type: 'text', placeholder: '可选' },
+    ],
+    compatRules: [],
+  },
+  // ── 平台积木（F5 起步：CLI 优先，凭据经凭据端口连线注入）──
+  {
+    type: 'jenkins',
+    category: 'platform',
+    label: 'Jenkins',
+    color: '#d24939',
+    inputs: [flowIn(), credPort('in', 'cred-in')],
+    outputs: [flowOut()],
+    fields: [
+      { key: 'url', label: '平台地址', type: 'text', required: true, placeholder: 'http://jenkins:8080', interpolatable: true },
+      { key: 'job', label: '任务名', type: 'text', required: true, interpolatable: true },
+      { key: 'action', label: '操作', type: 'select', default: 'trigger', options: [
+        { label: '触发构建', value: 'trigger' },
+        { label: '查状态', value: 'status' },
+        { label: '控制台输出', value: 'console' },
+      ] },
+      { key: 'build', label: '构建号', type: 'text', placeholder: '查状态/控制台用', interpolatable: true },
+    ],
+    compatRules: [],
+  },
+  {
+    type: 'harbor',
+    category: 'platform',
+    label: 'Harbor',
+    color: '#60b932',
+    inputs: [flowIn(), credPort('in', 'cred-in')],
+    outputs: [flowOut()],
+    fields: [
+      { key: 'url', label: '平台地址', type: 'text', required: true, placeholder: 'https://harbor.example.com', interpolatable: true },
+      { key: 'project', label: '项目', type: 'text', required: true, interpolatable: true },
+      { key: 'repo', label: '仓库', type: 'text', required: true, interpolatable: true },
+      { key: 'tag', label: '标签', type: 'text', default: 'latest', interpolatable: true },
+      { key: 'context', label: '构建目录', type: 'text', placeholder: '留空 = 工作区', picker: 'dir' },
+      { key: 'dockerfile', label: 'Dockerfile', type: 'text', placeholder: '留空 = 默认', picker: 'file' },
+    ],
+    compatRules: [],
+  },
+  {
+    type: 'k8s',
+    category: 'platform',
+    label: 'K8S',
+    color: '#326ce5',
+    inputs: [flowIn(), credPort('in', 'cred-in')],
+    outputs: [flowOut()],
+    fields: [
+      { key: 'action', label: '操作', type: 'select', default: 'apply', options: [
+        { label: '应用清单', value: 'apply' },
+        { label: '回滚状态', value: 'rollout' },
+        { label: '查看', value: 'get' },
+        { label: '日志', value: 'logs' },
+      ] },
+      { key: 'file', label: '清单文件', type: 'text', placeholder: 'apply 用（yaml 路径）', interpolatable: true, picker: 'file' },
+      { key: 'kind', label: '资源类型', type: 'text', placeholder: '如 deployment / pods' },
+      { key: 'name', label: '资源名', type: 'text', interpolatable: true },
+      { key: 'namespace', label: '命名空间', type: 'text', interpolatable: true },
+    ],
+    compatRules: [],
+  },
+  {
+    type: 'docker',
+    category: 'platform',
+    label: 'Docker',
+    color: '#0db7ed',
+    inputs: [flowIn()],
+    outputs: [flowOut()],
+    // 通用本地 docker 操作（单一职责，不含 registry 登录；registry 推送用 Harbor 块）
+    fields: [
+      { key: 'action', label: '操作', type: 'select', default: 'build', options: [
+        { label: '构建', value: 'build' },
+        { label: '拉取', value: 'pull' },
+        { label: '运行', value: 'run' },
+        { label: 'Compose', value: 'compose' },
+        { label: '镜像列表', value: 'images' },
+        { label: '容器列表', value: 'ps' },
+        { label: '日志', value: 'logs' },
+        { label: '执行', value: 'exec' },
+        { label: '停止', value: 'stop' },
+        { label: '删除', value: 'rm' },
+      ] },
+      { key: 'image', label: '镜像', type: 'text', interpolatable: true },
+      { key: 'tag', label: '标签', type: 'text', default: 'latest', interpolatable: true },
+      { key: 'context', label: '构建目录', type: 'text', placeholder: '留空 = 工作区', picker: 'dir' },
+      { key: 'dockerfile', label: 'Dockerfile', type: 'text', placeholder: '留空 = 默认', picker: 'file' },
+      { key: 'container', label: '容器名', type: 'text', interpolatable: true },
+      { key: 'service', label: 'Compose 服务', type: 'text', interpolatable: true },
+      { key: 'cmd', label: '命令', type: 'text', placeholder: 'run/exec 用', interpolatable: true },
+    ],
+    compatRules: [],
+  },
+  {
+    type: 'gitlab',
+    category: 'platform',
+    label: 'GitLab',
+    color: '#fc6d26',
+    inputs: [flowIn(), credPort('in', 'cred-in')],
+    outputs: [flowOut()],
+    // GitLab 服务操作（上传代码走 GIT 积木组）；需 PAT 凭据（Bearer）
+    fields: [
+      { key: 'url', label: '平台地址', type: 'text', required: true, placeholder: 'http://gitlab.example.com', interpolatable: true },
+      { key: 'project', label: '项目 ID/路径', type: 'text', required: true, interpolatable: true },
+      { key: 'action', label: '操作', type: 'select', default: 'pipeline-trigger', options: [
+        { label: '触发流水线', value: 'pipeline-trigger' },
+        { label: '流水线状态', value: 'pipeline-status' },
+        { label: '任务日志', value: 'job-log' },
+        { label: '创建 MR', value: 'mr-create' },
+      ] },
+      { key: 'ref', label: '分支/引用', type: 'text', placeholder: '流水线触发用', interpolatable: true },
+      { key: 'jobId', label: '任务 ID', type: 'text', placeholder: '任务日志用', interpolatable: true },
+      { key: 'mrSource', label: '源分支', type: 'text', placeholder: '建 MR 用', interpolatable: true },
+      { key: 'mrTarget', label: '目标分支', type: 'text', placeholder: '建 MR 用', interpolatable: true },
+      { key: 'mrTitle', label: 'MR 标题', type: 'text', placeholder: '建 MR 用', interpolatable: true },
+    ],
+    compatRules: [],
+  },
+  {
+    type: 'credential',
+    category: 'credential',
+    label: '凭据',
+    color: '#faad14',
+    // 独立数据源积木：无流程端口；通过「凭据端口」连线被目标块引用（见方案 §6）
+    inputs: [],
+    outputs: [credPort('out', 'cred-out')],
+    fields: [
+      { key: 'credentialId', label: '凭据 ID', type: 'text', required: true, placeholder: '由「配置凭据」写入' },
+      { key: 'credentialName', label: '凭据名称', type: 'text', placeholder: '如 生产 GitLab' },
+    ],
     compatRules: [],
   },
 ]

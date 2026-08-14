@@ -39,6 +39,9 @@ base64 = "0.22"
 url = "2"
 secrecy = "0.8"
 shell-words = "1.1"
+# 凭据加密（F3：AES-GCM）
+aes-gcm = "0.10"
+rand = "0.8"
 # MCP Server (HTTP + SSE)
 axum = { version = "0.7", features = ["macros"] }
 tower-http = { version = "0.5", features = ["cors"] }

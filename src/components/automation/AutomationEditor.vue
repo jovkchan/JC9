@@ -1,12 +1,24 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { nextTick, ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { invoke } from '@tauri-apps/api/core'
+import { save } from '@tauri-apps/plugin-dialog'
 import { useAutomationStore } from '@/stores/automation'
+import { useStatusStore } from '@/stores/status'
 import { getBlockDef, getBlockColor } from '@/components/automation/blocks/palette'
-import type { BlockNode, Port } from '@/types/automation'
+import { BLOCK_W, blockHeight, blockSummary, MAX_SUMMARY_LINES } from '@/components/automation/blocks/summary'
+import type { BlockNode, Port, Edge } from '@/types/automation'
 import JcButton from '@/components/ui/JcButton.vue'
 import JcInput from '@/components/ui/JcInput.vue'
+import JcTextarea from '@/components/ui/JcTextarea.vue'
+import JcModal from '@/components/ui/JcModal.vue'
+import JcContextMenu from '@/components/ui/JcContextMenu.vue'
+import type { JcContextMenuItem } from '@/components/ui/JcContextMenu.vue'
+import InspectorPanel from './editor/InspectorPanel.vue'
+import LoginDialog from './editor/LoginDialog.vue'
 
 const store = useAutomationStore()
+const status = useStatusStore()
 
 // ── Canvas 视口（F1a 骨架：世界↔屏幕 + 平移/缩放 + 网格）──
 // 后续积木/端口/连线全部由 renderer 在此绘制（见 docs/plans §4.7）
@@ -38,6 +50,258 @@ let connFrom: { blockId: string; port: Port } | null = null
 const connCursor = ref({ x: 0, y: 0 })
 const PORT_HIT_R = 12        // 端口命中半径（屏幕像素）
 
+// ── 右键菜单（删除 / 编辑 / 固定 / 登录；连线删除）──
+const ctxShow = ref(false)
+const ctxX = ref(0)
+const ctxY = ref(0)
+const ctxNode = ref<BlockNode | null>(null)
+/** 当前选中的连线（单击选中 + Delete 删除 / 右键删除） */
+const selectedEdgeId = ref<string | null>(null)
+/** 右键命中的连线（连线菜单） */
+const ctxEdgeId = ref<string | null>(null)
+const edgeMenuItems: JcContextMenuItem[] = [
+  { label: '删除连线', value: 'delete-edge', danger: true },
+]
+const ctxMenuItems = computed<JcContextMenuItem[]>(() =>
+  ctxEdgeId.value ? edgeMenuItems : ctxItems.value,
+)
+
+/** 打开编辑面板：选中块 + 记录要编辑的目标 */
+const inspectNode = ref<BlockNode | null>(null)
+/** 登录弹窗目标 */
+const loginNode = ref<BlockNode | null>(null)
+const loginOpen = ref(false)
+
+function openContext(e: MouseEvent, node: BlockNode) {
+  e.preventDefault()
+  selectedId.value = node.id
+  selectedEdgeId.value = null
+  ctxNode.value = node
+  ctxEdgeId.value = null
+  ctxX.value = e.clientX
+  ctxY.value = e.clientY
+  ctxShow.value = true
+  schedule()
+}
+
+/** 右键连线 → 删除连线菜单 */
+function openEdgeContext(e: MouseEvent, edge: Edge) {
+  e.preventDefault()
+  selectedEdgeId.value = edge.id
+  ctxNode.value = null
+  ctxEdgeId.value = edge.id
+  ctxX.value = e.clientX
+  ctxY.value = e.clientY
+  ctxShow.value = true
+  schedule()
+}
+
+const ctxItems = computed<JcContextMenuItem[]>(() => {
+  const n = ctxNode.value
+  const items: JcContextMenuItem[] = [
+    { label: '编辑', value: 'edit' },
+    { label: n?.locked ? '取消固定' : '固定', value: 'lock' },
+  ]
+  // 手动触发块可单独触发该分支（F2，无需依赖「开始」）
+  if (n?.type === 'manual-trigger') {
+    items.push({ label: '触发此分支', value: 'trigger' })
+  }
+  // 凭据是独立积木：右键提供「配置凭据」；普通块不再绑登录，凭据通过连线引用
+  if (n?.type === 'credential') {
+    items.push({ label: '配置凭据', value: 'login' })
+  }
+  items.push({ label: '删除', value: 'delete', danger: true })
+  return items
+})
+
+function onCtxSelect(item: JcContextMenuItem) {
+  const node = ctxNode.value
+  ctxShow.value = false
+  if (item.value === 'delete-edge') {
+    if (ctxEdgeId.value) {
+      store.removeEdge(ctxEdgeId.value)
+      if (selectedEdgeId.value === ctxEdgeId.value) selectedEdgeId.value = null
+    }
+    ctxEdgeId.value = null
+    return
+  }
+  if (!node) return
+  switch (item.value) {
+    case 'edit':
+      inspectNode.value = node
+      break
+    case 'lock':
+      store.toggleLock(node.id)
+      break
+    case 'trigger':
+      // 手动触发：以该块为入口运行（多个手动触发块各自触发各自分支）
+      if (store.current) doRun(store.current.id, node.id)
+      break
+    case 'login':
+      // 配置凭据块（选择/新建凭据 → 写入 config.credentialId）
+      loginNode.value = node
+      loginOpen.value = true
+      break
+    case 'delete':
+      store.removeNode(node.id)
+      if (selectedId.value === node.id) selectedId.value = null
+      if (inspectNode.value?.id === node.id) inspectNode.value = null
+      break
+  }
+}
+
+/** InspectorPanel「配置凭据」按钮 → 打开 LoginDialog（针对当前编辑的凭据块） */
+function onConfigureCredential() {
+  if (inspectNode.value?.type === 'credential') {
+    loginNode.value = inspectNode.value
+    loginOpen.value = true
+  }
+}
+
+// ── 导出（完整 JSON，见方案 §4.6）──
+const exportOpen = ref(false)
+const exportText = computed(() => store.exportCurrentJson())
+
+function openExport() { exportOpen.value = true }
+
+async function copyExport() {
+  try {
+    await navigator.clipboard.writeText(exportText.value)
+    status.pushMessage('已复制自动化 JSON', 'success')
+  } catch (e) { status.pushMessage(`复制失败: ${e}`, 'error') }
+}
+
+async function saveExportFile() {
+  try {
+    const name = store.current?.name ? `${store.current.name}.json` : 'automation.json'
+    const filePath = await save({ filters: [{ name: '自动化 JSON', extensions: ['json'] }], defaultPath: name })
+    if (!filePath) return
+    const data = Array.from(new TextEncoder().encode(exportText.value))
+    await invoke('write_file_binary', { path: filePath, data })
+    status.pushMessage(`已导出到 ${filePath}`, 'success')
+  } catch (e) { status.pushMessage(`导出失败: ${e}`, 'error') }
+}
+
+// ── 运行态（Rust 引擎 automation-event 驱动）──
+const runningId = ref<string | null>(null)
+const failId = ref<string | null>(null)
+const runStep = ref(0)
+const runTotal = ref(0)
+const runName = ref('')
+const runTail = ref('')
+const runVars = ref<Record<string, unknown>>({})
+const runningRunId = ref<string | null>(null)
+const runIter = ref(0)
+let unlistenAuto: UnlistenFn | null = null
+
+function fmtDur(ms: number) {
+  if (!ms || ms < 1000) return `${ms ?? 0}ms`
+  return `${(ms / 1000).toFixed(1)}s`
+}
+
+// ── 运行日志分割面板（上部画布 + 下部日志，分隔条拖拽调整高度）──
+const mainRef = ref<HTMLElement | null>(null)
+const runLogH = ref(220)
+const showRunLog = computed(() => !!runningRunId.value || store.liveSteps.length > 0 || !!store.liveOutput)
+/** 编辑器内实时命令输出区：追加后自动滚动到底跟随最新 */
+const runlogOutEl = ref<HTMLPreElement | null>(null)
+watch(() => store.liveOutput, () => {
+  nextTick(() => { if (runlogOutEl.value) runlogOutEl.value.scrollTop = runlogOutEl.value.scrollHeight })
+})
+/** 新增积木后自动平移到可视范围（超出画布右/下边界的块平移进入视野） */
+function ensureNodeVisible(n: BlockNode) {
+  const cv = canvasRef.value
+  if (!cv) return
+  const W = cv.clientWidth, H = cv.clientHeight
+  const h = blockHeight(n.type, (n.config ?? {}) as Record<string, unknown>)
+  const sx = n.x * view.scale + view.ox
+  const sy = n.y * view.scale + view.oy
+  const sw = BLOCK_W * view.scale, sh = h * view.scale
+  let dx = 0, dy = 0
+  if (sx < 8) dx = 8 - sx
+  else if (sx + sw > W - 8) dx = W - 8 - (sx + sw)
+  if (sy < 8) dy = 8 - sy
+  else if (sy + sh > H - 8) dy = H - 8 - (sy + sh)
+  if (dx !== 0 || dy !== 0) { view.ox += dx; view.oy += dy; schedule() }
+}
+// 添加积木（length 增加）→ 平移到新块可见
+watch(
+  () => store.current?.nodes.length ?? 0,
+  (n, o) => {
+    if (n > o && store.current) {
+      const nodes = store.current.nodes
+      const last = nodes[nodes.length - 1]
+      if (last) ensureNodeVisible(last)
+    }
+  },
+)
+let logDragging = false
+function onLogBarDown(e: MouseEvent) {
+  e.preventDefault()
+  logDragging = true
+  document.body.style.userSelect = 'none'
+  document.body.style.cursor = 'row-resize'
+  window.addEventListener('mousemove', onLogBarMove)
+  window.addEventListener('mouseup', onLogBarUp)
+}
+function onLogBarMove(e: MouseEvent) {
+  if (!logDragging || !mainRef.value) return
+  const rect = mainRef.value.getBoundingClientRect()
+  const h = rect.bottom - e.clientY
+  runLogH.value = Math.min(480, Math.max(100, Math.round(h)))
+}
+function onLogBarUp() {
+  logDragging = false
+  document.body.style.userSelect = ''
+  document.body.style.cursor = ''
+  window.removeEventListener('mousemove', onLogBarMove)
+  window.removeEventListener('mouseup', onLogBarUp)
+}
+
+async function doRun(id?: string, entry?: string) {
+  const a = store.current
+  if (!a) return
+  const runId = await store.run(id ?? a.id, entry)
+  if (runId) runningRunId.value = runId
+}
+
+async function doStop() {
+  const a = store.current
+  if (!a || !runningRunId.value) return
+  await store.stop(a.id, runningRunId.value)
+  runningRunId.value = null
+}
+
+async function onAutoEvent(e: { payload: Record<string, unknown> }) {
+  const p = e.payload
+  const type = String(p.type ?? '')
+  const bid = (p.blockId as string) ?? null
+  if (type === 'started') { runningId.value = null; failId.value = null; runTail.value = ''; runIter.value = 0 }
+  if (type === 'step_start') {
+    runningId.value = bid
+    failId.value = null
+    runStep.value = Number(p.step ?? 0)
+    runTotal.value = Number(p.total ?? 0)
+    runName.value = String(p.name ?? '')
+  } else if (type === 'step_done') {
+    if (runningId.value === bid) runningId.value = null
+  } else if (type === 'step_fail') {
+    failId.value = bid
+    if (runningId.value === bid) runningId.value = null
+    if (typeof p.stdoutTail === 'string') runTail.value = p.stdoutTail
+  } else if (type === 'loop_iter') {
+    runIter.value = Number(p.iteration ?? 0)
+  } else if (type === 'var_change' || type === 'done') {
+    if (p.vars && typeof p.vars === 'object') runVars.value = p.vars as Record<string, unknown>
+  }
+  if (type === 'done' || type === 'error' || type === 'stopped') {
+    runningId.value = null
+    runningRunId.value = null
+    if (type === 'done') failId.value = null
+  }
+  schedule()
+}
+
 function snap(v: number) { return Math.round(v / 8) * 8 }
 
 // ── 端口几何 ──
@@ -45,14 +309,15 @@ function getPorts(block: { type: string }) {
   const def = getBlockDef(block.type)
   return { inputs: def?.inputs ?? [], outputs: def?.outputs ?? [] }
 }
-function portPos(block: { type: string; x: number; y: number }, p: Port) {
+function portPos(block: BlockNode, p: Port) {
   const { inputs, outputs } = getPorts(block)
+  const h = blockHeight(block.type, (block.config ?? {}) as Record<string, unknown>)
   if (p.direction === 'in') {
     const i = inputs.findIndex(x => x.id === p.id)
-    return { x: block.x, y: block.y + (BLOCK_H / (inputs.length + 1)) * (i + 1) }
+    return { x: block.x, y: block.y + (h / (inputs.length + 1)) * (i + 1) }
   }
   const j = outputs.findIndex(x => x.id === p.id)
-  return { x: block.x + BLOCK_W, y: block.y + (BLOCK_H / (outputs.length + 1)) * (j + 1) }
+  return { x: block.x + BLOCK_W, y: block.y + (h / (outputs.length + 1)) * (j + 1) }
 }
 
 // ── 命中检测 ──
@@ -60,7 +325,8 @@ function hitBlock(wx: number, wy: number): BlockNode | null {
   const nodes = store.current?.nodes ?? []
   for (let k = nodes.length - 1; k >= 0; k--) {
     const n = nodes[k]
-    if (wx >= n.x && wx <= n.x + BLOCK_W && wy >= n.y && wy <= n.y + BLOCK_H) return n
+    const h = blockHeight(n.type, (n.config ?? {}) as Record<string, unknown>)
+    if (wx >= n.x && wx <= n.x + BLOCK_W && wy >= n.y && wy <= n.y + h) return n
   }
   return null
 }
@@ -81,6 +347,46 @@ function compatible(a: Port, b: Port): boolean {
   if (a.direction === b.direction) return false
   if (a.dataType !== b.dataType) return false
   return true
+}
+
+/** 连线贝塞尔采样点（命中检测用） */
+function edgePathPoints(e: Edge, samples = 24): Array<{ x: number; y: number }> {
+  const a = store.current
+  if (!a) return []
+  const fb = a.nodes.find(n => n.id === e.fromBlock)
+  const tb = a.nodes.find(n => n.id === e.toBlock)
+  if (!fb || !tb) return []
+  const fPort = [...getPorts(fb).inputs, ...getPorts(fb).outputs].find(p => p.id === e.fromPort)
+  const tPort = [...getPorts(tb).inputs, ...getPorts(tb).outputs].find(p => p.id === e.toPort)
+  if (!fPort || !tPort) return []
+  const p0 = portPos(fb, fPort), p3 = portPos(tb, tPort)
+  const mx = (p0.x + p3.x) / 2
+  const pts: Array<{ x: number; y: number }> = []
+  for (let i = 0; i <= samples; i++) {
+    const t = i / samples
+    const mt = 1 - t
+    pts.push({
+      x: mt * mt * mt * p0.x + 3 * mt * mt * t * mx + 3 * mt * t * t * mx + t * t * t * p3.x,
+      y: mt * mt * mt * p0.y + 3 * mt * mt * t * p0.y + 3 * mt * t * t * p3.y + t * t * t * p3.y,
+    })
+  }
+  return pts
+}
+
+/** 命中连线：点到贝塞尔最近距离 < 阈值 */
+function hitEdge(wx: number, wy: number): Edge | null {
+  const a = store.current
+  if (!a || a.edges.length === 0) return null
+  const thr = 10 / view.scale
+  let best: Edge | null = null
+  let bestD = thr
+  for (const e of a.edges) {
+    for (const p of edgePathPoints(e)) {
+      const d = Math.hypot(wx - p.x, wy - p.y)
+      if (d < bestD) { bestD = d; best = e }
+    }
+  }
+  return best
 }
 
 const MULTI_COLOR = '#e6a23c'   // 可连多条线的端口高亮色（琥珀）
@@ -169,8 +475,10 @@ function drawEdges() {
     const tPort = [...getPorts(tb).inputs, ...getPorts(tb).outputs].find(p => p.id === edge.toPort)
     if (!fPort || !tPort) continue
     const p1 = portPos(fb, fPort), p2 = portPos(tb, tPort)
-    c.strokeStyle = portColor(fPort, ec.get(portKey(edge.fromBlock, edge.fromPort)) ?? 0)
-    c.globalAlpha = 0.85
+    const sel = edge.id === selectedEdgeId.value
+    c.strokeStyle = sel ? '#8a58ff' : portColor(fPort, ec.get(portKey(edge.fromBlock, edge.fromPort)) ?? 0)
+    c.lineWidth = (sel ? 4 : 2) / s
+    c.globalAlpha = sel ? 1 : 0.85
     bezier(c, p1, p2)
     c.stroke()
     c.globalAlpha = 1
@@ -249,8 +557,12 @@ function drawHintText() {
   ctx2d.setTransform(dpr * s, 0, 0, dpr * s, dpr * view.ox, dpr * view.oy)
 }
 
-const BLOCK_W = 200
-const BLOCK_H = 60
+function ellipsisText(c: CanvasRenderingContext2D, text: string, maxW: number): string {
+  if (c.measureText(text).width <= maxW) return text
+  let t = text
+  while (t.length > 1 && c.measureText(t + '…').width > maxW) t = t.slice(0, -1)
+  return t + '…'
+}
 
 function cssVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim()
@@ -267,30 +579,78 @@ function drawBlocks() {
   // 主题感知：块背景/文字随明暗模式切换
   const bg = cssVar('--jc-bg-elevated') || '#2d2d30'
   const text = cssVar('--jc-text-primary') || '#e6e6e6'
+  const sub = cssVar('--jc-text-secondary') || 'rgba(196,196,196,0.78)'
   for (const n of a.nodes) {
     const def = getBlockDef(n.type)
     const color = getBlockColor(n.type)
     const isSel = n.id === selectedId.value
+    const cfg = (n.config ?? {}) as Record<string, unknown>
+    const h = blockHeight(n.type, cfg)
+    const summary = blockSummary(n.type, cfg).slice(0, MAX_SUMMARY_LINES)
     c.fillStyle = bg
     c.strokeStyle = color   // 边框始终用块主题色；选中仅加粗 + 同色阴影
     c.lineWidth = isSel ? 2 / s : 1 / s
     if (isSel) { c.shadowColor = color; c.shadowBlur = 16 / s }
-    roundRect(n.x, n.y, BLOCK_W, BLOCK_H, 8)
+    roundRect(n.x, n.y, BLOCK_W, h, 8)
     c.fill()
     c.stroke()
     c.shadowColor = 'transparent'
     c.shadowBlur = 0
+    // 运行态高亮：当前执行块绿描边 + 淡绿填充；失败块红描边
+    if (runningId.value === n.id) {
+      c.fillStyle = 'rgba(82,196,26,0.12)'
+      c.strokeStyle = '#52c41a'
+      c.lineWidth = 2 / s
+      roundRect(n.x, n.y, BLOCK_W, h, 8)
+      c.fill()
+      c.stroke()
+    } else if (failId.value === n.id) {
+      c.fillStyle = 'rgba(255,77,79,0.12)'
+      c.strokeStyle = '#ff4d4f'
+      c.lineWidth = 2 / s
+      roundRect(n.x, n.y, BLOCK_W, h, 8)
+      c.fill()
+      c.stroke()
+    }
     c.fillStyle = text
     c.font = `500 ${13 / s}px system-ui`
     c.textBaseline = 'middle'
     c.textAlign = 'left'
-    c.fillText(def?.label ?? n.type, n.x + 14 / s, n.y + 14 / s)
+    // 凭据块标题显示所绑定凭据名；其余显示类型 label
+    const title = n.type === 'credential'
+      ? (String(cfg.credentialName ?? '') || '凭据')
+      : (def?.label ?? n.type)
+    c.fillText(title, n.x + 14 / s, n.y + 14 / s)
+    // 配置摘要（次级色多行，超宽省略；块随行数拉高）
+    if (summary.length) {
+      c.fillStyle = sub
+      c.font = `400 ${11.5 / s}px system-ui`
+      const maxW = BLOCK_W - 26 / s
+      summary.forEach((line, i) => {
+        c.fillText(ellipsisText(c, line, maxW), n.x + 14 / s, n.y + 34 / s + i * (14 / s))
+      })
+    }
+    // 右上角状态标记（纯几何圆点，非 emoji）：固定=金色 / 凭据已配置=绿色
+    let badgeX = n.x + BLOCK_W - 10 / s
+    if (n.locked) {
+      c.beginPath()
+      c.arc(badgeX, n.y + 10 / s, 3.5 / s, 0, Math.PI * 2)
+      c.fillStyle = '#e6a23c'
+      c.fill()
+      badgeX -= 12 / s
+    }
+    if (n.type === 'credential' && (n.config as Record<string, unknown>)?.credentialName) {
+      c.beginPath()
+      c.arc(badgeX, n.y + 10 / s, 3.5 / s, 0, Math.PI * 2)
+      c.fillStyle = '#52c41a'
+      c.fill()
+    }
     const { inputs, outputs } = getPorts(n)
     inputs.forEach((p, i) => {
-      drawPort(n.x, n.y + (BLOCK_H / (inputs.length + 1)) * (i + 1), portColor(p, ec.get(portKey(n.id, p.id)) ?? 0), 'in')
+      drawPort(n.x, n.y + (h / (inputs.length + 1)) * (i + 1), portColor(p, ec.get(portKey(n.id, p.id)) ?? 0), 'in')
     })
     outputs.forEach((p, i) => {
-      drawPort(n.x + BLOCK_W, n.y + (BLOCK_H / (outputs.length + 1)) * (i + 1), portColor(p, ec.get(portKey(n.id, p.id)) ?? 0), 'out')
+      drawPort(n.x + BLOCK_W, n.y + (h / (outputs.length + 1)) * (i + 1), portColor(p, ec.get(portKey(n.id, p.id)) ?? 0), 'out')
     })
   }
   c.textBaseline = 'alphabetic'
@@ -335,6 +695,7 @@ function onWheel(e: WheelEvent) {
   view.ox = sx - world.x * ns
   view.oy = sy - world.y * ns
   view.scale = ns
+  store.setCanvasScale(ns)
   schedule()
 }
 
@@ -358,11 +719,13 @@ function onPointerDown(e: PointerEvent) {
     schedule()
     return
   }
-  // 2) 块 → 选中 + 拖拽
+  // 2) 块 → 选中 + 直接打开参数面板（不影响拖拽）
   const blk = hitBlock(w.x, w.y)
   if (blk) {
     selectedId.value = blk.id
-    if (e.button === 0) {
+    selectedEdgeId.value = null
+    inspectNode.value = blk
+    if (e.button === 0 && !blk.locked) {
       mode = 'drag'
       dragId = blk.id
       dragOffX = w.x - blk.x
@@ -373,8 +736,22 @@ function onPointerDown(e: PointerEvent) {
     schedule()
     return
   }
-  // 3) 空白 → 平移 + 取消选中
+  // 2.5) 连线 → 选中（Delete 删除 / 右键删除）
+  const edge = hitEdge(w.x, w.y)
+  if (edge) {
+    selectedEdgeId.value = edge.id
+    selectedId.value = null
+    if (e.button === 0) {
+      mode = 'pan'
+      cv.setPointerCapture(e.pointerId)
+    }
+    schedule()
+    return
+  }
+  // 3) 空白 → 平移 + 取消选中/收起参数
   selectedId.value = null
+  selectedEdgeId.value = null
+  inspectNode.value = null
   if (e.button === 0 || e.button === 1) {
     mode = 'pan'
     cv.setPointerCapture(e.pointerId)
@@ -434,17 +811,46 @@ function onKeydown(e: KeyboardEvent) {
     return
   }
   if (e.key === 'Delete' || e.key === 'Backspace') {
-    if (selectedId.value) {
+    if (selectedEdgeId.value) {
+      store.removeEdge(selectedEdgeId.value)
+      selectedEdgeId.value = null
+      e.preventDefault()
+    } else if (selectedId.value) {
       store.removeNode(selectedId.value)
       selectedId.value = null
+      inspectNode.value = null
       e.preventDefault()
     }
   }
 }
 
+/** 右键：命中积木 → 操作菜单；命中连线 → 删除连线菜单；空白 → 阻止默认菜单 */
+function onContextMenu(e: MouseEvent) {
+  const cv = canvasRef.value
+  if (!cv) return
+  const rect = cv.getBoundingClientRect()
+  const w = toWorld(e.clientX - rect.left, e.clientY - rect.top)
+  const blk = hitBlock(w.x, w.y)
+  if (blk) { openContext(e, blk); return }
+  const edge = hitEdge(w.x, w.y)
+  if (edge) { openEdgeContext(e, edge); return }
+  e.preventDefault()
+}
+
 // 积木/连线变化 → 重绘
 watch(() => store.current?.nodes, () => schedule(), { deep: true })
 watch(() => store.current?.edges, () => schedule(), { deep: true })
+
+/** 调色板拖拽落点：画布内则在该位置添加积木（world 坐标，位置用户指定） */
+function handleDrop(p: { type: string; clientX: number; clientY: number }) {
+  const cv = canvasRef.value
+  if (!cv) return
+  const rect = cv.getBoundingClientRect()
+  if (p.clientX < rect.left || p.clientX > rect.right || p.clientY < rect.top || p.clientY > rect.bottom) return
+  const w = toWorld(p.clientX - rect.left, p.clientY - rect.top)
+  const node = store.addNodeAt(p.type, w.x, w.y)
+  if (node) ensureNodeVisible(node)
+}
 
 onMounted(() => {
   const cv = canvasRef.value
@@ -456,16 +862,27 @@ onMounted(() => {
   cv.addEventListener('pointermove', onPointerMove)
   cv.addEventListener('pointerup', onPointerUp)
   cv.addEventListener('keydown', onKeydown)
+  cv.addEventListener('contextmenu', onContextMenu)
   resizeObs = new ResizeObserver(() => schedule())
   resizeObs.observe(cv)
   // 主题（明暗）切换时重绘，块背景/文字跟随 --jc-* 变量
   themeObs = new MutationObserver(() => schedule())
   themeObs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+  // 凭据（登录）数据刷新（automation 数据由列表视图 load 一次，避免覆盖内存编辑）
+  store.credentialLoad()
+  // 订阅运行事件（画布高亮 + 状态条）；实时日志由 MainPanel 全局监听写入 store.liveSteps
+  listen<Record<string, unknown>>('automation-event', onAutoEvent)
+    .then(fn => { unlistenAuto = fn })
+    .catch(e => console.error('automation-event listen failed', e))
+  store.setDropHandler(handleDrop)
+  store.setCanvasScale(view.scale)
   schedule()
 })
 
 onBeforeUnmount(() => {
+  store.setDropHandler(null)
   if (raf) cancelAnimationFrame(raf)
+  unlistenAuto?.()
   resizeObs?.disconnect()
   themeObs?.disconnect()
   const cv = canvasRef.value
@@ -475,6 +892,7 @@ onBeforeUnmount(() => {
     cv.removeEventListener('pointermove', onPointerMove)
     cv.removeEventListener('pointerup', onPointerUp)
     cv.removeEventListener('keydown', onKeydown)
+    cv.removeEventListener('contextmenu', onContextMenu)
   }
 })
 </script>
@@ -495,13 +913,80 @@ onBeforeUnmount(() => {
         <JcButton size="small" :disabled="!store.canUndo" @click="store.undo()">撤回</JcButton>
         <JcButton size="small" :disabled="!store.canRedo" @click="store.redo()">重做</JcButton>
         <JcButton size="small" type="primary" @click="store.save()">保存</JcButton>
-        <JcButton size="small" @click="store.current && store.run(store.current.id)">运行</JcButton>
-        <JcButton size="small" disabled>停止</JcButton>
+        <JcButton size="small" @click="openExport()">导出</JcButton>
+        <JcButton size="small" @click="doRun()">运行</JcButton>
+        <JcButton size="small" :disabled="!runningRunId" @click="doStop()">停止</JcButton>
       </div>
     </div>
-    <div class="ae-canvas-wrap">
-      <canvas ref="canvasRef" class="ae-canvas" tabindex="0"></canvas>
+    <div ref="mainRef" class="ae-main">
+      <div class="ae-top">
+        <div class="ae-canvas-wrap">
+          <canvas ref="canvasRef" class="ae-canvas" tabindex="0"></canvas>
+        </div>
+        <div v-if="inspectNode" class="ae-inspector">
+          <div class="ae-ins-head">
+            <span>参数</span>
+            <button class="ae-ins-close" title="关闭" @click="inspectNode = null">✕</button>
+          </div>
+          <InspectorPanel :node="inspectNode" @configure-credential="onConfigureCredential" />
+        </div>
+      </div>
+      <!-- 分割条：拖拽调整日志高度 -->
+      <div v-if="showRunLog" class="ae-splitbar" @mousedown="onLogBarDown" title="拖拽调整日志高度"></div>
+      <!-- 运行日志（下方：每个积木执行实时记录，来自全局 store.liveSteps） -->
+      <div v-if="showRunLog" class="ae-runlog" :style="{ height: runLogH + 'px' }">
+        <div class="ae-runlog-head">
+          <span class="ae-runlog-title">运行日志</span>
+          <button class="ae-runlog-clear" @click="store.clearLive()">清空</button>
+        </div>
+        <!-- 实时命令输出（仿终端）：长命令执行中滚动显示，不再假死 -->
+        <pre ref="runlogOutEl" v-if="store.liveOutput" class="ae-runlog-out">{{ store.liveOutput }}</pre>
+        <div class="ae-runlog-body">
+          <div v-for="(s, i) in store.liveSteps" :key="i" class="ae-rl-step" :class="s.status">
+            <span class="ae-rl-dot" :style="{ background: getBlockColor(s.blockType) }"></span>
+            <span class="ae-rl-name">{{ s.name }}</span>
+            <span class="ae-rl-status" :class="s.status">{{ s.status === 'ok' ? 'OK' : 'FAIL' }}</span>
+            <span class="ae-rl-dur">{{ fmtDur(s.durationMs) }}</span>
+            <span v-if="s.exitCode !== null" class="ae-rl-code">码 {{ s.exitCode }}</span>
+            <span v-if="s.auth" class="ae-rl-auth" :title="`凭据：${s.auth}`">鉴权 {{ s.auth }}</span>
+            <span v-if="s.iteration !== undefined" class="ae-rl-iter">#{{ s.iteration }}</span>
+            <div class="ae-rl-detail">
+              <div v-if="s.detail" class="ae-rl-line"><span class="lbl">执行</span>{{ s.detail }}</div>
+              <div v-if="s.cwd" class="ae-rl-line"><span class="lbl">目录</span>{{ s.cwd }}</div>
+              <div v-if="s.stdoutTail" class="ae-rl-line"><span class="lbl">输出</span><span class="mono">{{ s.stdoutTail }}</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- 运行状态条 -->
+      <div v-if="runStep > 0 || failId" class="ae-runbar">
+        <span class="ae-run-step">{{ failId ? '失败' : '运行中' }} {{ runStep }}/{{ runTotal }} {{ runName }}</span>
+        <span v-if="runIter > 0" class="ae-run-iter">循环 #{{ runIter }}</span>
+        <span v-if="runTail" class="ae-run-tail">{{ runTail }}</span>
+        <span v-if="Object.keys(runVars).length" class="ae-run-vars">{{ JSON.stringify(runVars) }}</span>
+      </div>
     </div>
+
+    <!-- 画布右键菜单 -->
+    <JcContextMenu
+      v-model:show="ctxShow"
+      :x="ctxX"
+      :y="ctxY"
+      :items="ctxMenuItems"
+      @select="onCtxSelect"
+    />
+
+    <!-- 登录 / 凭据绑定 -->
+    <LoginDialog v-model:open="loginOpen" :node="loginNode" />
+
+    <!-- 导出完整 JSON -->
+    <JcModal :open="exportOpen" title="导出自动化" width="560" @update:open="exportOpen = $event">
+      <JcTextarea :model-value="exportText" :rows="14" readonly :spellcheck="false" />
+      <template #footer>
+        <JcButton @click="copyExport">复制</JcButton>
+        <JcButton type="primary" @click="saveExportFile">保存为文件</JcButton>
+      </template>
+    </JcModal>
   </div>
 </template>
 
@@ -537,7 +1022,7 @@ onBeforeUnmount(() => {
 }
 .ae-canvas-wrap {
   flex: 1;
-  min-height: 0;
+  min-width: 0;
   position: relative;
 }
 .ae-canvas {
@@ -547,5 +1032,179 @@ onBeforeUnmount(() => {
   cursor: grab;
   touch-action: none;
   outline: none;
+}
+.ae-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.ae-top {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+.ae-splitbar {
+  height: 5px;
+  flex-shrink: 0;
+  cursor: row-resize;
+  background: var(--jc-bg-panel, #252526);
+  border-top: 1px solid var(--jc-border-default, #3e3e42);
+  transition: background 0.15s;
+  &:hover { background: var(--jc-color-accent, #8a58ff); }
+}
+.ae-inspector {
+  width: 264px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--jc-border-default, #3e3e42);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.ae-ins-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--jc-text-primary, #e6e6e6);
+  border-bottom: 1px solid var(--jc-border-default, #3e3e42);
+  background: var(--jc-bg-panel, #252526);
+}
+.ae-ins-close {
+  background: none;
+  border: none;
+  color: var(--jc-text-secondary, #aaa);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.ae-ins-close:hover {
+  color: var(--jc-text-primary, #e6e6e6);
+  background: var(--jc-bg-hover, #2a2d2e);
+}
+.ae-inspector > .inspector {
+  flex: 1;
+  min-height: 0;
+}
+.ae-runbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 12px;
+  font-size: 11px;
+  color: var(--jc-text-secondary, #aaa);
+  background: var(--jc-bg-panel, #252526);
+  border-top: 1px solid var(--jc-border-default, #3e3e42);
+  overflow: hidden;
+  white-space: nowrap;
+}
+.ae-run-step {
+  flex-shrink: 0;
+  color: #52c41a;
+  font-weight: 600;
+}
+.ae-run-tail,
+.ae-run-vars {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ae-run-vars {
+  color: var(--jc-text-tertiary, #858585);
+}
+/* 运行日志（下方面板：实时 step_log，高度可拖拽分割） */
+.ae-runlog {
+  flex-shrink: 0;
+  border-top: 1px solid var(--jc-border-default, #3e3e42);
+  background: var(--jc-bg-panel, #252526);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.ae-runlog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--jc-border-default, #3e3e42);
+  flex-shrink: 0;
+}
+.ae-runlog-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--jc-text-primary, #e6e6e6);
+}
+.ae-runlog-clear {
+  background: none;
+  border: none;
+  color: var(--jc-text-secondary, #aaa);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 6px;
+  &:hover { color: var(--jc-text-primary, #e6e6e6); }
+}
+.ae-runlog-out {
+  flex-shrink: 0;
+  max-height: 140px;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  margin: 0;
+  padding: 6px 10px;
+  font-family: ui-monospace, Consolas, 'Courier New', monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--jc-text-secondary, #aaa);
+  background: var(--jc-bg-input, #2b2b2e);
+  border-bottom: 1px solid var(--jc-border-default, #3e3e42);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.ae-runlog-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ae-rl-step {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: var(--jc-bg-elevated, #2d2d30);
+  font-size: 12px;
+  &.fail { outline: 1px solid rgba(255, 77, 79, .35); }
+  .ae-rl-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 4px; flex-shrink: 0; }
+  .ae-rl-name { color: var(--jc-text-primary, #e6e6e6); font-weight: 500; }
+  .ae-rl-status {
+    font-size: 11px;
+    &.fail { color: var(--jc-color-error, #ff4d4f); }
+  }
+  .ae-rl-dur,
+  .ae-rl-code,
+  .ae-rl-iter { font-size: 11px; color: var(--jc-text-tertiary, #858585); }
+  .ae-rl-auth { font-size: 11px; color: var(--jc-color-warning, #faad14); }
+  .ae-rl-detail {
+    flex-basis: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    .ae-rl-line {
+      font-size: 11px;
+      color: var(--jc-text-secondary, #aaa);
+      display: flex;
+      gap: 6px;
+      .lbl { color: var(--jc-text-tertiary, #858585); flex-shrink: 0; }
+      .mono { font-family: var(--jc-font-mono, ui-monospace, monospace); word-break: break-all; }
+    }
+  }
 }
 </style>

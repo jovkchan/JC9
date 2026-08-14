@@ -1,6 +1,8 @@
 mod process;
 mod database;
 pub mod ai;
+pub mod automation;
+mod credential_crypto;
 
 use process::ProcessManager;
 use database::{Database, Project, Shortcut, NoteGroup, Note};
@@ -240,128 +242,73 @@ fn save_effect_config(config: String) -> Result<(), String> {
     database::save_effect_config(&config)
 }
 
-// ── 工作流（多命令顺序执行）──
+// ── 自动化（积木编辑器，F1b）──
 
 #[tauri::command]
-fn get_workflows() -> Result<String, String> {
-    database::get_workflows()
+fn automation_list() -> Result<String, String> {
+    database::get_automations()
 }
 
 #[tauri::command]
-fn save_workflows(workflows_json: String) -> Result<(), String> {
-    database::save_workflows_json(&workflows_json)
+fn automation_save(automations_json: String) -> Result<(), String> {
+    database::save_automations_json(&automations_json)
 }
 
-/// 执行工作流：按顺序在终端中执行多个命令，每个等上一个完成
 #[tauri::command]
-async fn run_workflow(app: tauri::AppHandle, tab_id: String, steps: Vec<database::WorkflowStep>) -> Result<(), String> {
-    use std::io::Read;
-    use tauri::Emitter;
+fn automation_delete(id: String) -> Result<(), String> {
+    database::delete_automation(&id)
+}
 
-    let total = steps.len();
-    for (i, step) in steps.iter().enumerate() {
-        let step_num = i + 1;
+#[tauri::command]
+fn credential_list() -> Result<String, String> {
+    database::get_credentials()
+}
 
-        // ── 终端输出步骤标题 ──
-        let header = format!(
-            "\x1b[1;33m=== 步骤 {}/{} ===\x1b[0m\n\x1b[1;36m> {}\x1b[0m\n",
-            step_num, total, step.command
-        );
-        app.emit("pty-output", serde_json::json!({
-            "processId": tab_id,
-            "data": header.as_bytes()
-        })).ok();
+#[tauri::command]
+fn credential_save_all(credentials_json: String) -> Result<(), String> {
+    database::save_credentials_json(&credentials_json)
+}
 
-        app.emit("workflow-event", serde_json::json!({
-            "type": "step_start", "step": step_num, "total": total, "name": step.name
-        })).ok();
+/// 按 id 新增/更新一条凭据（含明文，供引擎执行注入）
+#[tauri::command]
+fn credential_upsert(credential_json: String) -> Result<(), String> {
+    database::upsert_credential(&credential_json)
+}
 
-        // PowerShell 执行（默认 shell，比 cmd.exe 路径处理更强）
-        #[cfg(target_os = "windows")]
-        let (shell, arg, full_cmd) = ("powershell", "-Command", format!(
-            "[Console]::OutputEncoding=[Text.Encoding]::UTF8; $ErrorActionPreference='Stop'; {}",
-            step.command
-        ));
-        #[cfg(not(target_os = "windows"))]
-        let (shell, arg, full_cmd) = ("sh", "-c", step.command.clone());
+#[tauri::command]
+fn credential_delete(id: String) -> Result<(), String> {
+    database::delete_credential(&id)
+}
 
-        let mut cmd = std::process::Command::new(shell);
-        cmd.args([arg, &full_cmd]);
-        cmd.current_dir(if step.working_dir.is_empty() { "." } else { &step.working_dir });
-        cmd.stdout(std::process::Stdio::piped());
-        cmd.stderr(std::process::Stdio::piped());
-        cmd.env("COLUMNS", "100");   // 限制终端宽度避免 vite 按超宽列渲染
-        cmd.env("FORCE_COLOR", "1");  // 保留 ANSI 颜色
+/// 运行自动化（积木编辑器）：Rust 引擎按图 walk 执行，事件走 automation-event / pty-output。
+/// entry：可选入口块 id（手动触发）；缺省找「开始」，无则找第一个「手动触发」。
+/// 在独立线程执行：避免同步阻塞命令线程（长命令期间 UI / 停止按钮 / 其他命令仍可响应，仿终端实时输出）。
+#[tauri::command]
+fn automation_run(state: tauri::State<'_, Mutex<AppState>>, app: tauri::AppHandle, id: String, entry: Option<String>) -> Result<String, String> {
+    let ai_manager = {
+        let st = state.lock().unwrap();
+        st.ai_manager.clone()
+    };
+    let run_id = automation::new_run_id();
+    let run_id2 = run_id.clone();
+    let app2 = app.clone();
+    let id2 = id.clone();
+    std::thread::spawn(move || {
+        let _ = automation::run_automation(&app2, &id2, entry, Some(ai_manager), &run_id2);
+    });
+    Ok(run_id)
+}
 
-        // Windows 下隐藏 CMD 窗口（仅后台执行，输出走 PTY 管道）
-        #[cfg(target_os = "windows")]
-        {
-            use std::os::windows::process::CommandExt;
-            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-        }
+/// 停止运行中的自动化（置取消位，正在执行的命令会被 kill）
+#[tauri::command]
+fn automation_stop(run_id: String) -> Result<(), String> {
+    automation::stop_automation(&run_id)
+}
 
-        let mut child = cmd.spawn()
-            .map_err(|e| format!("步骤 {} 启动失败: {}", step_num, e))?;
-
-        // stdout 线程
-        let app2 = app.clone();
-        let tid = tab_id.clone();
-        if let Some(stdout) = child.stdout.take() {
-            std::thread::spawn(move || {
-                let mut reader = std::io::BufReader::new(stdout);
-                let mut buf = [0u8; 4096];
-                while let Ok(n) = reader.read(&mut buf) {
-                    if n == 0 { break; }
-                    let _ = app2.emit("pty-output", serde_json::json!({
-                        "processId": tid,
-                        "data": &buf[..n]
-                    }));
-                }
-            });
-        }
-
-        // stderr 线程
-        let app3 = app.clone();
-        let tid3 = tab_id.clone();
-        if let Some(stderr) = child.stderr.take() {
-            std::thread::spawn(move || {
-                let mut reader = std::io::BufReader::new(stderr);
-                let mut buf = [0u8; 4096];
-                while let Ok(n) = reader.read(&mut buf) {
-                    if n == 0 { break; }
-                    let _ = app3.emit("pty-output", serde_json::json!({
-                        "processId": tid3,
-                        "data": &buf[..n]
-                    }));
-                }
-            });
-        }
-
-        let status = child.wait().map_err(|e| format!("步骤 {} 执行异常: {}", step_num, e))?;
-
-        // ── 终端输出步骤结果 ──
-        if status.success() {
-            let ok = format!("\x1b[1;32m[OK]\x1b[0m 步骤 {}/{}\n", step_num, total);
-            app.emit("pty-output", serde_json::json!({ "processId": tab_id, "data": ok.as_bytes() })).ok();
-            app.emit("workflow-event", serde_json::json!({
-                "type": "step_done", "step": step_num, "total": total, "name": step.name
-            })).ok();
-        } else {
-            let code = status.code().unwrap_or(-1);
-            let fail = format!("\x1b[1;31m[FAIL]\x1b[0m 步骤 {}/{} (退出码 {}):\n", step_num, total, code);
-            app.emit("pty-output", serde_json::json!({ "processId": tab_id, "data": fail.as_bytes() })).ok();
-            app.emit("workflow-event", serde_json::json!({
-                "type": "step_fail", "step": step_num, "total": total, "name": step.name
-            })).ok();
-            return Err(format!("步骤 {} 失败，退出码 {}", step_num, code));
-        }
-    }
-    app.emit("workflow-event", serde_json::json!({
-        "type": "workflow_done", "step": total, "total": total
-    })).ok();
-    let done = format!("\n\x1b[1;32m工作流完成\x1b[0m\n");
-    app.emit("pty-output", serde_json::json!({ "processId": tab_id, "data": done.as_bytes() })).ok();
-    Ok(())
+/// 读取自动化运行日志（结构化，最新在前；每个积木的执行记录见 automation_logs.json）
+#[tauri::command]
+fn automation_logs_list() -> Result<String, String> {
+    automation::list_automation_logs()
 }
 
 #[tauri::command]
@@ -2118,6 +2065,28 @@ pub fn run_mcp_stdio() {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// 从 ai-config.json 解析当前 provider 的 (provider, apiKey, baseUrl, model)
+fn parse_ai_provider_config(cfg: &serde_json::Value) -> (String, String, String, String) {
+    // 优先 notes-ai-models 数组第一个
+    if let Some(raw) = cfg.get("notes-ai-models").and_then(|v| v.as_str()) {
+        if let Ok(arr) = serde_json::from_str::<serde_json::Value>(raw) {
+            if let Some(first) = arr.as_array().and_then(|a| a.first()) {
+                let provider = first.get("provider").and_then(|v| v.as_str()).unwrap_or("deepseek").to_string();
+                let api_key = first.get("apiKey").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let base_url = first.get("endpoint").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let model = first.get("model").and_then(|v| v.as_str()).unwrap_or("").split(',').next().unwrap_or("").trim().to_string();
+                return (provider, api_key, base_url, model);
+            }
+        }
+    }
+    // fallback 单配置
+    let provider = cfg.get("notes-ai-provider").and_then(|v| v.as_str()).unwrap_or("deepseek").to_string();
+    let api_key = cfg.get("notes-ai-apikey").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let base_url = cfg.get("notes-ai-endpoint").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let model = cfg.get("notes-ai-model").and_then(|v| v.as_str()).unwrap_or("").split(',').next().unwrap_or("").trim().to_string();
+    (provider, api_key, base_url, model)
+}
+
 pub fn run() {
     let db = Database::new().expect("无法初始化数据库");
 
@@ -2150,6 +2119,20 @@ pub fn run() {
                 db_conn.clone(),
                 Some(app.handle().clone()),
             ));
+            // 启动恢复已保存的 AI 配置（否则 AI 积木/聊天会退回本地 Mock 生成假内容）
+            {
+                let ai2 = ai_manager.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Ok(raw) = database::get_ai_config() {
+                        if let Ok(cfg) = serde_json::from_str::<serde_json::Value>(&raw) {
+                            let (provider, api_key, base_url, model) = parse_ai_provider_config(&cfg);
+                            if !api_key.is_empty() || !base_url.is_empty() {
+                                ai2.reconfigure_llm(&provider, &api_key, &base_url, &model).await;
+                            }
+                        }
+                    }
+                });
+            }
             // ── MCP Server ──
             let mcp_server = std::sync::Arc::new(tokio::sync::Mutex::new(
                 ai::mcp_server::McpServer::new()
@@ -2486,9 +2469,16 @@ pub fn run() {
             save_ai_config,
             get_effect_config,
             save_effect_config,
-            get_workflows,
-            save_workflows,
-            run_workflow,
+            automation_list,
+            automation_save,
+            automation_delete,
+            automation_run,
+            automation_stop,
+            automation_logs_list,
+            credential_list,
+            credential_save_all,
+            credential_upsert,
+            credential_delete,
             get_projects,
             save_all_projects,
             start_command,

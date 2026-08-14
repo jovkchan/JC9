@@ -1,13 +1,47 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
+import { open } from '@tauri-apps/plugin-dialog'
 import { useAutomationStore } from '@/stores/automation'
+import { useStatusStore } from '@/stores/status'
 import JcButton from '@/components/ui/JcButton.vue'
 import JcInput from '@/components/ui/JcInput.vue'
+import JcTextarea from '@/components/ui/JcTextarea.vue'
+import JcModal from '@/components/ui/JcModal.vue'
 import JcContextMenu from '@/components/ui/JcContextMenu.vue'
 import type { JcContextMenuItem } from '@/components/ui'
 
 const store = useAutomationStore()
+const status = useStatusStore()
 onMounted(() => store.load())
+
+// ── 导入（完整 JSON，见方案 §4.6）──
+const importOpen = ref(false)
+const importText = ref('')
+
+async function pickImportFile() {
+  try {
+    const selected = await open({ filters: [{ name: '自动化 JSON', extensions: ['json'] }], multiple: false })
+    if (selected && typeof selected === 'string') {
+      const content = await invoke<string>('read_file_string', { path: selected })
+      importText.value = content
+      doImport()
+    }
+  } catch (e) { status.pushMessage(`读取文件失败: ${e}`, 'error') }
+}
+
+function doImport() {
+  const json = importText.value.trim()
+  if (!json) { status.pushMessage('请先粘贴或选择自动化 JSON', 'warn'); return }
+  const a = store.importAutomationJson(json)
+  if (a) {
+    status.pushMessage(`已导入「${a.name}」`, 'success')
+    importOpen.value = false
+    importText.value = ''
+  } else {
+    status.pushMessage('导入失败：不是有效的自动化 JSON（需含 nodes/edges）', 'error')
+  }
+}
 
 // ── 列表项右键菜单：复制 / 编辑 / 删除 ──
 const ctxShow = ref(false)
@@ -15,10 +49,10 @@ const ctxPos = ref({ x: 0, y: 0 })
 const ctxId = ref('')
 
 const ctxItems: JcContextMenuItem[] = [
-  { label: '运行', value: 'run', icon: '▶' },
-  { label: '编辑', value: 'edit', icon: '✏️' },
-  { label: '复制', value: 'duplicate', icon: '📄' },
-  { label: '删除', value: 'delete', icon: '🗑️', danger: true },
+  { label: '运行', value: 'run' },
+  { label: '编辑', value: 'edit' },
+  { label: '复制', value: 'duplicate' },
+  { label: '删除', value: 'delete', danger: true },
 ]
 
 function openCtx(e: MouseEvent, id: string) {
@@ -29,6 +63,14 @@ function openCtx(e: MouseEvent, id: string) {
 }
 
 function closeCtx() { ctxShow.value = false }
+
+/** 运行态卡片样式：运行中流光，结束/出错用颜色边框区分 */
+function runClass(a: { id: string }) {
+  const st = store.runStateOf(a.id)
+  if (!st) return ''
+  if (st.status === 'running') return 'is-running'
+  return `st-${st.status}`
+}
 
 function onCtxSelect(item: JcContextMenuItem) {
   const id = ctxId.value
@@ -45,7 +87,10 @@ function onCtxSelect(item: JcContextMenuItem) {
   <section class="automation-list">
     <div class="al-header">
       <span class="al-title">自动化</span>
-      <JcButton size="small" type="primary" @click="store.create()">+ 新建</JcButton>
+      <div class="al-header-acts">
+        <JcButton size="small" @click="importOpen = true">导入</JcButton>
+        <JcButton size="small" type="primary" @click="store.create()">+ 新建</JcButton>
+      </div>
     </div>
     <div class="al-search">
       <JcInput beam glow v-model="store.search" placeholder="搜索自动化" />
@@ -55,7 +100,7 @@ function onCtxSelect(item: JcContextMenuItem) {
         v-for="a in store.filtered"
         :key="a.id"
         class="al-item"
-        :class="{ on: a.id === store.currentId }"
+        :class="[{ on: a.id === store.currentId }, runClass(a)]"
         @contextmenu.prevent="openCtx($event, a.id)"
       >
         <div class="al-item-main">
@@ -72,6 +117,15 @@ function onCtxSelect(item: JcContextMenuItem) {
       <span class="al-foot-hint">积木编辑器 · F1a 骨架</span>
     </div>
     <JcContextMenu :show="ctxShow" :x="ctxPos.x" :y="ctxPos.y" :items="ctxItems" @update:show="ctxShow = $event" @select="onCtxSelect" />
+
+    <!-- 导入完整 JSON -->
+    <JcModal :open="importOpen" title="导入自动化" width="520" @update:open="importOpen = $event">
+      <JcTextarea v-model="importText" :rows="12" :spellcheck="false" placeholder='粘贴 automation JSON（含 nodes/edges）' />
+      <template #footer>
+        <JcButton @click="pickImportFile">从文件选择</JcButton>
+        <JcButton type="primary" @click="doImport">导入</JcButton>
+      </template>
+    </JcModal>
   </section>
 </template>
 
@@ -88,6 +142,10 @@ function onCtxSelect(item: JcContextMenuItem) {
   align-items: center;
   justify-content: space-between;
   padding: 10px 12px 6px;
+}
+.al-header-acts {
+  display: flex;
+  gap: 6px;
 }
 .al-title {
   font-size: 13px;
@@ -106,6 +164,7 @@ function onCtxSelect(item: JcContextMenuItem) {
   gap: 4px;
 }
 .al-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -123,6 +182,28 @@ function onCtxSelect(item: JcContextMenuItem) {
   border-color: var(--jc-color-accent);
   background: var(--jc-bg-hover);
 }
+/* 运行结束态：边框颜色区分 */
+.al-item.st-done { border-color: rgba(82, 196, 26, .55); }
+.al-item.st-failed { border-color: rgba(255, 77, 79, .65); }
+.al-item.st-stopped { border-color: rgba(250, 173, 20, .65); }
+/* 运行中：流光描边（遵循系统「动作效果」配置：总开关 html.jc-beam-off 时隐藏；速度用 --jc-beam-duration） */
+html.jc-beam-off .al-item.is-running::before { display: none; }
+.al-item.is-running::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: conic-gradient(from var(--jc-al-ang, 0deg), transparent 0 330deg, var(--jc-color-accent, #8a58ff) 360deg);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: al-item-flow var(--jc-beam-duration, 1.6s) linear infinite;
+  pointer-events: none;
+}
+@property --jc-al-ang { syntax: '<angle>'; initial-value: 0deg; inherits: false; }
+@keyframes al-item-flow { to { --jc-al-ang: 360deg; } }
 .al-item-main {
   flex: 1;
   min-width: 0;

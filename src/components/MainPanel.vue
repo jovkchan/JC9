@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { useProjectStore } from '@/stores/project'
 import { useNotesStore } from '@/stores/notes'
 import { useAutomationStore } from '@/stores/automation'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { useStatusStore } from '@/stores/status'
 import TerminalView from '@/components/TerminalView.vue'
 import LogPanel from '@/components/LogPanel.vue'
@@ -14,6 +15,7 @@ import JcSelect from '@/components/ui/JcSelect.vue'
 import JcTextarea from '@/components/ui/JcTextarea.vue'
 import JcTabBar from '@/components/ui/JcTabBar.vue'
 import AutomationEditor from '@/components/automation/AutomationEditor.vue'
+import AutomationLogPanel from '@/components/automation/AutomationLogPanel.vue'
 import type { JcContextMenuItem } from '@/components/ui'
 import type { JcTabItem } from '@/components/ui'
 
@@ -72,11 +74,11 @@ const autoStore = useAutomationStore()
 const activeNoteId = computed(() => notesStore.activeNoteTabId)
 
 // 当前模块的标签（按 sidebarTab 隔离）
-const showTermTabs = computed(() => store.sidebarTab === 'projects' || store.sidebarTab === 'workflows')
+const showTermTabs = computed(() => store.sidebarTab === 'projects')
 const showToolTabs = computed(() => store.sidebarTab === 'tools')
 const showNoteTabs = computed(() => store.sidebarTab === 'notes')
 const showMemoryTabs = computed(() => store.sidebarTab === 'memories')
-const showDocTabs = computed(() => store.sidebarTab === 'projects' || store.sidebarTab === 'workflows')
+const showDocTabs = computed(() => store.sidebarTab === 'projects')
 
 // Auto-switch to note tab type when a note tab opens (仅在笔记模块下)
 watch(activeNoteId, (id) => {
@@ -200,14 +202,11 @@ const ctxItems: JcContextMenuItem[] = [
 
 // ── JcTabBar 标签页数据与事件（按 sidebarTab 模块隔离） ──
 const termTabItems = computed<JcTabItem[]>(() =>
-  store.runningTabs
-    .map((t, i) => ({ t, i }))
-    .filter(({ t }) => store.sidebarTab === 'projects' ? t.projectId !== 'workflow' : t.projectId === 'workflow')
-    .map(({ t, i }) => ({
-      key: i,
-      label: t.commandName,
-      live: store.runningMap[store.cmdKey(t.projectId, t.commandId)] === 'running',
-    })),
+  store.runningTabs.map((t, i) => ({
+    key: i,
+    label: t.commandName,
+    live: store.runningMap[store.cmdKey(t.projectId, t.commandId)] === 'running',
+  })),
 )
 const termActiveKey = computed(() => (store.activeTabType === 'term' ? store.activeTabIndex : -1))
 const docTabItems = computed<JcTabItem[]>(() => store.docTabs.map((t, i) => ({ key: i, label: t.title })))
@@ -339,6 +338,9 @@ function confirmRename() {
 
 let reminderTimer: ReturnType<typeof setInterval> | null = null
 const notifiedTasks = new Set<string>()
+let autoUnlistenAuto: UnlistenFn | null = null
+let autoUnlistenStep: UnlistenFn | null = null
+let autoUnlistenPty: UnlistenFn | null = null
 
 function checkReminders() {
   const now = new Date()
@@ -388,11 +390,25 @@ onMounted(() => {
   }
   checkReminders()
   reminderTimer = setInterval(checkReminders, 15000)
+  // 自动化运行事件（全局：列表卡片运行态 + 实时日志面板；MainPanel 常驻，列表/编辑器共用）
+  listen<Record<string, unknown>>('automation-event', e => autoStore.onRunEvent(e.payload))
+    .then(fn => { autoUnlistenAuto = fn })
+    .catch(() => {})
+  listen<Record<string, unknown>>('step_log', e => autoStore.onStepLog(e.payload))
+    .then(fn => { autoUnlistenStep = fn })
+    .catch(() => {})
+  // 实时命令输出（pty-output，仿终端）：processId=runId，写入 store.liveOutput
+  listen<{ processId: string; data: number[] }>('pty-output', e => autoStore.onPtyOutput(e.payload as unknown as Record<string, unknown>))
+    .then(fn => { autoUnlistenPty = fn })
+    .catch(() => {})
 })
 
 onUnmounted(() => {
   document.removeEventListener('keydown', handleKeyDownSearch)
   if (reminderTimer) clearInterval(reminderTimer)
+  autoUnlistenAuto?.()
+  autoUnlistenStep?.()
+  autoUnlistenPty?.()
 })
 </script>
 
@@ -406,7 +422,7 @@ onUnmounted(() => {
     <JcTabBar v-if="showNoteTabs&&notesStore.noteTabs.length>0" :tabs="noteTabItems" :active-key="noteActiveKey" @select="onNoteTabSelect" @close="onNoteTabClose" @context-select="onNoteCtxSelect" />
 
     <!-- Terminal content -->
-    <div v-for="(t,i) in store.runningTabs" :key="'tc'+t.projectId+t.commandId" class="content" v-show="showTermTabs&&(store.sidebarTab==='projects'?t.projectId!=='workflow':t.projectId==='workflow')&&store.activeTabType==='term'&&i===store.activeTabIndex">
+    <div v-for="(t,i) in store.runningTabs" :key="'tc'+t.projectId+t.commandId" class="content" v-show="showTermTabs&&store.activeTabType==='term'&&i===store.activeTabIndex">
       <div class="bar">
         <code class="cmdtext">{{ t.command }}</code>
         <div class="acts">
@@ -542,7 +558,7 @@ onUnmounted(() => {
       <AutomationEditor />
     </div>
     <div v-else-if="store.sidebarTab === 'automation'" class="content">
-      <div class="empty automation-empty">从左侧选择自动化，或点击「+ 新建」开始搭建</div>
+      <AutomationLogPanel />
     </div>
 
     <div v-if="store.sidebarTab !== 'automation'&&store.runningTabs.length===0&&store.docTabs.length===0&&store.toolTabs.length===0&&store.memoryTabs.length===0&&notesStore.noteTabs.length===0" class="empty-or-feed" style="flex:1;display:flex">
