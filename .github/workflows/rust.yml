@@ -10,8 +10,45 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  # 质量门禁（格式化 + Clippy），仅在 Linux x86_64 跑一次即可
+  lint:
     runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: src-tauri
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Lint with Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+  # 跨平台构建 + 测试（Linux x86_64 / macOS ARM64 / macOS x86_64）
+  # macOS 两种架构分别验证 vec0-macos-aarch64.dylib 与 vec0-macos-x86_64.dylib 均可编译嵌入
+  build:
+    needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+          - os: macos-14        # macOS ARM64 (Apple Silicon)
+          - os: macos-13        # macOS x86_64 (Intel)
+    runs-on: ${{ matrix.os }}
 
     # Cargo 工作区位于 src-tauri/ 子目录（仓库根目录是前端 package.json）
     defaults:
@@ -21,20 +58,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 固定 Rust 工具链（含 rustfmt / clippy 组件）
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
 
-      # 缓存 Cargo 依赖与 target，显著加速后续构建
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
 
-      # Tauri v2 在 Linux 上编译/链接所需的系统库（webview / gtk / svg / appindicator）
+      # Tauri v2 在 Linux 上编译/链接所需的系统库（webview / gtk / svg / appindicator）。
+      # macOS 使用系统自带 WebKit 与 Xcode 工具链，无需额外安装。
       - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -44,12 +79,6 @@ jobs:
             librsvg2-dev \
             patchelf \
             build-essential
-
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-      - name: Lint with Clippy
-        run: cargo clippy --all-targets -- -D warnings
 
       - name: Build
         run: cargo build --verbose

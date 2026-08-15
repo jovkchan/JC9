@@ -18,8 +18,6 @@ tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
-# Windows Toast 原生构建（appLogoOverride 应用图标；插件桌面端不支持顶部图标）
-tauri-winrt-notification = "0.7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 portable-pty = "0.8"
@@ -52,3 +50,8 @@ tokio-stream = "0.1"
 tokio-util = "0.7"
 # Markdown → HTML 渲染（笔记分享页面）
 pulldown-cmark = "0.13"
+
+# Windows Toast 原生构建（appLogoOverride 应用图标；插件桌面端不支持顶部图标）
+# 仅 Windows 需要；macOS/Linux 无需编译此 crate（tauri-plugin-notification 已覆盖跨平台系统通知）
+[target.'cfg(windows)'.dependencies]
+tauri-winrt-notification = "0.7"
