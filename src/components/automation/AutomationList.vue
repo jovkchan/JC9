@@ -150,7 +150,7 @@ function onCtxSelect(item: JcContextMenuItem) {
       <JcTextarea v-model="importText" :rows="12" :spellcheck="false" placeholder='粘贴 automation JSON（含 nodes/edges）' />
       <template #footer>
         <JcButton @click="pickImportFile">从文件选择</JcButton>
-        <JcButton type="primary" @click="doImport">导入</JcButton>
+        <JcButton type="primary" @click="doImport()">导入</JcButton>
       </template>
     </JcModal>
 
