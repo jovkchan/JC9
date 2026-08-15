@@ -21,8 +21,8 @@
    - **多模式对话**：支持 CRAFT（全执行）/ ASK（只读问答）/ PLAN（规划模式）三种 Chat Mode，以及多会话管理、自动命名与历史持久化。
 -  **富文本笔记编辑器**：基于 TipTap / Yiitap 移植的强大 WYSIWYG 编辑器，支持 Markdown / 纯文本 / 富文本多模式，含增强表格（合并拆分 / 底色 / 列宽）、Mermaid 图表、KaTeX 公式、图片、Callout、多列布局、版本历史（50 条快照）与撤销恢复、笔记链接（`jclink://`）与在线分享。
 -  **本地记忆与知识库**：SQLite + sqlite-vec 本地向量库，混合语义搜索（向量 + FTS5 全文），支持笔记自动同步入库、Agent 记忆沉淀（`jc9_memory_*`）、按项目 scope 隔离与记忆压缩。
--  **内置 MCP Server**：自带 MCP Server，暴露笔记与记忆操作工具，支持 **SSE**（`127.0.0.1:18899` + Bearer Token）与 **Stdio**（`node <释放的 jc9-mcp.mjs>`，运行时内嵌释放）两种方式被外部 MCP 客户端（Claude Desktop / VS Code 等）接入；同时内置 MCP 客户端可接入第三方 MCP 服务器。
--  **积木式自动化编辑器**：可视化 Canvas 拖拽编程，通过「开始 / 命令 / 条件 / 延迟 / 变量设置 / 结束」等积木块连线编排自动化工作流，支持 50 步撤销 / 重做、主题感知渲染与端口连线校验。
+-  **内置 MCP Server**：自带 MCP Server，暴露笔记 / 记忆 / 自动化触发等 17 个工具，支持 **SSE**（`127.0.0.1:18899` + Bearer Token）与 **Stdio**（`node <释放的 jc9-mcp.mjs>`，运行时内嵌释放）两种方式被外部 MCP 客户端（Claude Desktop / VS Code 等）接入；同时内置 MCP 客户端可接入第三方 MCP 服务器。
+-  **积木式自动化编辑器**：可视化 Canvas 拖拽编程，通过「开始 / 手动触发 / 命令 / 条件 / 延迟 / 循环 / 并行 / 变量 / 工作区 / 环境变量 / Git / Docker / GitLab / Jenkins / Harbor / K8S / 凭据 / AI 生成 / 通知 / 调用工作流 / 结束」等 30+ 积木块连线编排自动化工作流；内置 Rust 本地执行引擎（控制流 + 凭据加密 + 全量执行日志），支持 50 步撤销 / 重做、主题感知渲染与端口连线校验。
 -  **自研可移植 UI 组件库**：`src/components/ui` 下自研一套对齐 Ant Design 设计规范（色彩 / 字体 / 8px 布局 / 暗黑模式 / 三级阴影）的 `Jc*` 组件体系（按钮 / 输入 / 选择 / 弹窗 / 右键菜单 / Toast 等 20+ 组件），全项目工具与表单已统一收编。
 
 ##  技术栈
@@ -97,6 +97,9 @@ npx tauri build
   - **哈希计算 (Hash)**：大文件拖拽分块流式读取（防内存溢出），支持 MD5、SHA-1、SHA-256、SHA-512 以及 **SM3 国密算法**。
   - **JWT 解码器**：一键解析 JSON Web Token 的 Header 与 Payload 荷载。
   - **Base64 / URL / Unicode 编解码**：文本/图片 Base64 互转、URL 编解码与 Unicode/ASCII 码点翻译转换。
+  - **UUID 生成器**：UUID v1 / v4 批量生成，支持大写、去横线、自定义格式。
+  - **图片 Base64**：本地图片拖拽转 Base64 数据（含预览与体积统计）。
+  - **环境变量查看**：进程环境变量分类检索与实时过滤。
 
 -  **排版与辅助**
   - **占位假文生成 (Lorem Ipsum)**：支持生成中英文、中国古典诗词及 HTML 标签的 UI 假文。
@@ -104,6 +107,9 @@ npx tauri build
   - **CSS 单位换算**：`px`、`rem`、`em` , `vw` , `vh` 双向联动换算，带物理大小滑块与缩放预览演示。
   - **SVG 预览与优化**：本地 SVG 导入/粘贴，透明棋盘格缩放预览，深度 DOM 级别冗余清理与浮点精度控制。
   - **二维码工具**：自定义 Logo、8种码眼/码点形状的二维码矢量生成与本地图片上传解析。
+  - **颜色转换**：HEX / RGB / HSL / HSV / CMYK / LAB 多格式互转与调色预览。
+  - **Markdown 转纯文本**：Markdown 源码一键转可读纯文本。
+  - **图标生成**：文本 / Emoji 一键生成自定义尺寸与配色的 PNG 图标。
 
 -  **系统与网络 (System & Network)**
   - **DNS 解析查询**：模拟 Linux `dig` 终端，支持 A/CNAME/MX/TXT/AAAA 记录的多源 DoH 查询。
@@ -143,19 +149,30 @@ npx tauri build
 
 ### ⚙️ 积木式自动化编辑器
 
-- 可视化 Canvas 拖拽编程（`src/components/automation/`），自研轻量画布引擎（平移 / 缩放 / 网格 / 吸附）
-- 积木块注册表：开始 / 命令 / 条件 / 延迟 / 变量设置 / 结束，Schema 驱动（`src/types/automation.ts`）
-- 颜色匹配端口连线（同色可连、异色禁止）+ 贝塞尔曲线 + 箭头
-- 独立 Store（50 步撤销 / 重做）、主题感知渲染、BlockPalette 积木面板
-- 契约冻结，后续将扩展平台块与 Rust 执行引擎
+- 可视化 Canvas 拖拽编程（`src/components/automation/`），自研轻量画布引擎（平移 / 缩放 / 网格 / 吸附 / 框选 / 右键菜单）
+- 积木块注册表（Schema 驱动，`src/types/automation.ts` + `blocks/blocks.ts`）：
+  - 入口：开始 / 手动触发
+  - 终端：命令（Shell 覆盖 PowerShell / CMD / Bash / Python / Node）/ 打开网址 / 启动程序
+  - 逻辑：条件 / 延迟 / 循环（for / while）/ 并行组 / 调用工作流（防环深度上限）
+  - 环境：工作区（链路 cwd）/ 环境变量
+  - 变量：变量赋值（string / number / boolean）
+  - 版本控制：Git 克隆 / 查看变更 / 提交 / 推送 / 拉取 / 分支 / 标签
+  - 平台：Docker / GitLab / Jenkins / Harbor / K8S（CLI 执行 + 凭据连线注入）
+  - 权限：凭据块（Basic / PAT / Token / SSH Key / Kubeconfig）
+  - 其他：AI 生成 / 通知 / 结束
+- 颜色匹配端口连线（同色可连、异色禁止）+ 贝塞尔曲线 + 箭头；凭据专属金色端口
+- Rust 本地执行引擎（`src-tauri/src/automation.rs`）：链路上下文传递（cwd / shell / env / session / last）、`{{var}}` / `{{last.*}}` 插值、控制流（手动触发 / 并行 fork / 循环 / 可中断停止）、防死循环熔断、失败策略（stop / continue）
+- 凭据 AES-256-GCM 加密存储（`~/.jc9/key.bin` 0600，前端仅掩码）；全量执行日志 `automation_logs.json`（每步耗时 / 退出码 / 鉴权 / 执行内容，保留 200 条）
+- 独立 Store（50 步撤销 / 重做）、主题感知渲染、BlockPalette 积木面板 + InspectorPanel 参数面板 + LoginDialog 凭据登录
+- MCP 外部触发：`jc9_automation_run` 按 ID 激活指定工作积木（列表 / 编辑器右键 → 复制 ID）
 
 ### 🔌 内置 MCP Server
 
-- 暴露 **16 个工具**：笔记操作（8）+ 记忆操作（6）+ 诊断（2），让外部 AI 读写 JC9 的笔记与记忆
+- 暴露 **17 个工具**：笔记操作（8）+ 记忆操作（6）+ 诊断（2）+ 自动化触发（1），让外部 AI 读写 JC9 的笔记与记忆、并按 ID 触发工作积木
 - 支持两种标准传输（对齐 MCP 接入配置规范）：**Stdio**（`command`/`args`/`env`）与 **SSE**（`url`/`headers`），均不含 `type` 字段
 - **Stdio 方式**：`command`=`node`、`args` 指向**运行时释放的 `jc9-mcp.mjs`**（内嵌模板 → exe 同目录 `mcp/`，自动写入当前地址/端口），`env` 传 `key`；通过内置 MCP Server 读写笔记/记忆（需 JC9 运行中）
 - **SSE 方式**：`http://127.0.0.1:18899/sse`（事件流）+ `http://127.0.0.1:18899/message`（同协议 HTTP POST 端点），`headers` 走 Bearer Token
-- 三种端点均使用 API Key 做认证与权限隔离（scope + 分组白名单 + **工具白名单**，可对 16 个工具逐项开关，危险操作以红/黄/绿标识）；server 命名采用 kebab-case（`jc9` / `jc9-sse`）
+- 三种端点均使用 API Key 做认证与权限隔离（scope + 分组白名单 + **工具白名单**，可对 17 个工具逐项开关，危险操作以红/黄/绿标识）；server 命名采用 kebab-case（`jc9` / `jc9-sse`）
 - 知识库按 `project:{id}` 分组隔离；配置存 `settings` 表 `mcp_server_config` KV
 - 笔记 CRUD 后通过 `notes:changed` 事件实时同步前端
 
@@ -208,11 +225,11 @@ npx tauri build
 ├─ src/                     # 前端 (Vue 3 + TS + Pinia)
 │  ├─ components/
 │  │  ├─ ai-agent/          # AI Agent 面板 / 多任务工作台
-│  │  ├─ automation/        # 积木式自动化编辑器 (Canvas)
+│  │  ├─ automation/        # 积木式自动化编辑器 (Canvas 引擎 + blocks 注册表 + editor 面板)
 │  │  ├─ editor/            # 编辑器 UI 组件 (ColorBoard/Emoji/BubbleMenu/TableMenu)
 │  │  ├─ notes/             # 笔记系统 (NoteEditor/VersionHistory/NoteFeedView...)
 │  │  ├─ settings/          # 设置面板 (模型/角色/MCP/APIKey/记忆)
-│  │  ├─ tools/             # 32 个开发者工具箱页面
+│  │  ├─ tools/             # 33 个开发者工具箱页面
 │  │  └─ ui/                # 自研可移植 UI 组件库 (Jc*)
 │  ├─ composables/          # 可复用逻辑 (useBeam/useJcTheme...)
 │  ├─ extensions/           # TipTap/Yiitap 自定义扩展 (JcCodeBlock + Mermaid...)
@@ -222,6 +239,7 @@ npx tauri build
 ├─ src-tauri/               # Rust + Tauri v2 后端
 │  └─ src/
 │     ├─ ai/                # AI Agent (30+ 模块: react_loop/agent_manager/guardrails...)
+│     ├─ automation.rs      # 积木自动化执行引擎 (链路上下文/控制流/凭据解密/执行日志)
 │     ├─ database.rs        # SQLite + sqlite-vec
 │     ├─ process.rs         # 进程管理
 │     └─ storage.rs

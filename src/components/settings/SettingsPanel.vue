@@ -354,7 +354,7 @@ interface McpServerConfigType {
 
 // ── API Key 管理（独立于服务配置）──
 interface ApiKeyItem { id: string; key: string; label: string; scope: string; group_ids: string[]; tools: string[] }
-// MCP 工具白名单选项（对应内置 MCP Server 的 16 个工具；risk: safe=查询/绿, medium=中危/黄, danger=删改/红；新建类=黄）
+// MCP 工具白名单选项（对应内置 MCP Server 的工具；risk: safe=查询/绿, medium=中危/黄, danger=删改/红；新建类=黄）
 const mcpToolOptions: { name: string; label: string; category: string; risk: 'safe' | 'medium' | 'danger'; description: string }[] = [
   { name: 'jc9_note_search', label: '搜索笔记', category: '笔记', risk: 'safe', description: '向量语义 + 关键词混合搜索笔记，返回最匹配列表（含预览/匹配度）' },
   { name: 'jc9_note_read', label: '读取笔记', category: '笔记', risk: 'safe', description: '读取指定笔记的完整内容（Markdown）' },
@@ -372,8 +372,9 @@ const mcpToolOptions: { name: string; label: string; category: string; risk: 'sa
   { name: 'jc9_memory_compress', label: '压缩记忆', category: '记忆', risk: 'danger', description: '压缩多条记忆为一条摘要，原记忆被删除' },
   { name: 'jc9_database_stats', label: '诊断统计', category: '诊断', risk: 'safe', description: '数据库/向量索引诊断统计（只读）' },
   { name: 'jc9_reindex', label: '重建向量', category: '诊断', risk: 'medium', description: '重建全部知识条目向量嵌入（耗时，重操作）' },
+  { name: 'jc9_automation_run', label: '运行工作积木', category: '自动化', risk: 'danger', description: '按 ID 触发一个工作积木（自动化任务）执行，可能运行本地命令 / 平台操作' },
 ]
-const mcpToolCategories = ['笔记', '记忆', '诊断']
+const mcpToolCategories = ['笔记', '记忆', '诊断', '自动化']
 const showApiKeyManager = ref(false)
 const showApiKeyForm = ref(false)
 const editingApiKeyId = ref('') // '' = 添加新 Key
@@ -1160,7 +1161,7 @@ async function compressMemories() {
                   <div v-for="ak in keys" :key="ak.id" class="api-key-item" style="display:flex;align-items:center;gap:8px;padding:5px 6px;font-size:11px;border:1px solid var(--jc-border-default);border-radius:4px;margin-bottom:3px">
                     <code style="color:var(--jc-color-success);font-size:10px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ ak.key }}</code>
                     <span style="color:var(--jc-text-highlight);font-size:10px;white-space:nowrap">{{ ak.label }}</span>
-                    <span v-if="ak.tools && ak.tools.length" style="font-size:10px;color:var(--jc-text-secondary);white-space:nowrap" :title="ak.tools.join(', ')">工具 {{ ak.tools.length }}/16</span>
+                    <span v-if="ak.tools && ak.tools.length" style="font-size:10px;color:var(--jc-text-secondary);white-space:nowrap" :title="ak.tools.join(', ')">工具 {{ ak.tools.length }}/{{ mcpToolOptions.length }}</span>
                     <span v-else style="font-size:10px;color:var(--jc-color-success);white-space:nowrap">全部工具</span>
                     <button class="mcp-copy-btn" @click="copyText(ak.key)" title="复制">复制</button>
                     <button class="btn-sm" @click="openEditApiKey(ak)">编辑</button>
