@@ -12,7 +12,6 @@ gitcode/
 Thumbs.db
 jc9_knowledge.db
 src-tauri/jc9_knowledge.db
-src-tauri/icons/
 !src-tauri/icons/icon.ico
 !src-tauri/icons/icon.png
 .vs/
