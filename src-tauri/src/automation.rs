@@ -592,37 +592,85 @@ fn run_curl(args: &[String], cancel: &Arc<AtomicBool>, on_out: OnOut) -> Result<
     run_child(&mut cmd, 0, cancel, on_out)
 }
 
-/// Jenkins：触发构建 / 查状态 / 控制台输出（Basic Auth + Crumb CSRF）；可取消
-fn exec_jenkins(url: &str, job: &str, action: &str, build: &str, user: &str, token: &str, cancel: &Arc<AtomicBool>, on_out: OnOut) -> Result<(i32, String, String), String> {
+/// 对字符串截尾 N 行（0 = 全部）
+fn tail_lines(s: &str, n: usize) -> String {
+    if n == 0 {
+        return s.to_string();
+    }
+    let lines: Vec<&str> = s.lines().collect();
+    let skip = lines.len().saturating_sub(n);
+    lines.iter().skip(skip).cloned().collect::<Vec<_>>().join("\n")
+}
+
+/// Jenkins：触发构建（可参数注入）/ 查队列 / 查状态（可指定构建号）/ 控制台输出（可截尾 N 行）/ 停止构建（Basic Auth + Crumb CSRF）；可取消
+fn exec_jenkins(url: &str, job: &str, action: &str, build: &str, params: &str, tail: &str, user: &str, token: &str, cancel: &Arc<AtomicBool>, on_out: OnOut) -> Result<(i32, String, String), String> {
     let root = url.trim_end_matches('/');
     let auth = format!("{}:{}", user, token);
+    let get_crumb = |root: &str| -> String {
+        let api = format!("{}/crumbIssuer/api/json", root);
+        run_curl(&["-s".into(), "-u".into(), auth.clone(), api], cancel, on_out)
+            .ok()
+            .and_then(|(_, o, _)| serde_json::from_str::<Value>(&o).ok())
+            .and_then(|v| v.get("crumb").and_then(|c| c.as_str()).map(String::from))
+            .unwrap_or_default()
+    };
+    let mk_get = |api: String| -> Vec<String> {
+        vec!["-s".into(), "-u".into(), auth.clone(), api]
+    };
     match action {
         "trigger" => {
-            // 1) 取 Crumb
-            let crumb_api = format!("{}/crumbIssuer/api/json", root);
-            let out = run_curl(&["-s".into(), "-u".into(), auth.clone(), crumb_api], cancel, on_out)?;
-            let crumb = serde_json::from_str::<Value>(&out.1)
-                .ok()
-                .and_then(|v| v.get("crumb").and_then(|c| c.as_str()).map(String::from))
-                .unwrap_or_default();
-            // 2) POST build
-            let api = format!("{}/job/{}/build", root, job);
+            let c = get_crumb(&root);
+            let with_params = !params.trim().is_empty();
+            let api = if with_params {
+                format!("{}/job/{}/buildWithParameters", root, job)
+            } else {
+                format!("{}/job/{}/build", root, job)
+            };
             let mut args = vec!["-s".into(), "-u".into(), auth.clone(), "-X".into(), "POST".into()];
-            if !crumb.is_empty() {
+            if !c.is_empty() {
                 args.push("-H".into());
-                args.push(format!("Jenkins-Crumb: {}", crumb));
+                args.push(format!("Jenkins-Crumb: {}", c));
+            }
+            if with_params {
+                for line in params.lines() {
+                    let kv = line.trim();
+                    if kv.is_empty() {
+                        continue;
+                    }
+                    args.push("--data-urlencode".into());
+                    args.push(kv.to_string());
+                }
             }
             args.push(api);
             run_curl(&args, cancel, on_out)
         }
+        "queue" => {
+            let api = format!("{}/queue/api/json", root);
+            run_curl(&mk_get(api), cancel, on_out)
+        }
         "status" => {
-            let api = format!("{}/job/{}/lastBuild/api/json", root, job);
-            run_curl(&["-s".into(), "-u".into(), auth, api], cancel, on_out)
+            let b = if build.is_empty() { "lastBuild" } else { build };
+            let api = format!("{}/job/{}/{}/api/json", root, job, b);
+            run_curl(&mk_get(api), cancel, on_out)
+        }
+        "stop" => {
+            let b = if build.is_empty() { "lastBuild" } else { build };
+            let c = get_crumb(&root);
+            let api = format!("{}/job/{}/{}/stop", root, job, b);
+            let mut args = vec!["-s".into(), "-u".into(), auth.clone(), "-X".into(), "POST".into()];
+            if !c.is_empty() {
+                args.push("-H".into());
+                args.push(format!("Jenkins-Crumb: {}", c));
+            }
+            args.push(api);
+            run_curl(&args, cancel, on_out)
         }
         _ => {
             let b = if build.is_empty() { "lastBuild" } else { build };
             let api = format!("{}/job/{}/{}/consoleText", root, job, b);
-            run_curl(&["-s".into(), "-u".into(), auth, api], cancel, on_out)
+            let (code, out, err) = run_curl(&mk_get(api), cancel, on_out)?;
+            let n: usize = tail.trim().parse().unwrap_or(0);
+            Ok((code, tail_lines(&out, n), err))
         }
     }
 }
@@ -667,11 +715,22 @@ fn exec_harbor(url: &str, project: &str, repo: &str, tag: &str, context: &str, d
     Ok((pcode, all_out, all_err))
 }
 
-/// K8S：kubectl（kubeconfig 内容写临时文件，经 KUBECONFIG 注入）；可取消
-fn exec_k8s(action: &str, file: &str, kind: &str, name: &str, ns: &str, kubeconfig: &str, cancel: &Arc<AtomicBool>, on_out: OnOut) -> Result<(i32, String, String), String> {
+/// K8S：kubectl（kubeconfig 内容写临时文件，经 KUBECONFIG 注入）；apply/rollout/set-image/set-env/restart/get/logs；可取消
+fn exec_k8s(action: &str, file: &str, kind: &str, name: &str, ns: &str, image: &str, env: &str, kubeconfig: &str, cancel: &Arc<AtomicBool>, on_out: OnOut) -> Result<(i32, String, String), String> {
     // 写 kubeconfig 临时文件
     let tmp_path = std::env::temp_dir().join(format!("jc9-kube-{}.yaml", now_ts()));
     std::fs::write(&tmp_path, kubeconfig).map_err(|e| format!("写 kubeconfig 失败: {}", e))?;
+    // deployment 资源引用：name 可带/不带类型前缀
+    let dep = |name: &str| -> String {
+        if name.is_empty() {
+            return "deployment/".to_string();
+        }
+        if name.contains('/') {
+            name.to_string()
+        } else {
+            format!("deployment/{}", name)
+        }
+    };
     let args: Vec<String> = match action {
         "apply" => {
             let mut a = vec!["apply".into(), "-f".into(), file.into()];
@@ -681,6 +740,26 @@ fn exec_k8s(action: &str, file: &str, kind: &str, name: &str, ns: &str, kubeconf
         "rollout" => {
             let k: String = if kind.is_empty() { "deployment".to_string() } else { kind.to_string() };
             let mut a = vec!["rollout".into(), "status".into(), format!("{}/{}", k, name)];
+            if !ns.is_empty() { a.push("-n".into()); a.push(ns.into()); }
+            a
+        }
+        "set-image" => {
+            let mut a = vec!["set".into(), "image".into(), dep(name)];
+            if !image.is_empty() { a.push(image.to_string()); }
+            if !ns.is_empty() { a.push("-n".into()); a.push(ns.into()); }
+            a
+        }
+        "set-env" => {
+            let mut a = vec!["set".into(), "env".into(), dep(name)];
+            for kv in env.lines() {
+                let kv = kv.trim();
+                if !kv.is_empty() { a.push(kv.to_string()); }
+            }
+            if !ns.is_empty() { a.push("-n".into()); a.push(ns.into()); }
+            a
+        }
+        "restart" => {
+            let mut a = vec!["rollout".into(), "restart".into(), dep(name)];
             if !ns.is_empty() { a.push("-n".into()); a.push(ns.into()); }
             a
         }
@@ -703,6 +782,138 @@ fn exec_k8s(action: &str, file: &str, kind: &str, name: &str, ns: &str, kubeconf
     let (code, out, err) = run_child(&mut sc, 0, cancel, on_out)?;
     let _ = std::fs::remove_file(&tmp_path);
     Ok((code, out, err))
+}
+
+/// HTTP 期望状态码匹配：支持精确（200）或 2xx 通配
+fn match_expect_http(code: &str, expect: &str) -> bool {
+    let c: u32 = code.trim().parse().unwrap_or(0);
+    let e = expect.trim();
+    if let Some(prefix) = e.strip_suffix("xx") {
+        if let Ok(first) = prefix.trim().parse::<u32>() {
+            return c / 100 == first;
+        }
+    }
+    if let Ok(ec) = e.parse::<u32>() {
+        return c == ec;
+    }
+    e == code
+}
+
+/// HTTP 请求 / 健康检查（curl）：期望状态码匹配即成功；stdout = 状态码 + 响应体；可取消
+fn exec_http(method: &str, url: &str, headers: &str, body: &str, expect_code: &str, timeout: &str, user: &str, token: &str, cancel: &Arc<AtomicBool>, on_out: OnOut) -> Result<(i32, String, String), String> {
+    let tmp = std::env::temp_dir().join(format!("jc9-http-{}.body", now_ts()));
+    let mut args: Vec<String> = vec![
+        "-s".into(), "-L".into(),
+        "-o".into(), tmp.to_string_lossy().to_string(),
+        "-w".into(), "%{http_code}".into(),
+        "-X".into(), method.to_string(),
+    ];
+    if !user.is_empty() || !token.is_empty() {
+        args.push("-u".into());
+        args.push(format!("{}:{}", user, token));
+    }
+    for h in headers.lines() {
+        let h = h.trim();
+        if !h.is_empty() {
+            args.push("-H".into());
+            args.push(h.to_string());
+        }
+    }
+    if !body.is_empty() {
+        args.push("-d".into());
+        args.push(body.to_string());
+    }
+    if let Ok(t) = timeout.parse::<u32>() {
+        if t > 0 {
+            args.push("--max-time".into());
+            args.push(t.to_string());
+        }
+    }
+    args.push(url.to_string());
+    let (code, out, err) = run_curl(&args, cancel, on_out)?;
+    let http_code = out.trim().to_string();
+    let mut response = String::new();
+    if let Ok(b) = std::fs::read_to_string(&tmp) {
+        response = b;
+    }
+    let _ = std::fs::remove_file(&tmp);
+    let expect = if expect_code.trim().is_empty() { "200".to_string() } else { expect_code.trim().to_string() };
+    let body_out = format!("{} {}", http_code, response.trim());
+    let ok = code == 0 && match_expect_http(&http_code, &expect);
+    if ok {
+        Ok((0, body_out, err))
+    } else {
+        Ok((1, body_out, format!("HTTP 状态码 {} 不匹配期望 {}", http_code, expect)))
+    }
+}
+
+/// SSH 远程执行命令：auth=key 用私钥（password 栏）ssh -i；auth=password 走 plink（Windows）/ sshpass（其他）；可取消
+fn exec_ssh(host: &str, port: &str, user: &str, command: &str, auth: &str, secret: &str, timeout: &str, cancel: &Arc<AtomicBool>, on_out: OnOut) -> Result<(i32, String, String), String> {
+    let user = if user.trim().is_empty() { "root".to_string() } else { user.to_string() };
+    let port = if port.trim().is_empty() { "22".to_string() } else { port.to_string() };
+    let target = format!("{}@{}", user, host);
+    let mut timeout_args: Vec<String> = Vec::new();
+    if let Ok(t) = timeout.parse::<u32>() {
+        if t > 0 {
+            timeout_args.push("-o".into());
+            timeout_args.push(format!("ConnectTimeout={}", t));
+        }
+    }
+    let cmd = command.to_string();
+    if auth == "key" {
+        // 私钥：写临时文件 → ssh -i
+        let key_path = std::env::temp_dir().join(format!("jc9-ssh-key-{}.pem", now_ts()));
+        std::fs::write(&key_path, secret.as_bytes()).map_err(|e| format!("写 SSH 私钥临时文件失败: {}", e))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600));
+        }
+        let mut args: Vec<String> = vec![
+            "-i".into(), key_path.to_string_lossy().to_string(),
+            "-p".into(), port,
+            "-o".into(), "StrictHostKeyChecking=no".into(),
+            "-o".into(), "UserKnownHostsFile=/dev/null".into(),
+        ];
+        args.extend(timeout_args);
+        args.push(target);
+        args.push(cmd);
+        let mut sc = StdCommand::new("ssh");
+        sc.args(&args);
+        let r = run_child(&mut sc, 0, cancel, on_out);
+        let _ = std::fs::remove_file(&key_path);
+        return r;
+    }
+    // 密码认证
+    let mut args: Vec<String> = Vec::new();
+    let has_plink = StdCommand::new("plink").arg("-V").output().map(|o| o.status.success()).unwrap_or(false);
+    let client = if has_plink { "plink" } else { "sshpass" };
+    if has_plink {
+        args.push("-ssh".into());
+        args.push("-batch".into());
+        args.push("-P".into());
+        args.push(port.clone());
+        args.push("-pw".into());
+        args.push(secret.to_string());
+        args.push(target.clone());
+        args.push(cmd.clone());
+    } else {
+        args.push("-p".into());
+        args.push(secret.to_string());
+        args.push("ssh".into());
+        args.push("-p".into());
+        args.push(port.clone());
+        args.push("-o".into());
+        args.push("StrictHostKeyChecking=no".into());
+        args.push("-o".into());
+        args.push("UserKnownHostsFile=/dev/null".into());
+        args.extend(timeout_args);
+        args.push(target.clone());
+        args.push(cmd.clone());
+    }
+    let mut sc = StdCommand::new(client);
+    sc.args(&args);
+    run_child(&mut sc, 0, cancel, on_out)
 }
 
 /// Docker：通用本地操作（build/pull/run/compose/images/ps/logs/exec/stop/rm）；可取消
@@ -1290,7 +1501,7 @@ pub fn walk(
                 return Err(format!("{} 失败，退出码 {}", node_label, code));
             }
         }
-        pk @ ("jenkins" | "harbor" | "k8s" | "docker" | "gitlab") => {
+        pk @ ("jenkins" | "harbor" | "k8s" | "docker" | "gitlab" | "ssh" | "http") => {
             // 平台积木：凭据经「凭据端口」连线注入
             let cred = cred_for_node(nodes, edges, node_id);
             // 实时输出（pty-output 流，docker build 等长操作可见进度）
@@ -1336,10 +1547,12 @@ pub fn walk(
                     let job = interpolate(get_str(&config, "job"), ctx);
                     let action = get_str(&config, "action").to_string();
                     let build = interpolate(get_str(&config, "build"), ctx);
+                    let params = interpolate(get_str(&config, "params"), ctx);
+                    let tail = get_num_str(&config, "tail");
                     let user = cred_get("username");
                     let t = cred_get("token");
                     let token = if t.is_empty() { cred_get("password") } else { t };
-                    match exec_jenkins(&url, &job, &action, &build, &user, &token, cancel, on_out) {
+                    match exec_jenkins(&url, &job, &action, &build, &params, &tail, &user, &token, cancel, on_out) {
                         Ok(v) => v,
                         Err(m) => return Err(m),
                     }
@@ -1359,17 +1572,52 @@ pub fn walk(
                         Err(m) => return Err(m),
                     }
                 }
-                _ => {
+                "k8s" => {
                     let action = get_str(&config, "action").to_string();
                     let file = interpolate(get_str(&config, "file"), ctx);
                     let kind = interpolate(get_str(&config, "kind"), ctx);
                     let name = interpolate(get_str(&config, "name"), ctx);
                     let ns = interpolate(get_str(&config, "namespace"), ctx);
+                    let image = interpolate(get_str(&config, "image"), ctx);
+                    let env = interpolate(get_str(&config, "env"), ctx);
                     let kc = cred_get("kubeconfig");
-                    match exec_k8s(&action, &file, &kind, &name, &ns, &kc, cancel, on_out) {
+                    match exec_k8s(&action, &file, &kind, &name, &ns, &image, &env, &kc, cancel, on_out) {
                         Ok(v) => v,
                         Err(m) => return Err(m),
                     }
+                }
+                "ssh" => {
+                    let host = interpolate(get_str(&config, "host"), ctx);
+                    let port = get_num_str(&config, "port");
+                    let cu = cred_get("username");
+                    let user = interpolate(get_str(&config, "user"), ctx);
+                    let user = if user.is_empty() { cu } else { user };
+                    let auth = get_str(&config, "auth").to_string();
+                    let command = interpolate(get_str(&config, "command"), ctx);
+                    let timeout = get_num_str(&config, "timeoutSecs");
+                    let secret = cred_get("password");
+                    match exec_ssh(&host, &port, &user, &command, &auth, &secret, &timeout, cancel, on_out) {
+                        Ok(v) => v,
+                        Err(m) => return Err(m),
+                    }
+                }
+                "http" => {
+                    let method = get_str(&config, "method").to_string();
+                    let url = interpolate(get_str(&config, "url"), ctx);
+                    let headers = interpolate(get_str(&config, "headers"), ctx);
+                    let body = interpolate(get_str(&config, "body"), ctx);
+                    let expect = get_str(&config, "expectCode").to_string();
+                    let timeout = get_num_str(&config, "timeoutSecs");
+                    let user = cred_get("username");
+                    let t = cred_get("token");
+                    let token = if t.is_empty() { cred_get("password") } else { t };
+                    match exec_http(&method, &url, &headers, &body, &expect, &timeout, &user, &token, cancel, on_out) {
+                        Ok(v) => v,
+                        Err(m) => return Err(m),
+                    }
+                }
+                _ => {
+                    return Err(format!("未知平台积木类型: {}", pk));
                 }
             };
             ctx.last = Some(LastResult { exit_code: code, stdout: out.clone(), stderr: err.clone() });
@@ -1567,6 +1815,7 @@ pub fn walk(
         "ai-generate" => {
             let prompt = interpolate(get_str(&config, "prompt"), ctx);
             let var_name = interpolate(get_str(&config, "varName"), ctx);
+            let model = interpolate(get_str(&config, "model"), ctx);
             if prompt.is_empty() {
                 return Err(format!("AI 块 {}：缺少需求描述", node_id));
             }
@@ -1581,7 +1830,7 @@ pub fn walk(
             let text = std::thread::scope(|s| {
                 s.spawn(move || {
                     let rt = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
-                    rt.block_on(mgr.generate_text(system, &user))
+                    rt.block_on(mgr.generate_text_with_model(system, &user, &model))
                 })
                 .join()
                 .map_err(|_| "AI 线程异常".to_string())?

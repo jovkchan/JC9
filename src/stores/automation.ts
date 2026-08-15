@@ -217,6 +217,12 @@ export const useAutomationStore = defineStore('automation', () => {
     if (a) { a.name = name; a.updatedAt = new Date().toISOString(); markDirty() }
   }
 
+  /** 更新工作积木描述（编辑器标题栏可编辑） */
+  function setDescription(id: string, desc: string) {
+    const a = automations.value.find(x => x.id === id)
+    if (a) { a.description = desc; a.updatedAt = new Date().toISOString(); markDirty() }
+  }
+
   /** 从积木面板添加一个积木到当前自动化画布 */
   function addNode(type: string): BlockNode | null {
     const a = current.value
@@ -392,6 +398,14 @@ export const useAutomationStore = defineStore('automation', () => {
       if (currentBlockId.value === bid) currentBlockId.value = null
     } else if (type === 'done' || type === 'error' || type === 'stopped') {
       const status = type === 'done' ? 'done' : type === 'stopped' ? 'stopped' : 'failed'
+      // 失败/异常：把详细错误暴露给用户（Toast + 实时日志），否则运行失败无法排查
+      if (type === 'error') {
+        const msg = String(p.error ?? '执行失败')
+        useStatusStore().pushMessage(`❌ ${msg}`, 'error')
+        if (liveRunId.value === runId) {
+          liveOutput.value = (liveOutput.value ? liveOutput.value + '\n' : '') + `[错误] ${msg}`
+        }
+      }
       if (aid && runState.value[aid]) {
         runState.value[aid] = { runId, status }
         runState.value = { ...runState.value }
@@ -618,13 +632,18 @@ export const useAutomationStore = defineStore('automation', () => {
     return JSON.stringify(a, null, 2)
   }
 
-  /** 导入自动化 JSON：校验结构 + 重新生成节点/边 id（避免冲突），加入列表 */
-  function importAutomationJson(json: string): Automation | null {
+  /** 导入自动化 JSON：同名覆盖（overwrite）或另存副本（asCopy）；返回 'conflict' 表示存在同名需确认 */
+  function importAutomationJson(json: string, opts?: { overwrite?: boolean; asCopy?: boolean }): Automation | 'conflict' | null {
     try {
       const obj = JSON.parse(json)
       if (!obj || typeof obj !== 'object') throw new Error('不是有效的 JSON 对象')
       if (!Array.isArray(obj.nodes) || !Array.isArray(obj.edges)) throw new Error('缺少 nodes / edges')
       const now = new Date().toISOString()
+      const name = obj.name ? String(obj.name) : '导入的工作积木'
+      const existing = automations.value.find(a => a.name === name)
+      if (existing && !opts?.overwrite && !opts?.asCopy) {
+        return 'conflict'
+      }
       const idMap = new Map<string, string>()
       const nodes: BlockNode[] = (obj.nodes as BlockNode[]).map(n => {
         const nid = genId()
@@ -637,9 +656,20 @@ export const useAutomationStore = defineStore('automation', () => {
         fromBlock: idMap.get(e.fromBlock) ?? e.fromBlock,
         toBlock: idMap.get(e.toBlock) ?? e.toBlock,
       }))
+      if (existing && opts?.overwrite) {
+        // 覆盖现有（保留原 id / createdAt）
+        existing.name = name
+        existing.description = obj.description ?? ''
+        existing.version = 2
+        existing.nodes = nodes
+        existing.edges = edges
+        existing.variables = obj.variables ?? {}
+        existing.updatedAt = now
+        return existing
+      }
       const imported: Automation = {
         id: genId(),
-        name: obj.name ? `${String(obj.name)}（导入）` : '导入的工作积木',
+        name: opts?.asCopy && existing ? `${name}（副本）` : name,
         description: obj.description ?? '',
         version: 2,
         nodes,
@@ -656,10 +686,47 @@ export const useAutomationStore = defineStore('automation', () => {
     }
   }
 
+  /** 用 JSON 内容直接更新当前正在编辑的工作积木（替换节点/连线/变量/描述/名称，保留 id） */
+  function applyJsonToCurrent(json: string): boolean {
+    const a = current.value
+    if (!a) return false
+    try {
+      const obj = JSON.parse(json)
+      if (!obj || typeof obj !== 'object') return false
+      if (!Array.isArray(obj.nodes) || !Array.isArray(obj.edges)) return false
+      const now = new Date().toISOString()
+      const idMap = new Map<string, string>()
+      const nodes: BlockNode[] = (obj.nodes as BlockNode[]).map(n => {
+        const nid = genId()
+        idMap.set(n.id, nid)
+        return { ...n, id: nid }
+      })
+      const edges: Edge[] = (obj.edges as Edge[]).map(e => ({
+        ...e,
+        id: genId(),
+        fromBlock: idMap.get(e.fromBlock) ?? e.fromBlock,
+        toBlock: idMap.get(e.toBlock) ?? e.toBlock,
+      }))
+      pushHistory()
+      a.name = obj.name ? String(obj.name) : a.name
+      a.description = obj.description ?? a.description
+      a.version = 2
+      a.nodes = nodes
+      a.edges = edges
+      a.variables = obj.variables ?? {}
+      a.updatedAt = now
+      markDirty()
+      return true
+    } catch (e) {
+      console.error('apply json failed', e)
+      return false
+    }
+  }
+
   return {
     automations, currentId, current, editing, search, filtered, dirty, canUndo, canRedo,
     credentials,
-    load, open, create, remove, closeEditor, rename, addNode, addNodeAt, duplicate, run, stop,
+    load, open, create, remove, closeEditor, rename, setDescription, applyJsonToCurrent, addNode, addNodeAt, duplicate, run, stop,
     beginEdit: pushHistory, undo, redo, save, persist, markDirty, structureIssues,
     removeNode, addEdge, removeEdge, moveNode, updateNodeConfig, connectEdge, toggleLock,
     credentialLoad, credentialSave, credentialDelete,

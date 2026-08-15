@@ -241,6 +241,43 @@ impl AgentManager {
         Ok(content)
     }
 
+    /// AI 积木指定模型生成：model 为空 → 全局默认；否则从 ai-config 匹配模型并临时创建 provider
+    pub async fn generate_text_with_model(&self, system: &str, user: &str, model: &str) -> Result<String, String> {
+        let model = model.trim();
+        if model.is_empty() {
+            return self.generate_text(system, user).await;
+        }
+        let mut provider = self.provider.read().await.clone();
+        if let Ok(cfg_str) = crate::database::get_ai_config() {
+            if let Ok(cfg) = serde_json::from_str::<serde_json::Value>(&cfg_str) {
+                if let Some(raw) = cfg.get("notes-ai-models").and_then(|v| v.as_str()) {
+                    if let Ok(arr) = serde_json::from_str::<serde_json::Value>(raw) {
+                        for item in arr.as_array().into_iter().flatten() {
+                            let m = item.get("model").and_then(|v| v.as_str()).unwrap_or("");
+                            if m.split(',').map(str::trim).any(|s| s == model) {
+                                let api_key = item.get("apiKey").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                let base_url = item.get("endpoint").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                provider = Arc::new(OpenAiProvider::new(api_key, Some(base_url), Some(model.to_string()), None));
+                                println!("🤖 [Agent] AI 积木使用指定模型: {}", model);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let msgs = vec![
+            LlmMessage::system(system.to_string()),
+            LlmMessage::user(user.to_string()),
+        ];
+        let resp = provider.chat(&msgs, &[]).await.map_err(|e| format!("AI 调用失败: {}", e))?;
+        let content = resp.content.trim().to_string();
+        if content.is_empty() {
+            return Err("AI 未返回内容".into());
+        }
+        Ok(content)
+    }
+
     pub async fn set_reasoning_effort(&self, effort: String) {
         let eff = if effort.is_empty() || effort == "off" { None } else { Some(effort) };
         self.provider.read().await.set_reasoning_effort(eff).await;

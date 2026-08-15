@@ -297,12 +297,15 @@ impl LlmProvider for OpenAiProvider {
             })
         }).collect();
 
+        // 无工具时不携带 tools/tool_choice：部分模型（如 vLLM/GLM）拒绝空数组
         let mut body = serde_json::json!({
             "model": self.model,
             "messages": messages_json,
-            "tools": tools_json,
-            "tool_choice": "auto",
         });
+        if !tools.is_empty() {
+            body["tools"] = serde_json::json!(tools_json);
+            body["tool_choice"] = serde_json::json!("auto");
+        }
 
         // 针对支持思维的推理模型（如 DeepSeek 思考模型、OpenAI o1/o3 等）加入 reasoning_effort
         let is_reasoning_model = self.model.contains("deepseek") || self.model.contains("o1") || self.model.contains("o3");

@@ -155,11 +155,11 @@ export const BLOCK_HELP: Record<string, BlockHelp> = {
   },
   'ai-generate': {
     type: 'ai-generate',
-    usage: 'AI 块——用自然语言描述需求，由已配置的模型生成结果文本；可引用上一块输出（{{last.stdout}}）、工作目录（{{cwd}}）等插值。生成结果写入「输出变量」供下游 {{变量}} 引用，同时作为本块输出。',
+    usage: 'AI 块——用自然语言描述需求，由已配置的模型生成结果文本；可引用上一块输出（{{last.stdout}}）、工作目录（{{cwd}}）等插值。「模型」可选指定模型（下拉来自「设置 → AI」已配置模型列表，留空 = 默认模型）；若模型不支持 tools（如 GLM/vLLM），引擎会自动省略 tools 字段。生成结果写入「输出变量」供下游 {{变量}} 引用，同时作为本块输出。',
     when: '需要根据上下文动态生成内容（提交信息、变更说明、脚本片段、错误分析）时；需先在「设置 → AI」配置模型，未配置时运行会报错提示。',
     downstream: '流程 out → 任意带流程 in 的积木；生成文本通过变量插值被下游引用（无需连线）。',
     combos: [
-      '工作区 → Git 查看变更 → AI 生成（参考 {{last.stdout}} 生成提交信息→写 COMMIT_MSG）→ Git 提交（{{COMMIT_MSG}}）',
+      '工作区 → Git 查看变更 → AI 生成（参考 {{last.stdout}} 生成提交信息→写 COMMIT_MSG，模型选 glm-5.2-fp8）→ Git 提交（{{COMMIT_MSG}}）',
       '命令（失败输出）→ AI 生成（分析 {{last.stdout}} 给出修复建议）→ 打开网址',
       '变量赋值（{{last.stdout}}）→ AI 生成（改写 / 摘要）→ 变量赋值（{{AI_OUT}}）',
     ],
@@ -253,13 +253,13 @@ export const BLOCK_HELP: Record<string, BlockHelp> = {
   },
   jenkins: {
     type: 'jenkins',
-    usage: 'Jenkins 服务操作：触发构建 / 查构建状态 / 拉控制台输出。需通过凭据端口接入「用户名+API Token」凭据（自动处理 Crumb CSRF）。',
-    when: '代码推上去后触发 CI 构建、或等待构建结果时。',
-    downstream: '流程 out → 任意带流程 in 的积木（通常接 harbor / k8s / 打开网址）。',
+    usage: 'Jenkins 服务操作：触发构建（支持参数注入） / 查队列 / 查构建状态 / 拉控制台输出（可截断 N 行） / 停止构建。需通过凭据端口接入「用户名+API Token」凭据（自动处理 Crumb CSRF）。',
+    when: '代码推上去后触发 CI 构建、或等待构建结果、或远程查看构建执行情况时。',
+    downstream: '流程 out → 任意带流程 in 的积木（通常接 harbor / k8s / ssh / http / 打开网址）。',
     combos: [
-      'Git 推送 → Jenkins（触发构建）→ Jenkins（查状态）',
-      'Jenkins（成功）→ Harbor（打镜像）',
-      'Jenkins（控制台输出）→ 条件（判断构建结果）',
+      'Git 推送 → Jenkins（触发构建，参数 DEPLOY_ENV/VERSION）→ Jenkins（查状态）',
+      '循环 → Jenkins（查状态，判断 SUCCESS）→ Jenkins（控制台 tail 50）',
+      'Jenkins（构建成功）→ SSH（远程检查服务）→ HTTP（健康检查）',
     ],
   },
   harbor: {
@@ -271,13 +271,33 @@ export const BLOCK_HELP: Record<string, BlockHelp> = {
   },
   k8s: {
     type: 'k8s',
-    usage: 'Kubernetes 部署：应用清单 / 回滚状态 / 查看资源 / 拉日志（kubectl）。需凭据端口接入「Kubeconfig」凭据。',
+    usage: 'Kubernetes 部署：应用清单 / 回滚状态 / 更新镜像 / 更新环境变量 / 重启 / 查看资源 / 拉日志（kubectl）。需凭据端口接入「Kubeconfig」凭据。',
     when: '镜像已推送到 Harbor 后部署到集群、或查看部署状态时。',
-    downstream: '流程 out → 任意带流程 in 的积木（通常接打开网址验证）。',
+    downstream: '流程 out → 任意带流程 in 的积木（通常接打开网址 / HTTP 健康检查验证）。',
     combos: [
-      'Harbor（镜像就绪）→ K8S（apply）→ K8S（rollout）',
-      'K8S（部署成功）→ 打开网址（线上入口）',
+      'Harbor（镜像就绪）→ K8S（set-image）→ K8S（rollout）',
+      'K8S（部署成功）→ HTTP（健康检查 /health）',
       'K8S（get/logs）→ 条件',
+    ],
+  },
+  ssh: {
+    type: 'ssh',
+    usage: 'SSH 远程执行命令：在远端 Linux 服务器上跑命令（看服务健康 systemctl status / 查进程 / 执行部署）。凭据端口接入 ssh-key（私钥，推荐）或 basic（用户名+密码；Windows 需 plink，其他系统需 sshpass）。',
+    when: '需要在远程服务器上查看执行结果或执行部署时（如 UAT 机器上的 systemctl / curl 本机 / 查看 mes.env）。',
+    downstream: '流程 out → 任意带流程 in 的积木（条件判断 / 通知）。',
+    combos: [
+      'Jenkins（构建成功）→ SSH（systemctl status mes）→ 条件',
+      'SSH（远程 curl 本机健康检查）→ HTTP（公网健康检查）→ 通知',
+    ],
+  },
+  http: {
+    type: 'http',
+    usage: 'HTTP 请求 / 健康检查：请求 URL，期望状态码匹配即成功（可 200 / 2xx），输出状态码与响应体到 {{last.stdout}}。凭据端口可接 basic/token 用于鉴权。',
+    when: '部署后验证服务是否可用（看是否返回 200）、调用 REST API 时。',
+    downstream: '流程 out → 任意带流程 in 的积木（条件判断 / 通知）。',
+    combos: [
+      'K8S / SSH（部署完成）→ HTTP（/health 期望 200）→ 通知',
+      '循环 → HTTP（健康检查，失败重试）',
     ],
   },
   docker: {

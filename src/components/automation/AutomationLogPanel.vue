@@ -145,6 +145,7 @@ function blockColor(type: string) {
           <span class="alogs-detail-title">{{ selected.automationName }} · {{ fmtStatus(selected.status) }}</span>
           <span class="alogs-detail-meta">{{ fmtTime(selected.startedAt) }} → {{ fmtTime(selected.endedAt) }} · 共 {{ selected.durationMs }}ms</span>
         </div>
+        <div v-if="selected.error" class="alogs-detail-err" style="padding:6px 12px;color:#ff7875;background:rgba(255,77,79,.08);border-bottom:1px solid rgba(255,77,79,.2);font-size:12px;word-break:break-all;white-space:pre-wrap;">❌ {{ selected.error }}</div>
         <div class="alogs-steps">
           <div v-for="s in selected.steps" :key="s.index" class="alogs-step" :class="s.status">
             <span class="alogs-step-dot" :style="{ background: blockColor(s.blockType) }"></span>

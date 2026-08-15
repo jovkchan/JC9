@@ -29,9 +29,10 @@ const STATUS_ACTIONS: Record<string, string> = { status: '变更清单', diff: '
 const BRANCH_ACTIONS: Record<string, string> = { checkout: '切换', create: '新建', delete: '删除', list: '列出', merge: '合并' }
 const TAG_ACTIONS: Record<string, string> = { create: '创建', delete: '删除', list: '列出' }
 const SHELL_NAMES: Record<string, string> = { powershell: 'PowerShell', bash: 'Bash', cmd: 'CMD' }
-const JENKINS_ACT: Record<string, string> = { trigger: '触发', status: '查状态', console: '控制台' }
+const JENKINS_ACT: Record<string, string> = { trigger: '触发', queue: '查队列', status: '查状态', console: '控制台', stop: '停止' }
 const GITLAB_ACT: Record<string, string> = { 'pipeline-trigger': '触发流水线', 'pipeline-status': '流水线状态', 'job-log': '任务日志', 'mr-create': '创建MR' }
-const K8S_ACT: Record<string, string> = { apply: '应用', rollout: '回滚', get: '查看', logs: '日志' }
+const K8S_ACT: Record<string, string> = { apply: '应用', rollout: '回滚', 'set-image': '更新镜像', 'set-env': '更新环境变量', restart: '重启', get: '查看', logs: '日志' }
+const HTTP_ACT: Record<string, string> = { GET: 'GET', POST: 'POST', HEAD: 'HEAD', PUT: 'PUT', DELETE: 'DELETE' }
 const DOCKER_ACT: Record<string, string> = { build: '构建', pull: '拉取', run: '运行', compose: 'Compose', images: '镜像列表', ps: '容器列表', logs: '日志', exec: '执行', stop: '停止', rm: '删除' }
 
 /** 按块类型与配置生成摘要行（空数组 = 只有标题，无摘要区）
@@ -94,6 +95,7 @@ export function blockSummary(type: string, config: Record<string, unknown>): str
     }
     case 'ai-generate': {
       const rows = nonEmptyLines(s(c.prompt), MAX_SUMMARY_LINES - 1)
+      if (s(c.model)) rows.push(`模型 ${s(c.model)}`)
       if (s(c.varName)) rows.push(`→ ${s(c.varName)}`)
       return rows
     }
@@ -139,6 +141,8 @@ export function blockSummary(type: string, config: Record<string, unknown>): str
       const rows = one(`${s(c.job)}${s(c.build) ? ' #' + s(c.build) : ''}`)
       const a = s(c.action)
       if (a && a !== 'trigger') rows.push(JENKINS_ACT[a] ?? a)
+      if (s(c.params)) rows.push(...nonEmptyLines(s(c.params), 2))
+      if (s(c.tail) && s(c.tail) !== '0') rows.push(`tail ${s(c.tail)}`)
       if (s(c.url)) rows.push(s(c.url))
       return rows.slice(0, MAX_SUMMARY_LINES)
     }
@@ -151,7 +155,19 @@ export function blockSummary(type: string, config: Record<string, unknown>): str
     case 'k8s': {
       const rows = one([K8S_ACT[s(c.action)] ?? s(c.action), s(c.kind), s(c.name)].filter(Boolean).join(' '))
       if (s(c.namespace)) rows.push(`ns ${s(c.namespace)}`)
+      if (s(c.image)) rows.push(s(c.image))
+      if (s(c.env)) rows.push(s(c.env))
       if (s(c.file)) rows.push(s(c.file))
+      return rows.slice(0, MAX_SUMMARY_LINES)
+    }
+    case 'ssh': {
+      const rows = one(`${s(c.user) ? s(c.user) + '@' : ''}${s(c.host)}${s(c.port) && s(c.port) !== '22' ? ':' + s(c.port) : ''}`)
+      rows.push(...nonEmptyLines(s(c.command), 2))
+      return rows.slice(0, MAX_SUMMARY_LINES)
+    }
+    case 'http': {
+      const rows = one(`${HTTP_ACT[s(c.method)] ?? s(c.method)} ${s(c.url)}`)
+      if (s(c.expectCode)) rows.push(`期望 ${s(c.expectCode)}`)
       return rows.slice(0, MAX_SUMMARY_LINES)
     }
     case 'gitlab': {

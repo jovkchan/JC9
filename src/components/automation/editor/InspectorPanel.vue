@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // 积木参数面板（Schema 驱动）：选中积木后编辑 config，见方案 §5.5
 // 复用 BlockDef.fields 渲染，人工配置与 AI 生成落点一致
-import { ref, watch, computed, onBeforeUnmount } from 'vue'
+import { ref, watch, computed, onBeforeUnmount, onMounted } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import { useAutomationStore } from '@/stores/automation'
 import { getBlockDef, getBlockColor, getBlockLabel } from '@/components/automation/blocks/palette'
@@ -83,6 +84,26 @@ const targetTriggerOptions = computed<{ label: string; value: string }[]>(() => 
       value: n.id,
     }))
 })
+
+/** AI 生成块：模型选择（选项来自「设置 → AI」已配置模型列表） */
+const modelOptions = ref<{ label: string; value: string }[]>([])
+async function loadModels() {
+  if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return
+  try {
+    const list = await invoke<string[]>('ai_list_models')
+    modelOptions.value = [
+      { label: '默认模型（设置 → AI）', value: '' },
+      ...list.map(m => ({ label: m, value: m })),
+    ]
+  } catch (e) {
+    console.error('加载模型列表失败', e)
+  }
+}
+onMounted(loadModels)
+watch(
+  () => props.node?.type,
+  t => { if (t === 'ai-generate') loadModels() },
+)
 
 function asString(v: unknown): string { return v == null ? '' : String(v) }
 
@@ -184,7 +205,7 @@ function fieldValue(f: FieldDef) {
             v-else-if="f.type === 'select'"
             beam glow
             :model-value="asString(fieldValue(f))"
-            :options="(f.options ?? []).map(o => ({ label: String(o.label), value: o.value as string | number }))"
+            :options="f.key === 'model' && def?.type === 'ai-generate' ? modelOptions : (f.options ?? []).map(o => ({ label: String(o.label), value: o.value as string | number }))"
             @update:model-value="(v) => set(f.key, String(v))"
           />
           <!-- 开关 -->

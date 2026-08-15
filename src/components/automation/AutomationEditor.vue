@@ -164,15 +164,18 @@ function onConfigureCredential() {
   }
 }
 
-// ── 导出（完整 JSON，见方案 §4.6）──
+// ── JSON 弹窗（编辑框可直接改内容；更新 / 复制 / 保存为文件）──
 const exportOpen = ref(false)
-const exportText = computed(() => store.exportCurrentJson())
+const exportDraft = ref('')
 
-function openExport() { exportOpen.value = true }
+function openExport() {
+  exportDraft.value = store.exportCurrentJson()
+  exportOpen.value = true
+}
 
 async function copyExport() {
   try {
-    await navigator.clipboard.writeText(exportText.value)
+    await navigator.clipboard.writeText(exportDraft.value)
     status.pushMessage('已复制工作积木 JSON', 'success')
   } catch (e) { status.pushMessage(`复制失败: ${e}`, 'error') }
 }
@@ -244,10 +247,22 @@ async function saveExportFile() {
     const name = store.current?.name ? `${store.current.name}.json` : 'automation.json'
     const filePath = await save({ filters: [{ name: '工作积木 JSON', extensions: ['json'] }], defaultPath: name })
     if (!filePath) return
-    const data = Array.from(new TextEncoder().encode(exportText.value))
+    const data = Array.from(new TextEncoder().encode(exportDraft.value))
     await invoke('write_file_binary', { path: filePath, data })
     status.pushMessage(`已导出到 ${filePath}`, 'success')
   } catch (e) { status.pushMessage(`导出失败: ${e}`, 'error') }
+}
+
+/** 更新：把编辑框内的 JSON 直接应用到当前工作积木（就地更新画布，无需选文件） */
+function updateJsonFile() {
+  if (!store.current) return
+  const ok = store.applyJsonToCurrent(exportDraft.value)
+  if (ok) {
+    status.pushMessage(`已更新「${store.current.name}」`, 'success')
+    exportOpen.value = false
+  } else {
+    status.pushMessage('更新失败：JSON 无效（需含 nodes/edges）', 'error')
+  }
 }
 
 // ── 运行态（Rust 引擎 automation-event 驱动）──
@@ -1133,12 +1148,21 @@ onBeforeUnmount(() => {
         class="ae-name"
         @update:model-value="(v) => store.rename(store.current!.id, String(v))"
       />
+      <JcInput
+        beam glow
+        v-if="store.current"
+        :model-value="store.current.description"
+        class="ae-desc"
+        placeholder="描述（可选）"
+        style="width:240px;opacity:.72;font-size:12px"
+        @update:model-value="(v) => store.setDescription(store.current!.id, String(v))"
+      />
       <span v-if="store.dirty" class="ae-dirty" title="有未保存的修改">●</span>
       <div class="ae-acts">
         <JcButton size="small" :disabled="!store.canUndo" @click="store.undo()">撤回</JcButton>
         <JcButton size="small" :disabled="!store.canRedo" @click="store.redo()">重做</JcButton>
         <JcButton size="small" type="primary" @click="saveWithCheck">保存</JcButton>
-        <JcButton size="small" @click="openExport()">导出</JcButton>
+        <JcButton size="small" @click="openExport()">JSON</JcButton>
         <JcButton size="small" @click="copyCurrentId" :title="store.current?.id">复制 ID</JcButton>
         <JcButton size="small" @click="doRun()">运行</JcButton>
         <JcButton size="small" :disabled="!runningRunId" @click="doStop()">停止</JcButton>
@@ -1215,10 +1239,11 @@ onBeforeUnmount(() => {
     <!-- 登录 / 凭据绑定 -->
     <LoginDialog v-model:open="loginOpen" :node="loginNode" />
 
-    <!-- 导出完整 JSON -->
-    <JcModal :open="exportOpen" title="导出工作积木" width="560" @update:open="exportOpen = $event">
-      <JcTextarea :model-value="exportText" :rows="14" readonly :spellcheck="false" />
+    <!-- 导出 / 更新 JSON（编辑框可直接改内容） -->
+    <JcModal :open="exportOpen" title="工作积木 JSON" width="580" @update:open="exportOpen = $event">
+      <JcTextarea v-model="exportDraft" :rows="16" :spellcheck="false" style="font-family:monospace;font-size:12px" />
       <template #footer>
+        <JcButton @click="updateJsonFile">更新</JcButton>
         <JcButton @click="copyExport">复制</JcButton>
         <JcButton type="primary" @click="saveExportFile">保存为文件</JcButton>
       </template>

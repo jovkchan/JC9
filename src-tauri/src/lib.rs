@@ -232,6 +232,31 @@ fn save_ai_config(config: String) -> Result<(), String> {
     database::save_ai_config(&config)
 }
 
+/// AI 模型列表（供 AI 积木「模型选择」下拉）：从 ai-config 的 notes-ai-models 解析去重
+#[tauri::command]
+fn ai_list_models() -> Vec<String> {
+    let mut models: Vec<String> = Vec::new();
+    if let Ok(cfg_str) = database::get_ai_config() {
+        if let Ok(cfg) = serde_json::from_str::<serde_json::Value>(&cfg_str) {
+            if let Some(raw) = cfg.get("notes-ai-models").and_then(|v| v.as_str()) {
+                if let Ok(arr) = serde_json::from_str::<serde_json::Value>(raw) {
+                    for item in arr.as_array().into_iter().flatten() {
+                        if let Some(m) = item.get("model").and_then(|v| v.as_str()) {
+                            for one in m.split(',') {
+                                let one = one.trim().to_string();
+                                if !one.is_empty() && !models.contains(&one) {
+                                    models.push(one);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    models
+}
+
 /// 读取动画效果配置（存为 ~/.jc9/data/effect-config.json，跨 dev/build 共享）
 #[tauri::command]
 fn get_effect_config() -> Result<String, String> {
@@ -2523,6 +2548,7 @@ pub fn run() {
             get_startup_logs,
             get_ai_config,
             save_ai_config,
+            ai_list_models,
             get_effect_config,
             save_effect_config,
             send_notification,

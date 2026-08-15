@@ -19,6 +19,7 @@ onMounted(() => store.load())
 // ── 导入（完整 JSON，见方案 §4.6）──
 const importOpen = ref(false)
 const importText = ref('')
+const overwriteOpen = ref(false)
 
 async function pickImportFile() {
   try {
@@ -31,12 +32,16 @@ async function pickImportFile() {
   } catch (e) { status.pushMessage(`读取文件失败: ${e}`, 'error') }
 }
 
-function doImport() {
+function doImport(force = false, asCopy = false) {
   const json = importText.value.trim()
   if (!json) { status.pushMessage('请先粘贴或选择工作积木 JSON', 'warn'); return }
-  const a = store.importAutomationJson(json)
+  const a = store.importAutomationJson(json, { overwrite: force, asCopy })
+  if (a === 'conflict') {
+    overwriteOpen.value = true
+    return
+  }
   if (a) {
-    status.pushMessage(`已导入「${a.name}」`, 'success')
+    status.pushMessage(force ? `已覆盖「${a.name}」` : `已导入「${a.name}」`, 'success')
     importOpen.value = false
     importText.value = ''
   } else {
@@ -146,6 +151,18 @@ function onCtxSelect(item: JcContextMenuItem) {
       <template #footer>
         <JcButton @click="pickImportFile">从文件选择</JcButton>
         <JcButton type="primary" @click="doImport">导入</JcButton>
+      </template>
+    </JcModal>
+
+    <!-- 存在同名：覆盖 / 另存副本 / 取消 -->
+    <JcModal :open="overwriteOpen" title="存在同名工作积木" width="440" @update:open="overwriteOpen = $event">
+      <div class="imp-confirm">
+        <p>已存在同名的工作积木，导入将覆盖其节点 / 连线 / 描述 / 变量（保留 ID 与创建时间）。</p>
+      </div>
+      <template #footer>
+        <JcButton @click="overwriteOpen = false">取消</JcButton>
+        <JcButton @click="overwriteOpen = false; doImport(false, true)">另存副本</JcButton>
+        <JcButton type="primary" danger @click="overwriteOpen = false; doImport(true)">覆盖导入</JcButton>
       </template>
     </JcModal>
   </section>

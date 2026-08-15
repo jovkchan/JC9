@@ -15,7 +15,7 @@ export const PALETTE_SECTIONS: PaletteSection[] = [
   { key: 'entry', label: '入口', blocks: ['start', 'manual-trigger'] },
   { key: 'terminal', label: '终端', blocks: ['command', 'open-url', 'launch'] },
   { key: 'scm', label: '版本控制', blocks: ['git-clone', 'git-status', 'git-commit', 'git-push', 'git-pull', 'git-branch', 'git-tag'] },
-  { key: 'platform', label: '平台', blocks: ['docker', 'jenkins', 'harbor', 'k8s', 'gitlab'] },
+  { key: 'platform', label: '平台', blocks: ['docker', 'jenkins', 'harbor', 'k8s', 'gitlab', 'ssh', 'http'] },
   { key: 'env', label: '环境', blocks: ['workspace', 'env'] },
   { key: 'logic', label: '逻辑', blocks: ['condition', 'delay', 'loop', 'parallel', 'call-automation'] },
   { key: 'variable', label: '变量', blocks: ['var-set'] },
