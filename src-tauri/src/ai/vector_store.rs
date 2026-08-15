@@ -3,8 +3,42 @@ use std::sync::Mutex;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
-/// 编译时将 vec0.dll 嵌入 exe（避免分发时缺少 DLL）
-const VEC0_DLL_BYTES: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/vec0.dll"));
+/// 当前平台的 sqlite-vec 可加载扩展：返回 (扩展文件名, 编译期嵌入字节)。
+/// 跨平台支持：Windows → vec0.dll；Linux → vec0-*.so；macOS → vec0-*.dylib。
+/// 嵌入 exe 避免分发时缺少扩展文件；运行时找不到现成文件会自动释放到 exe 同级目录。
+fn vec_ext() -> (&'static str, &'static [u8]) {
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    {
+        ("vec0.dll", include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/vec0.dll")))
+    }
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    {
+        ("vec0-linux-x86_64.so", include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/vec0-linux-x86_64.so")))
+    }
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    {
+        ("vec0-linux-aarch64.so", include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/vec0-linux-aarch64.so")))
+    }
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        ("vec0-macos-aarch64.dylib", include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/vec0-macos-aarch64.dylib")))
+    }
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+    {
+        ("vec0-macos-x86_64.dylib", include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/vec0-macos-x86_64.dylib")))
+    }
+    // 未覆盖的平台（如 Android / iOS / 其他 arch）：编译期直接报错，提示补充扩展文件
+    #[cfg(not(any(
+        all(target_os = "windows", target_arch = "x86_64"),
+        all(target_os = "linux", target_arch = "x86_64"),
+        all(target_os = "linux", target_arch = "aarch64"),
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(target_os = "macos", target_arch = "x86_64"),
+    )))]
+    {
+        compile_error!("不支持的平台：请在 src-tauri 放置对应 sqlite-vec 扩展并在此配置");
+    }
+}
 
 /// 向量存储 - 集成 sqlite-vec 扩展实现语义检索
 /// 如果无法加载 sqlite-vec 扩展，回退到纯 Rust 余弦相似度
@@ -29,14 +63,13 @@ impl VectorStore {
         let mut has_sqlite_vec = false;
         let conn_guard = conn.lock().unwrap();
 
-        // 尝试加载 sqlite-vec 扩展
-        let vec_dll_path = Self::find_vec_extension();
-        if let Some(dll_path) = &vec_dll_path {
-            // 在 Windows 上，sqlite-vec 扩展名为 vec0.dll
+        // 尝试加载 sqlite-vec 扩展（Windows: vec0.dll / Linux: vec0.so / macOS: vec0.dylib）
+        let vec_ext_path = Self::find_vec_extension();
+        if let Some(ext_path) = &vec_ext_path {
             unsafe {
                 let result = conn_guard.load_extension_enable();
                 if result.is_ok() {
-                    let load_result = conn_guard.load_extension(dll_path, None);
+                    let load_result = conn_guard.load_extension(ext_path, None);
                     if load_result.is_ok() {
                         has_sqlite_vec = true;
                         println!("✅ sqlite-vec 扩展加载成功");
@@ -47,7 +80,7 @@ impl VectorStore {
                 }
             }
         } else {
-            println!("⚠️  未找到 sqlite-vec DLL，回退到纯 Rust 余弦相似度");
+            println!("⚠️  未找到 sqlite-vec 扩展，回退到纯 Rust 余弦相似度");
         }
 
         // 如果 sqlite-vec 加载成功，创建虚拟表
@@ -132,9 +165,9 @@ impl VectorStore {
         Ok(count)
     }
 
-    /// 查找 sqlite-vec 扩展 DLL（找不到则从嵌入的字节自动释放）
+    /// 查找 sqlite-vec 扩展文件（找不到则从嵌入的字节自动释放到 exe 同级目录）
     fn find_vec_extension() -> Option<PathBuf> {
-        // 搜索 vec0.dll 的候选路径
+        let (file_name, bytes) = vec_ext();
         let cwd = std::env::current_dir().ok();
         let exe_dir = std::env::current_exe().ok()
             .and_then(|p| p.parent().map(|pp| pp.to_path_buf()));
@@ -143,18 +176,18 @@ impl VectorStore {
 
         // 可执行文件同目录
         if let Some(ref dir) = exe_dir {
-            candidates.push(dir.join("vec0.dll"));
+            candidates.push(dir.join(file_name));
         }
         // 当前工作目录
         if let Some(ref dir) = cwd {
-            candidates.push(dir.join("vec0.dll"));
+            candidates.push(dir.join(file_name));
         }
         // src-tauri 子目录（从 cwd 或 exe_dir 向上找）
         for base in [&cwd, &exe_dir].iter().filter_map(|p| p.as_ref()) {
-            candidates.push(base.join("src-tauri").join("vec0.dll"));
+            candidates.push(base.join("src-tauri").join(file_name));
             // 尝试父级的 src-tauri 目录
             if let Some(parent) = base.parent() {
-                candidates.push(parent.join("src-tauri").join("vec0.dll"));
+                candidates.push(parent.join("src-tauri").join(file_name));
             }
         }
 
@@ -167,18 +200,18 @@ impl VectorStore {
 
         // 所有候选都不存在 → 从嵌入的字节释放到 exe 同级目录
         if let Some(ref dir) = exe_dir {
-            let target = dir.join("vec0.dll");
+            let target = dir.join(file_name);
             // 写入之前确保父目录存在
             if let Some(parent) = target.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
-            match std::fs::write(&target, VEC0_DLL_BYTES) {
+            match std::fs::write(&target, bytes) {
                 Ok(()) => {
-                    println!("📦 已自动释放 vec0.dll 到 {}", target.display());
+                    println!("📦 已自动释放 {} 到 {}", file_name, target.display());
                     return Some(target);
                 }
                 Err(e) => {
-                    println!("⚠️  自动释放 vec0.dll 失败: {e}");
+                    println!("⚠️  自动释放 {} 失败: {e}", file_name);
                 }
             }
         }

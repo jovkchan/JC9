@@ -1,0 +1,10 @@
+{
+  "bundle": {
+    "resources": [
+      "vec0-linux-x86_64.so",
+      "vec0-linux-aarch64.so",
+      "icons/icon.ico",
+      "icons/128x128.png"
+    ]
+  }
+}

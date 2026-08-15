@@ -1,0 +1,10 @@
+{
+  "bundle": {
+    "resources": [
+      "vec0-macos-aarch64.dylib",
+      "vec0-macos-x86_64.dylib",
+      "icons/icon.ico",
+      "icons/128x128.png"
+    ]
+  }
+}

@@ -13,7 +13,7 @@ JC9 是一个本地项目管理与终端工具，基于 Tauri 2 构建，前端 
 | 样式 | SCSS | `variables.scss`, `mixins.scss` |
 | 后端 | Rust | `rusqlite` (bundled), `tokio`, `reqwest` |
 | 数据库 | SQLite (WAL) | `jc9.db` → `%APPDATA%/jc9/jc9.db` |
-| 向量搜索 | sqlite-vec / 余弦相似度 | `vec0.dll` → `src-tauri/vec0.dll` |
+| 向量搜索 | sqlite-vec / 余弦相似度 | Windows: `vec0.dll`；Linux: `vec0-*.so`；macOS: `vec0-*.dylib`（编译期嵌入 + 运行时自动释放） |
 | AI 推理 | OpenAI 兼容 API | 支持 DeepSeek / 阿里云 / Anthropic |
 | AST 解析 | Tree-sitter | TypeScript, Rust, Vue SFC |
 

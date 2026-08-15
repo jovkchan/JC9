@@ -4,7 +4,7 @@
 
 - **数据库文件**：`%APPDATA%/jc9/jc9.db`（Windows）
 - **引擎**：SQLite 3，WAL 模式
-- **扩展**：sqlite-vec (`vec0.dll`)，用于向量搜索
+- **扩展**：sqlite-vec（`vec0.dll` / `vec0-*.so` / `vec0-*.dylib`，按平台），用于向量搜索
 - **管理类**：`src-tauri/src/database.rs`（主库）、`src-tauri/src/ai/knowledge_base.rs`（知识库）
 - **连接共享**：`Arc<Mutex<Connection>>`，`Database` 和 `KnowledgeBase` 共享同一连接
 
