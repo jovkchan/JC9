@@ -110,32 +110,36 @@ function onCtxSelect(item: JcContextMenuItem) {
 </template>
 
 <style scoped>
-/* 样式对齐 MainPanel 现有标签页 */
+/* Chrome 风格标签页：顶部圆角 + 激活标签亮色突出 */
 .jc-tabbar {
   display: flex;
-  background: var(--jc-bg-elevated, #2d2d30);
+  align-items: flex-end;          /* 标签贴底，激活标签与内容区融为一体 */
+  background: var(--jc-bg-app, #1e1e1e); /* 轨道 = 未激活标签颜色 */
   overflow-x: auto;
   flex-shrink: 0;
+  padding: 6px 8px 0;
 }
 .jc-tab {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 6px 12px;
+  gap: 5px;
+  padding: 6px 14px 8px;
   font-size: 12px;
   cursor: pointer;
   color: var(--jc-text-secondary, #858585);
-  border-right: 1px solid var(--jc-border-default, #3e3e42);
+  border-radius: 10px 10px 0 0;   /* 顶部圆角 */
   white-space: nowrap;
   user-select: none;
+  background: var(--jc-bg-app, #1e1e1e); /* 未激活 = 与轨道同色，融入背景 */
+  transition: background 0.15s ease, color 0.15s ease;
 }
 .jc-tab:hover {
   color: var(--jc-text-primary, #ccc);
-  background: var(--jc-bg-hover, #3a3a3e);
+  background: var(--jc-bg-panel, #252526);
 }
 .jc-tab.on {
   color: var(--jc-text-highlight, #e0e0e0);
-  background: var(--jc-bg-app, #1e1e1e);
+  background: var(--jc-bg-hover, #2a2d2e); /* 激活 = 原未激活颜色，亮色突出 */
 }
 .jc-tab__dot {
   width: 6px;
