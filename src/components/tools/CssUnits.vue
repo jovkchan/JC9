@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import ToolShell from '@/components/ui/ToolShell.vue'
+import JcInputNumber from '@/components/ui/JcInputNumber.vue'
 
 // 基准设置
 const rootFontSize = ref(16)
@@ -159,34 +160,22 @@ function selectPreset(px: number) {
         <div class="grid-inputs">
           <div class="input-field">
             <label>基准字号 (Root Rem Base)</label>
-            <div class="input-with-unit">
-              <input type="number" v-model.number="rootFontSize" min="1" />
-              <span class="unit">px</span>
-            </div>
+            <JcInputNumber :model-value="rootFontSize" :min="1" suffix="px" size="small" beam glow @update:model-value="rootFontSize = $event ?? 16" />
             <div class="field-desc">html { font-size: Xpx }</div>
           </div>
           <div class="input-field">
             <label>父元素字号 (Parent Em Base)</label>
-            <div class="input-with-unit">
-              <input type="number" v-model.number="parentFontSize" min="1" />
-              <span class="unit">px</span>
-            </div>
+            <JcInputNumber :model-value="parentFontSize" :min="1" suffix="px" size="small" beam glow @update:model-value="parentFontSize = $event ?? 16" />
             <div class="field-desc">用于计算当前元素的 em 值</div>
           </div>
           <div class="input-field">
             <label>视口宽度 (Viewport Width)</label>
-            <div class="input-with-unit">
-              <input type="number" v-model.number="viewportWidth" min="1" />
-              <span class="unit">px</span>
-            </div>
+            <JcInputNumber :model-value="viewportWidth" :min="1" suffix="px" size="small" beam glow @update:model-value="viewportWidth = $event ?? 1920" />
             <div class="field-desc">用于计算 100vw = Xpx</div>
           </div>
           <div class="input-field">
             <label>视口高度 (Viewport Height)</label>
-            <div class="input-with-unit">
-              <input type="number" v-model.number="viewportHeight" min="1" />
-              <span class="unit">px</span>
-            </div>
+            <JcInputNumber :model-value="viewportHeight" :min="1" suffix="px" size="small" beam glow @update:model-value="viewportHeight = $event ?? 1080" />
             <div class="field-desc">用于计算 100vh = Xpx</div>
           </div>
         </div>
@@ -200,33 +189,38 @@ function selectPreset(px: number) {
           
           <div class="row-inputs">
             <div class="val-input-group">
-              <span class="val-label px-label">PX</span>
-              <input type="number" v-model.number="pxVal" placeholder="0" class="input-highlight" />
-              <span class="val-unit-tag">像素单位</span>
+              <JcInputNumber :model-value="pxVal === '' ? null : pxVal" placeholder="0" size="small" beam glow @update:model-value="pxVal = $event ?? ''" class="css-val-group css-val-group--px">
+                <template #prefix><span class="val-label px-label">PX</span></template>
+                <template #suffix><span class="val-unit-tag">像素单位</span></template>
+              </JcInputNumber>
             </div>
 
             <div class="val-input-group">
-              <span class="val-label rem-label">REM</span>
-              <input type="number" v-model.number="remVal" placeholder="0" />
-              <span class="val-unit-tag">相对于根元素</span>
+              <JcInputNumber :model-value="remVal === '' ? null : remVal" placeholder="0" size="small" beam glow @update:model-value="remVal = $event ?? ''" class="css-val-group">
+                <template #prefix><span class="val-label rem-label">REM</span></template>
+                <template #suffix><span class="val-unit-tag">相对于根元素</span></template>
+              </JcInputNumber>
             </div>
 
             <div class="val-input-group">
-              <span class="val-label em-label">EM</span>
-              <input type="number" v-model.number="emVal" placeholder="0" />
-              <span class="val-unit-tag">相对于父元素</span>
+              <JcInputNumber :model-value="emVal === '' ? null : emVal" placeholder="0" size="small" beam glow @update:model-value="emVal = $event ?? ''" class="css-val-group">
+                <template #prefix><span class="val-label em-label">EM</span></template>
+                <template #suffix><span class="val-unit-tag">相对于父元素</span></template>
+              </JcInputNumber>
             </div>
 
             <div class="val-input-group">
-              <span class="val-label vw-label">VW</span>
-              <input type="number" v-model.number="vwVal" placeholder="0" />
-              <span class="val-unit-tag">视口宽度 %</span>
+              <JcInputNumber :model-value="vwVal === '' ? null : vwVal" placeholder="0" size="small" beam glow @update:model-value="vwVal = $event ?? ''" class="css-val-group">
+                <template #prefix><span class="val-label vw-label">VW</span></template>
+                <template #suffix><span class="val-unit-tag">视口宽度 %</span></template>
+              </JcInputNumber>
             </div>
 
             <div class="val-input-group">
-              <span class="val-label vh-label">VH</span>
-              <input type="number" v-model.number="vhVal" placeholder="0" />
-              <span class="val-unit-tag">视口高度 %</span>
+              <JcInputNumber :model-value="vhVal === '' ? null : vhVal" placeholder="0" size="small" beam glow @update:model-value="vhVal = $event ?? ''" class="css-val-group">
+                <template #prefix><span class="val-label vh-label">VH</span></template>
+                <template #suffix><span class="val-unit-tag">视口高度 %</span></template>
+              </JcInputNumber>
             </div>
           </div>
         </div>
@@ -327,40 +321,6 @@ function selectPreset(px: number) {
     color: var(--jc-text-secondary);
   }
 }
-.input-with-unit {
-  display: flex;
-  align-items: center;
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  border-radius: 4px;
-  overflow: hidden;
-  &:focus-within {
-    border-color: var(--jc-color-accent);
-  }
-  input {
-    flex: 1;
-    border: none;
-    background: transparent;
-    color: var(--jc-text-primary);
-    padding: 6px 10px;
-    font-size: 12px;
-    width: 60px;
-    outline: none;
-    -moz-appearance: textfield;
-    &::-webkit-outer-spin-button,
-    &::-webkit-inner-spin-button {
-      -webkit-appearance: none;
-      margin: 0;
-    }
-  }
-  .unit {
-    background: var(--jc-bg-hover);
-    padding: 6px 10px;
-    font-size: 11px;
-    color: var(--jc-text-secondary);
-    border-left: 1px solid var(--jc-border-strong);
-  }
-}
 .field-desc {
   font-size: 10px;
   color: var(--jc-text-secondary);
@@ -373,51 +333,39 @@ function selectPreset(px: number) {
   flex-direction: column;
   gap: 12px;
 }
-.val-input-group {
-  display: flex;
-  align-items: center;
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  border-radius: 4px;
-  overflow: hidden;
-  &:focus-within {
-    border-color: var(--jc-color-accent);
-  }
-  .val-label {
-    width: 60px;
-    text-align: center;
-    font-weight: bold;
-    font-size: 12px;
-    padding: 8px 0;
-    color: var(--jc-color-white);
-    flex-shrink: 0;
-  }
-  .px-label { background: #3b82f6; }
-  .rem-label { background: #10b981; }
-  .em-label { background: #f59e0b; }
-  .vw-label { background: #8b5cf6; }
-  .vh-label { background: #ec4899; }
-
-  input {
-    flex: 1;
-    border: none;
-    background: transparent;
-    color: var(--jc-text-primary);
-    padding: 8px 12px;
-    font-size: 13px;
-    font-family: 'Cascadia Code', Consolas, monospace;
-    font-weight: 500;
-    outline: none;
-    &.input-highlight {
-      color: var(--jc-text-highlight);
-    }
-  }
-  .val-unit-tag {
-    font-size: 10px;
-    color: var(--jc-text-secondary);
-    padding-right: 12px;
-    white-space: nowrap;
-  }
+.css-val-group :deep(.jc-input-number) {
+  height: auto;
+}
+.css-val-group :deep(.jc-input-number__affix--prefix) {
+  padding-left: 0;
+  padding-right: 0;
+}
+.css-val-group :deep(.jc-input-number__affix--suffix) {
+  padding-left: 0;
+  padding-right: 8px;
+}
+.val-label {
+  width: 60px;
+  text-align: center;
+  font-weight: bold;
+  font-size: 12px;
+  padding: 8px 0;
+  color: var(--jc-color-white);
+  flex-shrink: 0;
+  user-select: none;
+}
+.px-label { background: #3b82f6; }
+.rem-label { background: #10b981; }
+.em-label { background: #f59e0b; }
+.vw-label { background: #8b5cf6; }
+.vh-label { background: #ec4899; }
+.val-unit-tag {
+  font-size: 10px;
+  color: var(--jc-text-secondary);
+  white-space: nowrap;
+}
+.css-val-group--px :deep(.jc-input-number__inner) {
+  color: var(--jc-text-highlight);
 }
 
 // 可视化演示

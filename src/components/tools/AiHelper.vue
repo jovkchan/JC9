@@ -7,6 +7,7 @@ import { deleteChatMessages } from '@/utils/chatStorage'
 import JcModal from '@/components/ui/JcModal.vue'
 import JcInput from '@/components/ui/JcInput.vue'
 import JcButton from '@/components/ui/JcButton.vue'
+import JcSearchIcon from '@/components/ui/JcSearchIcon.vue'
 
 const notesStore = useNotesStore()
 const ai = useAiStore()
@@ -196,7 +197,7 @@ onUnmounted(() => { destroy() })
             </div>
             <!-- KB Search -->
             <div class="console-section" v-if="ai.workers.length > 0">
-              <div class="console-section-title">🔍 知识库</div>
+              <div class="console-section-title"><JcSearchIcon :size="13" /> 知识库</div>
               <div class="kb-search-compact">
                 <JcInput beam glow v-model="kbSearchQuery" placeholder="搜索知识库..." style="flex:1;min-width:0" @keyup.enter="searchKnowledgeBase" />
                 <JcButton size="small" @click="searchKnowledgeBase">搜索</JcButton>

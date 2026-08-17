@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import ToolShell from '@/components/ui/ToolShell.vue'
 import JcButton from '@/components/ui/JcButton.vue'
+import JcInputNumber from '@/components/ui/JcInputNumber.vue'
 
 const activeTab = ref<'business-days' | 'date-diff'>('business-days')
 
@@ -160,8 +161,7 @@ onMounted(() => {
         <div class="field-group">
           <label class="field-label">工作日偏移量（正数往后，负数往前）</label>
           <div class="offset-input-row">
-            <input type="number" v-model.number="daysOffset" @input="calculateWorkDays" class="num-input-element" placeholder="如 3" />
-            <span class="offset-unit">工作日</span>
+            <JcInputNumber :model-value="daysOffset" suffix="工作日" placeholder="如 3" beam glow @update:model-value="daysOffset = $event ?? 0" @change="calculateWorkDays" style="flex: 1; min-width: 0" />
           </div>
         </div>
 

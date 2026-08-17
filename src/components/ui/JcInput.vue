@@ -16,6 +16,10 @@ const props = withDefaults(
     disabled?: boolean
     readonly?: boolean
     size?: JcInputSize
+    /** 前置内容（文本或 #prefix 插槽），对齐 antd Input.prefix */
+    prefix?: string
+    /** 后置内容（文本或 #suffix 插槽），对齐 antd Input.suffix */
+    suffix?: string
     /** 可一键清空 */
     clearable?: boolean
     maxlength?: number
@@ -39,6 +43,8 @@ const props = withDefaults(
     disabled: false,
     readonly: false,
     size: 'middle',
+    prefix: '',
+    suffix: '',
     clearable: false,
     maxlength: undefined,
     beam: false,
@@ -98,6 +104,9 @@ function clear() {
 
 <template>
   <span ref="rootRef" :class="classes">
+    <span v-if="prefix || $slots.prefix" class="jc-input__affix jc-input__affix--prefix">
+      <slot name="prefix">{{ prefix }}</slot>
+    </span>
     <input
       ref="innerRef"
       :type="type"
@@ -112,15 +121,20 @@ function clear() {
       @focus="emit('focus', $event)"
       @blur="emit('blur', $event)"
     />
-    <button
-      v-if="clearable && !!modelValue"
-      type="button"
-      class="jc-input__clear"
-      title="清空"
-      @click="clear"
-    >
-      ✕
-    </button>
+    <span class="jc-input__after">
+      <button
+        v-if="clearable && !!modelValue"
+        type="button"
+        class="jc-input__clear"
+        title="清空"
+        @click="clear"
+      >
+        ✕
+      </button>
+      <span v-if="suffix || $slots.suffix" class="jc-input__affix jc-input__affix--suffix">
+        <slot name="suffix">{{ suffix }}</slot>
+      </span>
+    </span>
     <!-- 聚焦流光边框 + 内部光晕（JcBeam 封装：流光环与光晕共用同一套 beamStyle 变量） -->
     <JcBeam v-if="beam" :glow="glow" :style="beamStyle" />
   </span>
@@ -132,42 +146,66 @@ function clear() {
   display: inline-flex;
   align-items: center;
   width: 100%;
-}
-.jc-input__inner {
-  width: 100%;
-  font-family: inherit;
   background: var(--jc-bg-input, #3c3c3c);
   border: 1px solid var(--jc-border-strong, #555);
   border-radius: 4px;
-  color: var(--jc-text-primary, #ccc);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.jc-input:focus-within {
+  /* 细边框：仅 1px accent 色，无外发光（亮/暗一致，暗色下不再发亮） */
+  border-color: var(--jc-color-accent, #8a58ff);
+}
+.jc-input__inner {
+  flex: 1;
+  min-width: 0;
+  font-family: inherit;
+  background: transparent;
+  border: none;
   outline: none;
+  color: var(--jc-text-primary, #ccc);
   transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 .jc-input__inner::placeholder {
   color: var(--jc-text-secondary, #858585);
-}
-.jc-input__inner:focus {
-  /* 细边框：仅 1px accent 色，无外发光（亮/暗一致，暗色下不再发亮） */
-  border-color: var(--jc-color-accent, #8a58ff);
-  box-shadow: none;
 }
 .jc-input__inner:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
+/* 前后缀 */
+.jc-input__affix {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  color: var(--jc-text-secondary, #858585);
+  white-space: nowrap;
+  user-select: none;
+  font-size: inherit;
+}
+.jc-input__affix--prefix {
+  padding-left: 10px;
+  padding-right: 2px;
+}
+.jc-input__affix--suffix {
+  padding-left: 2px;
+  padding-right: 4px;
+}
+.jc-input__after {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  padding-right: 6px;
+}
+
 .jc-input--small .jc-input__inner { height: var(--jc-control-height-sm, 24px); padding: 0 8px; font-size: var(--jc-font-size-sm, 12px); }
 .jc-input--middle .jc-input__inner { height: var(--jc-control-height, 28px); padding: 0 10px; font-size: var(--jc-font-size-control, 12px); }
 .jc-input--large .jc-input__inner { height: var(--jc-control-height-lg, 36px); padding: 0 12px; font-size: var(--jc-font-size-lg, 14px); }
 
-.jc-input.is-clearable .jc-input__inner { padding-right: 26px; }
-
 .jc-input__clear {
-  position: absolute;
-  right: 6px;
   width: 16px;
   height: 16px;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   border: none;
@@ -178,13 +216,14 @@ function clear() {
   line-height: 1;
   cursor: pointer;
   padding: 0;
+  margin-right: 4px;
 }
 .jc-input__clear:hover {
   color: var(--jc-text-primary, #ccc);
 }
 
 /* 流光激活时原边框调浅为浅紫（避免深紫主色与流光重叠看不清） */
-.jc-input.has-beam:focus-within .jc-input__inner {
+.jc-input.has-beam:focus-within {
   border-color: rgba(138, 88, 255, 0.45) !important;
 }
 

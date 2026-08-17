@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted, computed, watch, defineAsyncComponent } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useProjectStore } from '@/stores/project'
-import { useNotesStore } from '@/stores/notes'
+import { useNotesStore, SEARCH_TAB_ID } from '@/stores/notes'
 import { useAutomationStore } from '@/stores/automation'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { useStatusStore } from '@/stores/status'
@@ -67,6 +67,7 @@ const IconGenerator = defineAsyncComponent(() => import('@/components/tools/Icon
 const VersionHistory = defineAsyncComponent(() => import('@/components/notes/VersionHistory.vue'))
 const AiHelper = defineAsyncComponent(() => import('@/components/tools/AiHelper.vue'))
 const FloatingSearch = defineAsyncComponent(() => import('@/components/notes/FloatingSearch.vue'))
+const NoteSearchView = defineAsyncComponent(() => import('@/components/notes/NoteSearchView.vue'))
 
 const store = useProjectStore()
 const notesStore = useNotesStore()
@@ -483,22 +484,26 @@ onUnmounted(() => {
 
     <!-- Note content -->
     <div v-for="t in notesStore.noteTabs" :key="'nc'+t.id" class="content" v-show="showNoteTabs&&store.activeTabType==='note'&&activeNoteId===t.id">
-      <div class="bar">
-        
-        <code class="cmdtext">笔记{{ t.id ? ': ' + (getEditingNote(t.id)?.title || '无标题') : '' }}</code>
-        <span v-if="getNoteGroupPath(t.id)" class="note-group-path">{{ getNoteGroupPath(t.id) }}</span>
-      </div>
-      <div class="note-body" :class="{ 'with-history': notesStore.showVersionHistory }">
-        <div class="note-editor-wrapper">
-          <NoteEditor
-            v-if="activeNoteId === t.id"
-            :existing-note="getEditingNote(t.id) ?? null"
-            @saved="onNoteSaved"
-            @cancel="notesStore.closeNoteTab(t.id)"
-          />
+      <!-- 独立搜索 Tab（保留 ID，非真实笔记） -->
+      <NoteSearchView v-if="t.id === SEARCH_TAB_ID" />
+      <template v-else>
+        <div class="bar">
+          
+          <code class="cmdtext">笔记{{ t.id ? ': ' + (getEditingNote(t.id)?.title || '无标题') : '' }}</code>
+          <span v-if="getNoteGroupPath(t.id)" class="note-group-path">{{ getNoteGroupPath(t.id) }}</span>
         </div>
-        <VersionHistory v-if="notesStore.showVersionHistory && activeNoteId === t.id" />
-      </div>
+        <div class="note-body" :class="{ 'with-history': notesStore.showVersionHistory }">
+          <div class="note-editor-wrapper">
+            <NoteEditor
+              v-if="activeNoteId === t.id"
+              :existing-note="getEditingNote(t.id) ?? null"
+              @saved="onNoteSaved"
+              @cancel="notesStore.closeNoteTab(t.id)"
+            />
+          </div>
+          <VersionHistory v-if="notesStore.showVersionHistory && activeNoteId === t.id" />
+        </div>
+      </template>
     </div>
 
     <!-- Memory detail content -->

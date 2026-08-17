@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import ToolShell from '@/components/ui/ToolShell.vue'
 import JcButton from '@/components/ui/JcButton.vue'
+import JcInputNumber from '@/components/ui/JcInputNumber.vue'
 
 const portInput = ref('')
 const logList = ref<{ text: string; type: 'info' | 'success' | 'error' }[]>([])
@@ -38,7 +39,7 @@ function clearLogs() {
       <div class="fld">
         <label>目标端口号</label>
         <div class="input-row">
-          <input v-model="portInput" type="number" placeholder="如: 8080" @keyup.enter="runKill" :disabled="loading" />
+          <JcInputNumber :model-value="portInput ? Number(portInput) : null" :min="1" :max="65535" placeholder="如: 8080" :disabled="loading" beam glow @update:model-value="portInput = $event != null ? String($event) : ''" @enter="runKill" style="flex: 1; min-width: 0" />
           <JcButton type="primary" :loading="loading" @click="runKill">
             {{ loading ? '正在释放...' : '释放端口' }}
           </JcButton>

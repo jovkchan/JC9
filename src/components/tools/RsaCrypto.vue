@@ -5,6 +5,7 @@ import JcButton from '@/components/ui/JcButton.vue'
 import JcSelect from '@/components/ui/JcSelect.vue'
 import JcTextarea from '@/components/ui/JcTextarea.vue'
 import JcSegmented from '@/components/ui/JcSegmented.vue'
+import JcSearchIcon from '@/components/ui/JcSearchIcon.vue'
 
 // 密钥生成配置
 const keySize = ref(2048)
@@ -327,7 +328,7 @@ function clearAll() {
           <div v-else class="tab-content">
             <div class="action-bar">
               <JcButton type="primary" @click="signData">🖋 私钥签名 (Sign)</JcButton>
-              <JcButton @click="verifyData">🔍 公钥验签 (Verify)</JcButton>
+              <JcButton @click="verifyData"><JcSearchIcon :size="13" /> 公钥验签 (Verify)</JcButton>
               
               <!-- 验签状态指示器 -->
               <span v-if="verifyStatus === 'success'" class="status-tag success">✓ 验签通过 (Signature Valid)</span>

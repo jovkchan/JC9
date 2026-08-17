@@ -3,6 +3,7 @@ import { ref, watch, computed, onMounted } from 'vue'
 import ToolShell from '@/components/ui/ToolShell.vue'
 import JcButton from '@/components/ui/JcButton.vue'
 import JcInput from '@/components/ui/JcInput.vue'
+import JcInputNumber from '@/components/ui/JcInputNumber.vue'
 
 const cronDialect = ref<'linux' | 'spring'>('linux') // Linux Crontab (5位) 还是 Java Spring (6位)
 
@@ -365,8 +366,8 @@ onMounted(() => {
                   <span>间隔秒数</span>
                 </label>
                 <div v-if="secondState.mode === 'interval'" class="interval-controls">
-                  从第 <input type="number" v-model.number="secondState.intervalStart" min="0" max="59" /> 秒开始，
-                  每隔 <input type="number" v-model.number="secondState.intervalStep" min="1" max="59" /> 秒一次
+                  从第 <JcInputNumber :model-value="secondState.intervalStart" :min="0" :max="59" size="small" beam glow @update:model-value="secondState.intervalStart = $event ?? 0" style="width: 64px; flex: none" /> 秒开始，
+                  每隔 <JcInputNumber :model-value="secondState.intervalStep" :min="1" :max="59" size="small" beam glow @update:model-value="secondState.intervalStep = $event ?? 1" style="width: 64px; flex: none" /> 秒一次
                 </div>
               </div>
               <div class="mode-row">
@@ -401,8 +402,8 @@ onMounted(() => {
                   <span>间隔分钟</span>
                 </label>
                 <div v-if="minuteState.mode === 'interval'" class="interval-controls">
-                  从第 <input type="number" v-model.number="minuteState.intervalStart" min="0" max="59" /> 分开始，
-                  每隔 <input type="number" v-model.number="minuteState.intervalStep" min="1" max="59" /> 分钟一次
+                  从第 <JcInputNumber :model-value="minuteState.intervalStart" :min="0" :max="59" size="small" beam glow @update:model-value="minuteState.intervalStart = $event ?? 0" style="width: 64px; flex: none" /> 分开始，
+                  每隔 <JcInputNumber :model-value="minuteState.intervalStep" :min="1" :max="59" size="small" beam glow @update:model-value="minuteState.intervalStep = $event ?? 1" style="width: 64px; flex: none" /> 分钟一次
                 </div>
               </div>
               <div class="mode-row">
@@ -437,8 +438,8 @@ onMounted(() => {
                   <span>间隔小时</span>
                 </label>
                 <div v-if="hourState.mode === 'interval'" class="interval-controls">
-                  从第 <input type="number" v-model.number="hourState.intervalStart" min="0" max="23" /> 点开始，
-                  每隔 <input type="number" v-model.number="hourState.intervalStep" min="1" max="23" /> 小时一次
+                  从第 <JcInputNumber :model-value="hourState.intervalStart" :min="0" :max="23" size="small" beam glow @update:model-value="hourState.intervalStart = $event ?? 0" style="width: 64px; flex: none" /> 点开始，
+                  每隔 <JcInputNumber :model-value="hourState.intervalStep" :min="1" :max="23" size="small" beam glow @update:model-value="hourState.intervalStep = $event ?? 1" style="width: 64px; flex: none" /> 小时一次
                 </div>
               </div>
               <div class="mode-row">
@@ -479,8 +480,8 @@ onMounted(() => {
                   <span>间隔天数</span>
                 </label>
                 <div v-if="dayState.mode === 'interval'" class="interval-controls">
-                  从第 <input type="number" v-model.number="dayState.intervalStart" min="1" max="31" /> 号开始，
-                  每隔 <input type="number" v-model.number="dayState.intervalStep" min="1" max="31" /> 天一次
+                  从第 <JcInputNumber :model-value="dayState.intervalStart" :min="1" :max="31" size="small" beam glow @update:model-value="dayState.intervalStart = $event ?? 1" style="width: 64px; flex: none" /> 号开始，
+                  每隔 <JcInputNumber :model-value="dayState.intervalStep" :min="1" :max="31" size="small" beam glow @update:model-value="dayState.intervalStep = $event ?? 1" style="width: 64px; flex: none" /> 天一次
                 </div>
               </div>
               <div class="mode-row">

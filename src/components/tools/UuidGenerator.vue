@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import ToolShell from '@/components/ui/ToolShell.vue'
 import JcButton from '@/components/ui/JcButton.vue'
-import JcInput from '@/components/ui/JcInput.vue'
+import JcInputNumber from '@/components/ui/JcInputNumber.vue'
 import JcCheckbox from '@/components/ui/JcCheckbox.vue'
 import JcTextarea from '@/components/ui/JcTextarea.vue'
 
@@ -62,14 +62,7 @@ function clearAll() {
       <div class="uuid-form">
         <div class="uuid-form__row">
           <label class="uuid-form__label">生成数量</label>
-          <JcInput
-            beam glow
-            :model-value="String(count)"
-            type="number"
-            size="small"
-            class="uuid-form__num"
-            @update:model-value="(v) => { const n = Number(v); if (!Number.isNaN(n)) count = Math.min(1000, Math.max(1, n)) }"
-          />
+          <JcInputNumber :model-value="count" :min="1" :max="1000" size="small" beam glow class="uuid-form__num" @update:model-value="count = Math.min(1000, Math.max(1, $event ?? 1))" />
         </div>
         <JcCheckbox v-model:checked="hyphens">保留连字符 (-)</JcCheckbox>
         <JcCheckbox v-model:checked="uppercase">大写格式</JcCheckbox>

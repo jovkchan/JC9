@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue'
 import ToolShell from '@/components/ui/ToolShell.vue'
 import JcButton from '@/components/ui/JcButton.vue'
 import JcInput from '@/components/ui/JcInput.vue'
+import JcInputNumber from '@/components/ui/JcInputNumber.vue'
 
 // 核心单一数据源：RGB + Alpha
 const r = ref(138)
@@ -319,22 +320,22 @@ const cmykString = computed(() => `cmyk(${cmykC.value}%, ${cmykM.value}%, ${cmyk
           <div class="slider-row">
             <span class="channel-label red">R</span>
             <input type="range" min="0" max="255" v-model.number="r" class="color-slider" />
-            <input type="number" min="0" max="255" v-model.number="r" class="num-input" />
+            <JcInputNumber :model-value="r" :min="0" :max="255" size="small" beam glow @update:model-value="r = $event ?? 0" style="width: 104px; flex: none" />
           </div>
           <div class="slider-row">
             <span class="channel-label green">G</span>
             <input type="range" min="0" max="255" v-model.number="g" class="color-slider" />
-            <input type="number" min="0" max="255" v-model.number="g" class="num-input" />
+            <JcInputNumber :model-value="g" :min="0" :max="255" size="small" beam glow @update:model-value="g = $event ?? 0" style="width: 104px; flex: none" />
           </div>
           <div class="slider-row">
             <span class="channel-label blue">B</span>
             <input type="range" min="0" max="255" v-model.number="b" class="color-slider" />
-            <input type="number" min="0" max="255" v-model.number="b" class="num-input" />
+            <JcInputNumber :model-value="b" :min="0" :max="255" size="small" beam glow @update:model-value="b = $event ?? 0" style="width: 104px; flex: none" />
           </div>
           <div class="slider-row">
             <span class="channel-label alpha">A</span>
             <input type="range" min="0" max="1" step="0.01" v-model.number="a" class="color-slider" />
-            <input type="number" min="0" max="1" step="0.01" v-model.number="a" class="num-input" />
+            <JcInputNumber :model-value="a" :min="0" :max="1" :step="0.01" size="small" beam glow @update:model-value="a = $event ?? 0" style="width: 104px; flex: none" />
           </div>
         </div>
 
@@ -344,20 +345,17 @@ const cmykString = computed(() => `cmyk(${cmykC.value}%, ${cmykM.value}%, ${cmyk
           <div class="slider-row">
             <span class="channel-label">H</span>
             <input type="range" min="0" max="360" v-model.number="hslH" @input="handleHslSlider" class="color-slider" />
-            <input type="number" min="0" max="360" v-model.number="hslH" @input="handleHslSlider" class="num-input" />
-            <span class="unit">°</span>
+            <JcInputNumber :model-value="hslH" :min="0" :max="360" suffix="°" size="small" beam glow @update:model-value="hslH = $event ?? 0" @change="handleHslSlider" style="width: 104px; flex: none" />
           </div>
           <div class="slider-row">
             <span class="channel-label">S</span>
             <input type="range" min="0" max="100" v-model.number="hslS" @input="handleHslSlider" class="color-slider" />
-            <input type="number" min="0" max="100" v-model.number="hslS" @input="handleHslSlider" class="num-input" />
-            <span class="unit">%</span>
+            <JcInputNumber :model-value="hslS" :min="0" :max="100" suffix="%" size="small" beam glow @update:model-value="hslS = $event ?? 0" @change="handleHslSlider" style="width: 104px; flex: none" />
           </div>
           <div class="slider-row">
             <span class="channel-label">L</span>
             <input type="range" min="0" max="100" v-model.number="hslL" @input="handleHslSlider" class="color-slider" />
-            <input type="number" min="0" max="100" v-model.number="hslL" @input="handleHslSlider" class="num-input" />
-            <span class="unit">%</span>
+            <JcInputNumber :model-value="hslL" :min="0" :max="100" suffix="%" size="small" beam glow @update:model-value="hslL = $event ?? 0" @change="handleHslSlider" style="width: 104px; flex: none" />
           </div>
         </div>
 
@@ -367,26 +365,22 @@ const cmykString = computed(() => `cmyk(${cmykC.value}%, ${cmykM.value}%, ${cmyk
           <div class="slider-row">
             <span class="channel-label cmyk-c">C</span>
             <input type="range" min="0" max="100" v-model.number="cmykC" @input="handleCmykSlider" class="color-slider" />
-            <input type="number" min="0" max="100" v-model.number="cmykC" @input="handleCmykSlider" class="num-input" />
-            <span class="unit">%</span>
+            <JcInputNumber :model-value="cmykC" :min="0" :max="100" suffix="%" size="small" beam glow @update:model-value="cmykC = $event ?? 0" @change="handleCmykSlider" style="width: 104px; flex: none" />
           </div>
           <div class="slider-row">
             <span class="channel-label cmyk-m">M</span>
             <input type="range" min="0" max="100" v-model.number="cmykM" @input="handleCmykSlider" class="color-slider" />
-            <input type="number" min="0" max="100" v-model.number="cmykM" @input="handleCmykSlider" class="num-input" />
-            <span class="unit">%</span>
+            <JcInputNumber :model-value="cmykM" :min="0" :max="100" suffix="%" size="small" beam glow @update:model-value="cmykM = $event ?? 0" @change="handleCmykSlider" style="width: 104px; flex: none" />
           </div>
           <div class="slider-row">
             <span class="channel-label cmyk-y">Y</span>
             <input type="range" min="0" max="100" v-model.number="cmykY" @input="handleCmykSlider" class="color-slider" />
-            <input type="number" min="0" max="100" v-model.number="cmykY" @input="handleCmykSlider" class="num-input" />
-            <span class="unit">%</span>
+            <JcInputNumber :model-value="cmykY" :min="0" :max="100" suffix="%" size="small" beam glow @update:model-value="cmykY = $event ?? 0" @change="handleCmykSlider" style="width: 104px; flex: none" />
           </div>
           <div class="slider-row">
             <span class="channel-label cmyk-k">K</span>
             <input type="range" min="0" max="100" v-model.number="cmykK" @input="handleCmykSlider" class="color-slider" />
-            <input type="number" min="0" max="100" v-model.number="cmykK" @input="handleCmykSlider" class="num-input" />
-            <span class="unit">%</span>
+            <JcInputNumber :model-value="cmykK" :min="0" :max="100" suffix="%" size="small" beam glow @update:model-value="cmykK = $event ?? 0" @change="handleCmykSlider" style="width: 104px; flex: none" />
           </div>
         </div>
       </div>

@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import ToolShell from '@/components/ui/ToolShell.vue'
 import JcButton from '@/components/ui/JcButton.vue'
 import JcInput from '@/components/ui/JcInput.vue'
+import JcInputNumber from '@/components/ui/JcInputNumber.vue'
 import JcSelect from '@/components/ui/JcSelect.vue'
 import JcTextarea from '@/components/ui/JcTextarea.vue'
 
@@ -171,12 +172,7 @@ function downloadAll() {
           <!-- 有效天数 -->
           <div class="config-item flex-1">
             <span class="config-label">证书有效期 (Days)</span>
-            <input 
-              type="number" 
-              v-model.number="days" 
-              placeholder="e.g. 365" 
-              class="config-input"
-            />
+            <JcInputNumber :model-value="days" :min="1" suffix="天" placeholder="e.g. 365" size="small" beam glow @update:model-value="days = $event ?? 365" />
           </div>
         </div>
 

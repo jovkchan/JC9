@@ -324,7 +324,7 @@ impl LlmProvider for OpenAiProvider {
             body["temperature"] = serde_json::json!(0.7);
         }
 
-        // 🔍 后端日志：请求概览
+        // 后端日志：请求概览
         println!(
             "🤖 [LLM] → {} | model={} | msgs={} | tools={} | thinking={:?}",
             url, self.model, messages.len(), tools.len(), current_effort
@@ -407,7 +407,7 @@ impl LlmProvider for OpenAiProvider {
         let input_tokens = json["usage"]["prompt_tokens"].as_u64().unwrap_or(0);
         let output_tokens = json["usage"]["completion_tokens"].as_u64().unwrap_or(0);
 
-        // 🔍 后端日志：响应摘要
+        //后端日志：响应摘要
         println!(
             "✅ [LLM] ← finish={} | content_len={} | thought_len={} | tool_calls={} | tokens in={} out={}",
             finish_reason,

@@ -78,12 +78,14 @@
 /* ── 聚焦显示：边框流光（.jc-beam）── */
 .jc-input:focus-within .jc-beam,
 .jc-select:focus-within .jc-beam,
-.jc-textarea-host:focus-within .jc-beam {
+.jc-textarea-host:focus-within .jc-beam,
+.jc-input-number:focus-within .jc-beam {
   opacity: 1;
 }
 .jc-input:focus-within .jc-beam .jc-beam__effect,
 .jc-select:focus-within .jc-beam .jc-beam__effect,
-.jc-textarea-host:focus-within .jc-beam .jc-beam__effect {
+.jc-textarea-host:focus-within .jc-beam .jc-beam__effect,
+.jc-input-number:focus-within .jc-beam .jc-beam__effect {
   animation-play-state: running;
 }
 
@@ -130,12 +132,14 @@
 /* 聚焦显示（表单控件 focus-within，光晕透明度走 token） */
 .jc-input:focus-within .jc-beam-glow,
 .jc-select:focus-within .jc-beam-glow,
-.jc-textarea-host:focus-within .jc-beam-glow {
+.jc-textarea-host:focus-within .jc-beam-glow,
+.jc-input-number:focus-within .jc-beam-glow {
   opacity: var(--jc-glow-opacity, 0.65);
 }
 .jc-input:focus-within .jc-beam-glow .jc-beam-glow__effect,
 .jc-select:focus-within .jc-beam-glow .jc-beam-glow__effect,
-.jc-textarea-host:focus-within .jc-beam-glow .jc-beam-glow__effect {
+.jc-textarea-host:focus-within .jc-beam-glow .jc-beam-glow__effect,
+.jc-input-number:focus-within .jc-beam-glow .jc-beam-glow__effect {
   animation-play-state: running;
 }
 /* JcSelect 下拉整体大流光：Teleport 到 body，不在 :focus-within 作用域内，需显式常显。
@@ -165,7 +169,9 @@ html.jc-glow-off .jc-border-beam__glow {
   visibility: hidden !important;
 }
 html.jc-beam-input-off .jc-input .jc-beam,
-html.jc-beam-input-off .jc-input .jc-beam-glow {
+html.jc-beam-input-off .jc-input .jc-beam-glow,
+html.jc-beam-input-off .jc-input-number .jc-beam,
+html.jc-beam-input-off .jc-input-number .jc-beam-glow {
   visibility: hidden !important;
 }
 html.jc-beam-textarea-off .jc-textarea-host .jc-beam,

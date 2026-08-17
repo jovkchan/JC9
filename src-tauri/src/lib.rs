@@ -2401,7 +2401,7 @@ pub fn run() {
                         |row| row.get(0)
                     ).unwrap_or(-1);
                     log_startup!("db_raw_count", "info",
-                        format!("🔍 SQL COUNT(projects WHERE user_id='local') = {}", project_count));
+                        format!("SQL COUNT(projects WHERE user_id='local') = {}", project_count));
 
                     // 列出 projects 表所有行
                     let db_raw_projects_result: Result<Vec<Vec<String>>, String> = (|| {
@@ -2422,7 +2422,7 @@ pub fn run() {
                         Ok(rows) => {
                             let log_entry = serde_json::json!({
                                 "step": "db_raw_projects",
-                                "message": format!("🔍 projects 表数据: {} 行", rows.len()),
+                                "message": format!("projects 表数据: {} 行", rows.len()),
                                 "level": "info",
                                 "rows": rows
                             });
@@ -2442,7 +2442,7 @@ pub fn run() {
                         |row| row.get(0)
                     ).unwrap_or(-1);
                     log_startup!("db_raw_groups", "info",
-                        format!("🔍 SQL COUNT(note_groups WHERE user_id='local') = {}", group_count));
+                        format!("SQL COUNT(note_groups WHERE user_id='local') = {}", group_count));
 
                     // 检查 user 表
                     let user_count: i64 = conn.query_row(
@@ -2451,7 +2451,7 @@ pub fn run() {
                         |row| row.get(0)
                     ).unwrap_or(-1);
                     log_startup!("db_users", "info",
-                        format!("🔍 users 表行数: {}", user_count));
+                        format!("users 表行数: {}", user_count));
                 } else {
                     log_startup!("db_raw_query", "error", "无法获取数据库连接锁");
                 }

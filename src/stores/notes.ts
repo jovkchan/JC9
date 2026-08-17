@@ -5,6 +5,9 @@ import { listen } from '@tauri-apps/api/event'
 import { useStatusStore } from '@/stores/status'
 import type { NoteGroup, Note, EditorState, NoteVersion } from '@/types/notes'
 
+/** 笔记模块「搜索」独立 Tab 的保留 ID */
+export const SEARCH_TAB_ID = '__search__'
+
 function genId(): string {
   return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
@@ -155,6 +158,88 @@ export const useNotesStore = defineStore('notes', () => {
   const notes = ref<Note[]>([])
   const selectedNoteId = ref<string | null>(null)
 
+  /**
+   * 权重评分 AND 过滤算法（支持空格分隔多词、is:pinned/is:archived/tag: 等语法）
+   * 抽取为纯函数，供 filteredNotes（当前列表）与 searchResults（全局搜索）共用
+   */
+  function applySearch(list: Note[], rawQuery: string): Note[] {
+    const queryWords = rawQuery.split(/\s+/).filter(Boolean)
+
+    const matchedWithScores = list.map(note => {
+      let score = 0
+      let matchesAll = true
+
+      for (const word of queryWords) {
+        // 判定特殊指令
+        if (word === 'is:pinned' || word === 'is:starred') {
+          if (!note.isPinned) matchesAll = false
+          continue
+        }
+        if (word === 'is:archived') {
+          if (!note.isArchived) matchesAll = false
+          continue
+        }
+        if (word.startsWith('tag:')) {
+          const tagVal = word.slice(4)
+          if (!note.tags.some(t => t.toLowerCase() === tagVal)) matchesAll = false
+          continue
+        }
+
+        // 模糊匹配逻辑
+        const titleIdx = note.title.toLowerCase().indexOf(word)
+        const contentIdx = note.content.toLowerCase().indexOf(word)
+        const hasTag = note.tags.some(t => t.toLowerCase().includes(word))
+
+        if (titleIdx === -1 && contentIdx === -1 && !hasTag) {
+          matchesAll = false
+          break // 必须全部词都匹配才满足
+        }
+
+        // 加权评分
+        if (titleIdx !== -1) {
+          score += 100 // 标题优先匹配，赋予极高权值
+          if (titleIdx === 0) score += 50 // 标题首词前缀匹配额外加权
+        }
+        if (hasTag) {
+          score += 30 // 标签匹配次之
+        }
+        if (contentIdx !== -1) {
+          score += 10 // 正文匹配分值最低
+        }
+      }
+
+      return { note, score, matchesAll }
+    })
+
+    // 仅保留满足全部检索词的笔记，并按得分从高到低排序（若分值相同，按更新时间倒序）
+    return matchedWithScores
+      .filter(x => x.matchesAll)
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score
+        const timeA = new Date(a.note.updatedAt || a.note.createdAt).getTime()
+        const timeB = new Date(b.note.updatedAt || b.note.createdAt).getTime()
+        return timeB - timeA
+      })
+      .map(x => x.note)
+  }
+
+  /** 全局搜索（忽略当前分组/标签/日期过滤，供搜索 Tab 与下拉使用） */
+  const searchResults = computed(() => {
+    let list = notes.value.filter(n => !n.isDeleted && !n.isArchived)
+    const q = searchQuery.value.trim().toLowerCase()
+    if (q) {
+      list = applySearch(list, q)
+    } else {
+      // 空查询时按最近更新排序，便于浏览
+      list = [...list].sort((a, b) => {
+        const ta = new Date(a.updatedAt || a.createdAt).getTime()
+        const tb = new Date(b.updatedAt || b.createdAt).getTime()
+        return tb - ta
+      })
+    }
+    return list
+  })
+
   // 联合过滤逻辑
   const filteredNotes = computed(() => {
     let list = notes.value.filter(n => !n.isDeleted)
@@ -184,65 +269,7 @@ export const useNotesStore = defineStore('notes', () => {
 
     // 5. 权重评分 AND 过滤算法（支持空格分隔多词、is:pinned/is:archived/tag: 等语法）
     if (searchQuery.value.trim()) {
-      const rawQuery = searchQuery.value.trim().toLowerCase()
-      const queryWords = rawQuery.split(/\s+/).filter(Boolean)
-
-      const matchedWithScores = list.map(note => {
-        let score = 0
-        let matchesAll = true
-
-        for (const word of queryWords) {
-          // 判定特殊指令
-          if (word === 'is:pinned' || word === 'is:starred') {
-            if (!note.isPinned) matchesAll = false
-            continue
-          }
-          if (word === 'is:archived') {
-            if (!note.isArchived) matchesAll = false
-            continue
-          }
-          if (word.startsWith('tag:')) {
-            const tagVal = word.slice(4)
-            if (!note.tags.some(t => t.toLowerCase() === tagVal)) matchesAll = false
-            continue
-          }
-
-          // 模糊匹配逻辑
-          const titleIdx = note.title.toLowerCase().indexOf(word)
-          const contentIdx = note.content.toLowerCase().indexOf(word)
-          const hasTag = note.tags.some(t => t.toLowerCase().includes(word))
-
-          if (titleIdx === -1 && contentIdx === -1 && !hasTag) {
-            matchesAll = false
-            break // 必须全部词都匹配才满足
-          }
-
-          // 加权评分
-          if (titleIdx !== -1) {
-            score += 100 // 标题优先匹配，赋予极高权值
-            if (titleIdx === 0) score += 50 // 标题首词前缀匹配额外加权
-          }
-          if (hasTag) {
-            score += 30 // 标签匹配次之
-          }
-          if (contentIdx !== -1) {
-            score += 10 // 正文匹配分值最低
-          }
-        }
-
-        return { note, score, matchesAll }
-      })
-
-      // 仅保留满足全部检索词的笔记，并按得分从高到低排序（若分值相同，按更新时间倒序）
-      list = matchedWithScores
-        .filter(x => x.matchesAll)
-        .sort((a, b) => {
-          if (b.score !== a.score) return b.score - a.score
-          const timeA = new Date(a.note.updatedAt || a.note.createdAt).getTime()
-          const timeB = new Date(b.note.updatedAt || b.note.createdAt).getTime()
-          return timeB - timeA
-        })
-        .map(x => x.note)
+      list = applySearch(list, searchQuery.value.trim().toLowerCase())
     }
 
     // 6. 日历日期过滤
@@ -426,6 +453,17 @@ export const useNotesStore = defineStore('notes', () => {
     activeNoteTabId.value = noteId
   }
 
+  /** 打开/激活独立的「搜索」Tab（保留 ID，非真实笔记） */
+  function openSearchTab() {
+    const idx = noteTabs.value.findIndex(t => t.id === SEARCH_TAB_ID)
+    if (idx >= 0) {
+      activeNoteTabId.value = SEARCH_TAB_ID
+      return
+    }
+    noteTabs.value.push({ id: SEARCH_TAB_ID, title: '搜索' })
+    activeNoteTabId.value = SEARCH_TAB_ID
+  }
+
   async function closeNoteTab(id: string) {
     // 关闭标签时自动保存草稿（若开启偏好）
     if (getSaveOnClose() && noteContentDrafts.value[id]) {
@@ -580,12 +618,12 @@ export const useNotesStore = defineStore('notes', () => {
     groups, selectedGroupId, groupTree,
     loadGroups, addGroup, updateGroup, removeGroup, getGroupPath,
     // Notes
-    notes, selectedNoteId, filteredNotes, pinnedNotes, unpinnedNotes,
+    notes, selectedNoteId, filteredNotes, pinnedNotes, unpinnedNotes, searchResults,
     loadNotes, loadAllNotes, saveNote, createNote,
     removeNote, restoreNote, permanentlyDeleteNote,
     searchNotes, togglePin, toggleArchive, copyContent,
     // Editor tabs
-    noteTabs, activeNoteTabId, openNoteTab, closeNoteTab,
+    noteTabs, activeNoteTabId, openNoteTab, openSearchTab, closeNoteTab,
     // Draft (close-to-save)
     getSaveOnClose, noteContentDrafts, updateNoteDraft, clearNoteDraft,
     // Version history

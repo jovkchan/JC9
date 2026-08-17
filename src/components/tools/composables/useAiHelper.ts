@@ -7,6 +7,7 @@ import { listen } from '@tauri-apps/api/event'
 import { getRole, loadAllRoles, type AgentRole } from '@/config/roles'
 import type { WorkerState, ApprovalRequest, KbEntry } from '@/types/ai'
 import { saveChatMessages, loadChatMessages } from '@/utils/chatStorage'
+import { searchIconSvg } from '@/components/ui/JcSearchIcon.vue'
 
 // ── Types ──
 export interface Message {
@@ -487,7 +488,7 @@ export function useAiHelper() {
 
     if (urlMatch && urlMatch[0]) {
       const url = urlMatch[0]
-      messages.value[aiMsgIndex].content = `🔍 检测到网页链接: \`${url}\`，正在尝试抓取网页内容...`
+      messages.value[aiMsgIndex].content = `${searchIconSvg(13)} 检测到网页链接: \`${url}\`，正在尝试抓取网页内容...`
       try {
         const html = await invoke<string>('fetch_url_html', { url })
         const doc = new DOMParser().parseFromString(html, 'text/html')

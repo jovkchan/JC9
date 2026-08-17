@@ -6,6 +6,8 @@ import ToolShell from '@/components/ui/ToolShell.vue'
 import JcButton from '@/components/ui/JcButton.vue'
 import JcSelect from '@/components/ui/JcSelect.vue'
 import JcTextarea from '@/components/ui/JcTextarea.vue'
+import JcInput from '@/components/ui/JcInput.vue'
+import JcColorPicker from '@/components/ui/JcColorPicker.vue'
 import JcSegmented from '@/components/ui/JcSegmented.vue'
 
 const tabOptions = [
@@ -741,17 +743,11 @@ function clearParse() {
             <div class="flex-config-row mt-8">
               <div class="config-field">
                 <label>{{ fgColorMode === 'gradient' ? '渐变起始色' : '码点颜色' }}</label>
-                <div class="color-picker-input-wrap">
-                  <input type="color" v-model="fgColor" />
-                  <input type="text" v-model="fgColor" class="color-hex-text" />
-                </div>
+                <JcColorPicker v-model="fgColor" beam glow />
               </div>
               <div v-if="fgColorMode === 'gradient'" class="config-field">
                 <label>渐变终止色</label>
-                <div class="color-picker-input-wrap">
-                  <input type="color" v-model="fgColor2" />
-                  <input type="text" v-model="fgColor2" class="color-hex-text" />
-                </div>
+                <JcColorPicker v-model="fgColor2" beam glow />
               </div>
               <div v-if="fgColorMode === 'gradient'" class="config-field">
                 <label>渐变方向</label>
@@ -764,10 +760,7 @@ function clearParse() {
           <div class="flex-config-row mt-10">
             <div class="config-field">
               <label>背景颜色</label>
-              <div class="color-picker-input-wrap">
-                <input type="color" v-model="bgColor" />
-                <input type="text" v-model="bgColor" class="color-hex-text" />
-              </div>
+              <JcColorPicker v-model="bgColor" beam glow />
             </div>
             <div class="config-field">
               <label>码点形状 (Data Dots)</label>
@@ -795,17 +788,11 @@ function clearParse() {
             <div v-if="eyeColorMode === 'custom'" class="flex-config-row mt-8">
               <div class="config-field">
                 <label>外框颜色 (Outer)</label>
-                <div class="color-picker-input-wrap">
-                  <input type="color" v-model="eyeOuterColor" />
-                  <input type="text" v-model="eyeOuterColor" class="color-hex-text" />
-                </div>
+                <JcColorPicker v-model="eyeOuterColor" beam glow />
               </div>
               <div class="config-field">
                 <label>内芯颜色 (Inner)</label>
-                <div class="color-picker-input-wrap">
-                  <input type="color" v-model="eyeInnerColor" />
-                  <input type="text" v-model="eyeInnerColor" class="color-hex-text" />
-                </div>
+                <JcColorPicker v-model="eyeInnerColor" beam glow />
               </div>
             </div>
           </div>
@@ -827,10 +814,7 @@ function clearParse() {
             </div>
             <div class="config-field">
               <label>文字颜色</label>
-              <div class="color-picker-input-wrap">
-                <input type="color" v-model="labelColor" />
-                <input type="text" v-model="labelColor" class="color-hex-text" placeholder="为空则默认" />
-              </div>
+              <JcColorPicker v-model="labelColor" beam glow placeholder="为空则默认" />
             </div>
             <div class="config-field">
               <label>字号大小</label>
@@ -1089,35 +1073,6 @@ function clearParse() {
   font-size: 9px;
   color: var(--jc-color-warning);
   margin-top: 2px;
-}
-.color-picker-input-wrap {
-  display: flex;
-  align-items: center;
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  border-radius: 3px;
-  padding: 2px 4px;
-  height: 26px;
-  
-  input[type="color"] {
-    border: none;
-    background: none;
-    width: 20px;
-    height: 18px;
-    cursor: pointer;
-    padding: 0;
-  }
-  .color-hex-text {
-    flex: 1;
-    border: none;
-    background: none;
-    color: var(--jc-text-primary);
-    font-family: 'Cascadia Code', Consolas, monospace;
-    font-size: 10px;
-    padding-left: 6px;
-    width: 100%;
-    outline: none;
-  }
 }
 
 /* 右侧预览 */

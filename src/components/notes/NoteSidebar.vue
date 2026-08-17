@@ -7,6 +7,7 @@ import type { Note, NoteGroup } from '@/types/notes'
 import JcModal from '@/components/ui/JcModal.vue'
 import JcInput from '@/components/ui/JcInput.vue'
 import JcButton from '@/components/ui/JcButton.vue'
+import JcSearchIcon from '@/components/ui/JcSearchIcon.vue'
 
 const store = useNotesStore()
 
@@ -387,6 +388,9 @@ onMounted(() => document.addEventListener('click', closeGroupCtx))
 
     <!-- Search + actions row (replaces old 全部笔记 header) -->
     <div class="ns-search-row">
+      <button class="ns-btn icon ns-btn--ghost" title="全局搜索 (打开搜索页)" @click="store.openSearchTab()">
+        <JcSearchIcon :size="14" />
+      </button>
       <span class="ns-search-hint-text">按 Ctrl + F 全局搜索</span>
       <button class="ns-btn icon" title="新建笔记" @click="handleNewNote">
         <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"
@@ -710,6 +714,17 @@ onMounted(() => document.addEventListener('click', closeGroupCtx))
 
   &.on {
     color: var(--jc-color-accent)
+  }
+}
+
+/* 无背景图标按钮：仅图标变色（如搜索图标） */
+.ns-btn.icon.ns-btn--ghost {
+  background: transparent;
+  padding: 3px 6px;
+
+  &:hover {
+    background: transparent;
+    color: var(--jc-color-accent);
   }
 }
 

@@ -8,6 +8,7 @@ import { useAutomationStore } from '@/stores/automation'
 import { getBlockDef, getBlockColor, getBlockLabel } from '@/components/automation/blocks/palette'
 import type { BlockNode, FieldDef } from '@/types/automation'
 import JcInput from '@/components/ui/JcInput.vue'
+import JcInputNumber from '@/components/ui/JcInputNumber.vue'
 import JcTextarea from '@/components/ui/JcTextarea.vue'
 import JcSelect from '@/components/ui/JcSelect.vue'
 import JcSwitch from '@/components/ui/JcSwitch.vue'
@@ -168,13 +169,12 @@ function fieldValue(f: FieldDef) {
             @update:model-value="(v) => set(f.key, String(v))"
           />
           <!-- 数字（JC 组件） -->
-          <JcInput
+          <JcInputNumber
             v-else-if="f.type === 'number'"
             beam glow
-            type="number"
-            :model-value="asString(fieldValue(f))"
+            :model-value="Number(fieldValue(f)) || null"
             :placeholder="f.placeholder"
-            @update:model-value="(v) => set(f.key, Number(v) || 0)"
+            @update:model-value="(v) => set(f.key, v ?? 0)"
           />
           <!-- Shell -->
           <JcSelect

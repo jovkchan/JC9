@@ -6,6 +6,7 @@ import { save } from '@tauri-apps/plugin-dialog'
 import ToolShell from '@/components/ui/ToolShell.vue'
 import JcButton from '@/components/ui/JcButton.vue'
 import JcSelect from '@/components/ui/JcSelect.vue'
+import JcInputNumber from '@/components/ui/JcInputNumber.vue'
 
 const customFormatOptions = [
   { label: 'PNG 格式 (.png)', value: 'png' },
@@ -1035,11 +1036,11 @@ onUnmounted(() => {
               <div class="custom-row">
                 <div class="custom-col">
                   <label>宽度 (Px)</label>
-                  <input type="number" v-model.number="customSettings.width" />
+                  <JcInputNumber :model-value="customSettings.width" :min="1" suffix="px" size="small" beam glow @update:model-value="customSettings.width = $event ?? 256" />
                 </div>
                 <div class="custom-col">
                   <label>高度 (Px)</label>
-                  <input type="number" v-model.number="customSettings.height" />
+                  <JcInputNumber :model-value="customSettings.height" :min="1" suffix="px" size="small" beam glow @update:model-value="customSettings.height = $event ?? 256" />
                 </div>
               </div>
               <div class="custom-row">

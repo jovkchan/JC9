@@ -109,6 +109,9 @@
   --jc-border-default: #3e3e42;
   --jc-border-strong: #555;
 
+  // ── Map · 透明棋盘格（颜色选择器色块底，明暗两套） ──
+  --jc-color-checker: rgba(128, 128, 128, 0.35);
+
   // ── Alias · 阴影语义（对齐 JC9 原值：菜单/下拉 2 层、弹窗 3 层） ──
   --jc-shadow-menu: 0 4px 12px rgba(0, 0, 0, 0.5);
   --jc-shadow-modal: 0 8px 24px rgba(0, 0, 0, 0.6);
@@ -141,6 +144,8 @@
 
   --jc-border-default: #d4d4d4;
   --jc-border-strong: #b0b0b0;
+
+  --jc-color-checker: rgba(0, 0, 0, 0.18);
 
   --jc-shadow-1: 0 1px 2px -2px rgba(0, 0, 0, 0.16), 0 3px 6px 0 rgba(0, 0, 0, 0.12), 0 5px 12px 4px rgba(0, 0, 0, 0.09);
   --jc-shadow-2: 0 3px 6px -4px rgba(0, 0, 0, 0.12), 0 6px 16px 0 rgba(0, 0, 0, 0.08), 0 9px 28px 8px rgba(0, 0, 0, 0.05);

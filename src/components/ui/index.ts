@@ -12,6 +12,8 @@
 // 组件
 export { default as JcButton } from './JcButton.vue'
 export { default as JcInput } from './JcInput.vue'
+export { default as JcInputNumber } from './JcInputNumber.vue'
+export { default as JcColorPicker } from './JcColorPicker.vue'
 export { default as JcTextarea } from './JcTextarea.vue'
 export { default as JcSelect } from './JcSelect.vue'
 export { default as JcSegmented } from './JcSegmented.vue'
@@ -36,6 +38,7 @@ export type { JcTabItem } from './JcTabBar.vue'
 export { default as JcBorderBeam } from './JcBorderBeam.vue'
 export type { JcBorderBeamColor, JcBorderBeamTrigger } from './JcBorderBeam.vue'
 export { default as JcBeam } from './JcBeam.vue'
+export { default as JcSearchIcon } from './JcSearchIcon.vue'
 export { default as ToolShell } from './ToolShell.vue'
 
 // 命令式 Toast
@@ -49,6 +52,8 @@ export type { JcTheme } from './theme'
 // 组件类型
 export type { JcButtonType, JcButtonSize, JcButtonShape } from './JcButton.vue'
 export type { JcInputSize } from './JcInput.vue'
+export type { JcInputNumberSize } from './JcInputNumber.vue'
+export type { JcColorPickerSize } from './JcColorPicker.vue'
 export type { JcSelectOption, JcSelectSize } from './JcSelect.vue'
 export type { JcSegmentedOption, JcSegmentedSize } from './JcSegmented.vue'
 export type { JcBadgeStatus } from './JcBadge.vue'

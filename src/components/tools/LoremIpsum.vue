@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import ToolShell from '@/components/ui/ToolShell.vue'
 import JcButton from '@/components/ui/JcButton.vue'
+import JcInputNumber from '@/components/ui/JcInputNumber.vue'
 import JcTextarea from '@/components/ui/JcTextarea.vue'
 
 const language = ref<'cn' | 'en'>('cn')
@@ -116,12 +117,12 @@ function copyText() {
 
         <div class="config-field mt-10">
           <label>段落数量 (Paragraphs)</label>
-          <input type="number" v-model.number="paragraphs" min="1" max="50" @change="generateText" class="num-input" />
+          <JcInputNumber :model-value="paragraphs" :min="1" :max="50" beam glow @update:model-value="paragraphs = $event ?? 1" @change="generateText" />
         </div>
 
         <div class="config-field mt-10">
           <label>{{ language === 'cn' ? '每段大致字数' : '每段大致单词数' }}</label>
-          <input type="number" v-model.number="textLength" min="10" max="1000" @change="generateText" class="num-input" />
+          <JcInputNumber :model-value="textLength" :min="10" :max="1000" beam glow @update:model-value="textLength = $event ?? 10" @change="generateText" />
         </div>
 
         <div class="config-field mt-10">
@@ -181,18 +182,6 @@ function copyText() {
   input[type="radio"], input[type="checkbox"] {
     accent-color: var(--jc-color-accent);
     margin: 0;
-  }
-}
-.num-input {
-  background: var(--jc-bg-input);
-  border: 1px solid var(--jc-border-strong);
-  color: var(--jc-text-primary);
-  padding: 4px 8px;
-  border-radius: 3px;
-  font-size: 11px;
-  outline: none;
-  &:focus {
-    border-color: var(--jc-color-accent);
   }
 }
 </style>

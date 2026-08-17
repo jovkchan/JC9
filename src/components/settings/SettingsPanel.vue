@@ -9,6 +9,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { loadAllRoles, saveAllRoles, type AgentRole } from '@/config/roles'
 import JcModal from '@/components/ui/JcModal.vue'
 import JcInput from '@/components/ui/JcInput.vue'
+import JcInputNumber from '@/components/ui/JcInputNumber.vue'
 import JcSelect from '@/components/ui/JcSelect.vue'
 import JcTextarea from '@/components/ui/JcTextarea.vue'
 import JcBorderBeam from '@/components/ui/JcBorderBeam.vue'
@@ -1018,10 +1019,10 @@ async function compressMemories() {
                 <JcInput beam glow v-else v-model="newModelForm.model" placeholder="多个用英文逗号分隔" />
               </div>
               <div class="form-row">
-                <div class="form-group form-half"><label>输入价格 (元/百万)</label><input v-model.number="newModelForm.inputPrice" type="number" step="0.1" class="form-input" /></div>
-                <div class="form-group form-half"><label>输出价格 (元/百万)</label><input v-model.number="newModelForm.outputPrice" type="number" step="0.1" class="form-input" /></div>
+                <div class="form-group form-half"><label>输入价格 (元/百万)</label><JcInputNumber :model-value="newModelForm.inputPrice" :min="0" :step="0.1" size="small" beam glow @update:model-value="newModelForm.inputPrice = $event ?? 0" /></div>
+                <div class="form-group form-half"><label>输出价格 (元/百万)</label><JcInputNumber :model-value="newModelForm.outputPrice" :min="0" :step="0.1" size="small" beam glow @update:model-value="newModelForm.outputPrice = $event ?? 0" /></div>
               </div>
-              <div class="form-group"><label>熔断限额 (元)</label><input v-model.number="newModelForm.costLimit" type="number" step="0.5" class="form-input" /></div>
+              <div class="form-group"><label>熔断限额 (元)</label><JcInputNumber :model-value="newModelForm.costLimit" :min="0" :step="0.5" size="small" beam glow @update:model-value="newModelForm.costLimit = $event ?? 0" /></div>
               <template #footer>
                 <button class="footer-btn-cancel" @click="cancelModelForm">取消</button>
                 <button class="footer-btn-save" @click="saveModelForm">确定</button>
@@ -1127,7 +1128,7 @@ async function compressMemories() {
                 <button class="mcp-copy-btn" @click="copyMcpUrl">复制</button>
                 <span class="mcp-compact-sep">|</span>
                 <span class="mcp-compact-label">端口</span>
-                <input v-model="mcpPortInput" class="mcp-port-input" type="number" min="1024" max="65535" @change="mcpPortInput = Math.max(1024, Math.min(65535, Number(mcpPortInput) || 18899)).toString()" />
+                <JcInputNumber :model-value="mcpPortInput ? Number(mcpPortInput) : null" :min="1024" :max="65535" size="small" beam glow @update:model-value="mcpPortInput = $event != null ? String($event) : ''" style="width: 110px" />
               </div>
 
               <!-- 第3行：配置模板（仅 Stdio 接入方式）-->
@@ -1244,7 +1245,7 @@ async function compressMemories() {
               <span v-if="noteShareLoading" style="font-size:11px;color:var(--jc-text-secondary)">处理中...</span>
               <span class="mcp-compact-sep">|</span>
               <span class="mcp-compact-label">端口</span>
-              <input v-model="noteSharePortInput" class="mcp-port-input" type="number" min="1024" max="65535" @change="noteSharePortInput = Math.max(1024, Math.min(65535, Number(noteSharePortInput) || 8899)).toString()" />
+              <JcInputNumber :model-value="noteSharePortInput ? Number(noteSharePortInput) : null" :min="1024" :max="65535" size="small" beam glow @update:model-value="noteSharePortInput = $event != null ? String($event) : ''" style="width: 110px" />
               <span style="flex:1"></span>
               <button class="mcp-action-btn" @click="saveNoteShareConfig" :disabled="noteShareLoading">{{ noteShareLoading ? '保存中...' : '保存' }}</button>
             </div>
