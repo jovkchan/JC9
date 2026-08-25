@@ -260,6 +260,163 @@ fn config_of(node: &Map<String, Value>) -> Map<String, Value> {
         .unwrap_or_default()
 }
 
+/// 路径解析：绝对路径原样；相对路径基于工作区（ctx.cwd）拼接
+fn resolve_path(cwd: &str, p: &str) -> std::path::PathBuf {
+    let path = std::path::Path::new(p);
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::path::Path::new(cwd).join(path)
+    }
+}
+
+/// 该块是否连了失败分支（out-fail）：失败时优先走降级路径而非中止流程
+fn has_out_fail(edges: &[Value], node_id: &str) -> bool {
+    edges.iter().any(|e| {
+        e.get("fromBlock").and_then(|b| b.as_str()) == Some(node_id)
+            && e.get("fromPort").and_then(|p| p.as_str()) == Some("out-fail")
+    })
+}
+
+/// 数值结果格式化：整数不带小数
+fn fmt_num(v: f64) -> String {
+    if v.fract() == 0.0 && v.abs() < 1e15 {
+        format!("{}", v as i64)
+    } else {
+        format!("{}", v)
+    }
+}
+
+// ── 简易四则运算求值（+ - * / % 与括号，递归下降）──
+fn skip_ws(s: &[char], pos: &mut usize) {
+    while *pos < s.len() && s[*pos].is_whitespace() {
+        *pos += 1;
+    }
+}
+fn parse_number(s: &[char], pos: &mut usize) -> Result<f64, String> {
+    skip_ws(s, pos);
+    let start = *pos;
+    while *pos < s.len() && (s[*pos].is_ascii_digit() || s[*pos] == '.') {
+        *pos += 1;
+    }
+    if start == *pos {
+        return Err("期望数字".into());
+    }
+    let txt: String = s[start..*pos].iter().collect();
+    txt.parse::<f64>().map_err(|_| format!("无效数字: {}", txt))
+}
+fn parse_factor(s: &[char], pos: &mut usize) -> Result<f64, String> {
+    skip_ws(s, pos);
+    if *pos < s.len() && s[*pos] == '(' {
+        *pos += 1;
+        let v = parse_expr(s, pos)?;
+        skip_ws(s, pos);
+        if *pos >= s.len() || s[*pos] != ')' {
+            return Err("缺少右括号".into());
+        }
+        *pos += 1;
+        return Ok(v);
+    }
+    if *pos < s.len() && (s[*pos] == '+' || s[*pos] == '-') {
+        let sign = if s[*pos] == '-' { -1.0 } else { 1.0 };
+        *pos += 1;
+        return Ok(sign * parse_factor(s, pos)?);
+    }
+    parse_number(s, pos)
+}
+fn parse_term(s: &[char], pos: &mut usize) -> Result<f64, String> {
+    let mut v = parse_factor(s, pos)?;
+    loop {
+        skip_ws(s, pos);
+        if *pos < s.len() && (s[*pos] == '*' || s[*pos] == '/' || s[*pos] == '%') {
+            let op = s[*pos];
+            *pos += 1;
+            let rhs = parse_factor(s, pos)?;
+            v = match op {
+                '*' => v * rhs,
+                '/' => {
+                    if rhs == 0.0 {
+                        return Err("除零".into());
+                    }
+                    v / rhs
+                }
+                '%' => {
+                    if rhs == 0.0 {
+                        return Err("取模除零".into());
+                    }
+                    v % rhs
+                }
+                _ => unreachable!(),
+            };
+        } else {
+            break;
+        }
+    }
+    Ok(v)
+}
+fn parse_expr(s: &[char], pos: &mut usize) -> Result<f64, String> {
+    let mut v = parse_term(s, pos)?;
+    loop {
+        skip_ws(s, pos);
+        if *pos < s.len() && (s[*pos] == '+' || s[*pos] == '-') {
+            let op = s[*pos];
+            *pos += 1;
+            let rhs = parse_term(s, pos)?;
+            v = if op == '+' { v + rhs } else { v - rhs };
+        } else {
+            break;
+        }
+    }
+    Ok(v)
+}
+/// 四则运算表达式求值（支持括号与 + - * / %）；表达式先经插值
+fn eval_arith_expr(input: &str) -> Result<f64, String> {
+    let s: Vec<char> = input.trim().chars().collect();
+    if s.is_empty() {
+        return Err("表达式为空".into());
+    }
+    let mut pos = 0usize;
+    let v = parse_expr(&s, &mut pos)?;
+    skip_ws(&s, &mut pos);
+    if pos != s.len() {
+        let rest: String = s[pos..].iter().collect();
+        return Err(format!("表达式含多余字符: {}", rest));
+    }
+    Ok(v)
+}
+
+/// 语义化版本号递增：1.0.0 → 1.0.1（patch）；可递增 minor / major；支持 v 前缀与尾缀
+fn bump_version(ver: &str, part: &str) -> Result<String, String> {
+    let v = ver.trim().strip_prefix('v').unwrap_or(ver.trim());
+    if v.is_empty() {
+        return Err("版本号为空".into());
+    }
+    let raw: Vec<&str> = v.split('.').collect();
+    let mut parts: Vec<i64> = Vec::with_capacity(raw.len());
+    for p in raw {
+        let digits: String = p.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if digits.is_empty() {
+            if p.is_empty() {
+                parts.push(0);
+            } else {
+                return Err(format!("版本段不是数字: {}", p));
+            }
+        } else {
+            parts.push(digits.parse::<i64>().map_err(|_| format!("版本段非法: {}", p))?);
+        }
+    }
+    while parts.len() < 3 {
+        parts.push(0);
+    }
+    let idx = match part {
+        "major" => 0usize,
+        "minor" => 1,
+        _ => 2,
+    };
+    parts[idx] += 1;
+    Ok(parts.iter().map(|n| n.to_string()).collect::<Vec<_>>().join("."))
+}
+
 /// 统一插值：{{var}} / {{last.stdout}} / {{last.exitCode}} / {{last.stderr}}
 fn interpolate(s: &str, ctx: &Ctx) -> String {
     let mut out = s.to_string();
@@ -1363,8 +1520,12 @@ pub fn walk(
                 "step": ctx.step, "total": total, "ts": now_ts()
             }));
             log_step(run_id, emit, steps, node_id, name, &node_label, ctx.step, if code == 0 { "ok" } else { "fail" }, started_at, Some(code), &tail, &command, &cwd, &auth, None, None);
-            if code != 0 && get_str(&config, "onFail") != "continue" {
-                return Err(format!("命令块 {} 失败，退出码 {}", node_id, code));
+            if code != 0 {
+                if has_out_fail(edges, node_id) {
+                    branch = Some("out-fail".to_string());
+                } else if get_str(&config, "onFail") != "continue" {
+                    return Err(format!("命令块 {} 失败，退出码 {}", node_id, code));
+                }
             }
         }
         "workspace" => {
@@ -1790,6 +1951,268 @@ pub fn walk(
             let detail = format!("{} = {}", var_name, value);
             log_step(run_id, emit, steps, node_id, name, &node_label, ctx.step, "ok", started_at, Some(0), "", &detail, &ctx.cwd, &auth, None, None);
         }
+        "read-file" => {
+            let raw_path = interpolate(get_str(&config, "path"), ctx);
+            if raw_path.is_empty() {
+                return Err(format!("读取文件块 {}：缺少路径", node_id));
+            }
+            let p = resolve_path(&ctx.cwd, &raw_path);
+            let var_name = interpolate(get_str(&config, "varName"), ctx);
+            match std::fs::read_to_string(&p) {
+                Ok(text) => {
+                    if !var_name.is_empty() {
+                        ctx.vars.insert(var_name.clone(), Value::String(text.clone()));
+                    }
+                    ctx.last = Some(LastResult { exit_code: 0, stdout: text.clone(), stderr: String::new() });
+                    let detail = format!("读取 {}（{} 字节）", p.display(), text.len());
+                    emit("automation-event", &json!({
+                        "type": "step_done", "runId": run_id, "blockId": node_id, "name": node_label,
+                        "exitCode": 0, "vars": ctx.vars, "step": ctx.step, "total": total, "ts": now_ts()
+                    }));
+                    log_step(run_id, emit, steps, node_id, name, &node_label, ctx.step, "ok", started_at, Some(0), &detail, &detail, &ctx.cwd, &auth, None, None);
+                }
+                Err(e) => {
+                    let msg = format!("读取文件 {} 失败: {}", p.display(), e);
+                    emit("automation-event", &json!({
+                        "type": "step_fail", "runId": run_id, "blockId": node_id, "name": node_label,
+                        "exitCode": -1, "stdoutTail": msg, "step": ctx.step, "total": total, "ts": now_ts()
+                    }));
+                    log_step(run_id, emit, steps, node_id, name, &node_label, ctx.step, "fail", started_at, None, &msg, &msg, &ctx.cwd, &auth, None, None);
+                    if has_out_fail(edges, node_id) {
+                        branch = Some("out-fail".to_string());
+                    } else {
+                        return Err(msg);
+                    }
+                }
+            }
+        }
+        "write-file" => {
+            let raw_path = interpolate(get_str(&config, "path"), ctx);
+            if raw_path.is_empty() {
+                return Err(format!("写入文件块 {}：缺少路径", node_id));
+            }
+            let p = resolve_path(&ctx.cwd, &raw_path);
+            let content = interpolate(get_str(&config, "content"), ctx);
+            let append = config.get("append").and_then(|v| v.as_bool()).unwrap_or(false);
+            let result = if append {
+                use std::io::Write;
+                std::fs::OpenOptions::new().create(true).append(true).open(&p)
+                    .and_then(|mut f| f.write_all(content.as_bytes()))
+            } else {
+                std::fs::write(&p, &content)
+            };
+            match result {
+                Ok(()) => {
+                    let detail = format!("写入 {}（{} 字节）", p.display(), content.len());
+                    ctx.last = Some(LastResult { exit_code: 0, stdout: detail.clone(), stderr: String::new() });
+                    emit("automation-event", &json!({
+                        "type": "step_done", "runId": run_id, "blockId": node_id, "name": node_label,
+                        "exitCode": 0, "vars": ctx.vars, "step": ctx.step, "total": total, "ts": now_ts()
+                    }));
+                    log_step(run_id, emit, steps, node_id, name, &node_label, ctx.step, "ok", started_at, Some(0), &detail, &detail, &ctx.cwd, &auth, None, None);
+                }
+                Err(e) => {
+                    let msg = format!("写入文件 {} 失败: {}", p.display(), e);
+                    emit("automation-event", &json!({
+                        "type": "step_fail", "runId": run_id, "blockId": node_id, "name": node_label,
+                        "exitCode": -1, "stdoutTail": msg, "step": ctx.step, "total": total, "ts": now_ts()
+                    }));
+                    log_step(run_id, emit, steps, node_id, name, &node_label, ctx.step, "fail", started_at, None, &msg, &msg, &ctx.cwd, &auth, None, None);
+                    if has_out_fail(edges, node_id) {
+                        branch = Some("out-fail".to_string());
+                    } else {
+                        return Err(msg);
+                    }
+                }
+            }
+        }
+        "hash-file" => {
+            let raw_path = interpolate(get_str(&config, "path"), ctx);
+            if raw_path.is_empty() {
+                return Err(format!("文件哈希块 {}：缺少路径", node_id));
+            }
+            let p = resolve_path(&ctx.cwd, &raw_path);
+            let algo = get_str(&config, "algorithm");
+            let var_name = interpolate(get_str(&config, "varName"), ctx);
+            match std::fs::read(&p) {
+                Ok(bytes) => {
+                    use sha2::{Digest, Sha256, Sha384, Sha512};
+                    let hex_str = match algo {
+                        "sha384" => {
+                            let mut h = Sha384::new();
+                            h.update(&bytes);
+                            hex::encode(h.finalize())
+                        }
+                        "sha512" => {
+                            let mut h = Sha512::new();
+                            h.update(&bytes);
+                            hex::encode(h.finalize())
+                        }
+                        _ => {
+                            let mut h = Sha256::new();
+                            h.update(&bytes);
+                            hex::encode(h.finalize())
+                        }
+                    };
+                    let label = match algo {
+                        "sha384" => "SHA-384",
+                        "sha512" => "SHA-512",
+                        _ => "SHA-256",
+                    };
+                    if !var_name.is_empty() {
+                        ctx.vars.insert(var_name.clone(), Value::String(hex_str.clone()));
+                    }
+                    let detail = format!("{} {}", label, hex_str);
+                    ctx.last = Some(LastResult { exit_code: 0, stdout: hex_str.clone(), stderr: String::new() });
+                    emit("automation-event", &json!({
+                        "type": "step_done", "runId": run_id, "blockId": node_id, "name": node_label,
+                        "exitCode": 0, "vars": ctx.vars, "step": ctx.step, "total": total, "ts": now_ts()
+                    }));
+                    log_step(run_id, emit, steps, node_id, name, &node_label, ctx.step, "ok", started_at, Some(0), &hex_str, &detail, &ctx.cwd, &auth, None, None);
+                }
+                Err(e) => {
+                    let msg = format!("读取文件 {} 失败: {}", p.display(), e);
+                    emit("automation-event", &json!({
+                        "type": "step_fail", "runId": run_id, "blockId": node_id, "name": node_label,
+                        "exitCode": -1, "stdoutTail": msg, "step": ctx.step, "total": total, "ts": now_ts()
+                    }));
+                    log_step(run_id, emit, steps, node_id, name, &node_label, ctx.step, "fail", started_at, None, &msg, &msg, &ctx.cwd, &auth, None, None);
+                    if has_out_fail(edges, node_id) {
+                        branch = Some("out-fail".to_string());
+                    } else {
+                        return Err(msg);
+                    }
+                }
+            }
+        }
+        "capture" => {
+            let source = interpolate(get_str(&config, "source"), ctx);
+            let pattern = interpolate(get_str(&config, "pattern"), ctx);
+            if pattern.is_empty() {
+                return Err(format!("输出捕获块 {}：缺少正则", node_id));
+            }
+            let var_map_raw = get_str(&config, "vars");
+            let mut map: Vec<(String, String)> = Vec::new();
+            for line in var_map_raw.lines() {
+                if let Some((g, v)) = line.split_once('=') {
+                    let g = g.trim();
+                    let v = v.trim();
+                    if !g.is_empty() && !v.is_empty() {
+                        map.push((g.to_string(), v.to_string()));
+                    }
+                }
+            }
+            if map.is_empty() {
+                return Err(format!("输出捕获块 {}：请填写 捕获组=变量名 映射", node_id));
+            }
+            let result: Result<(), String> = (|| {
+                let re = regex::Regex::new(&pattern).map_err(|e| format!("正则无效: {}", e))?;
+                let caps = re.captures(&source).ok_or_else(|| format!("未匹配: {}", pattern))?;
+                let mut written: Vec<String> = Vec::new();
+                for (g, var) in &map {
+                    let val: Option<String> = if let Ok(i) = g.parse::<usize>() {
+                        caps.get(i).map(|m| m.as_str().to_string())
+                    } else {
+                        caps.name(g).map(|m| m.as_str().to_string())
+                    };
+                    if let Some(val) = val {
+                        ctx.vars.insert(var.clone(), Value::String(val.clone()));
+                        written.push(format!("{}={}", var, val));
+                    }
+                }
+                ctx.last = Some(LastResult { exit_code: 0, stdout: written.join(", "), stderr: String::new() });
+                Ok(())
+            })();
+            match result {
+                Ok(()) => {
+                    let detail = ctx.last.as_ref().map(|l| l.stdout.clone()).unwrap_or_default();
+                    emit("automation-event", &json!({
+                        "type": "step_done", "runId": run_id, "blockId": node_id, "name": node_label,
+                        "exitCode": 0, "vars": ctx.vars, "step": ctx.step, "total": total, "ts": now_ts()
+                    }));
+                    log_step(run_id, emit, steps, node_id, name, &node_label, ctx.step, "ok", started_at, Some(0), &detail, &detail, &ctx.cwd, &auth, None, None);
+                }
+                Err(msg) => {
+                    emit("automation-event", &json!({
+                        "type": "step_fail", "runId": run_id, "blockId": node_id, "name": node_label,
+                        "exitCode": -1, "stdoutTail": msg, "step": ctx.step, "total": total, "ts": now_ts()
+                    }));
+                    log_step(run_id, emit, steps, node_id, name, &node_label, ctx.step, "fail", started_at, None, &msg, &msg, &ctx.cwd, &auth, None, None);
+                    if has_out_fail(edges, node_id) {
+                        branch = Some("out-fail".to_string());
+                    } else {
+                        return Err(msg);
+                    }
+                }
+            }
+        }
+        "expr" => {
+            let mode = get_str(&config, "mode");
+            let var_name = interpolate(get_str(&config, "varName"), ctx);
+            let result: Result<String, String> = match mode {
+                "bump" => {
+                    let version = interpolate(get_str(&config, "version"), ctx);
+                    if version.is_empty() {
+                        Err("运算块：缺少版本号".into())
+                    } else {
+                        bump_version(&version, get_str(&config, "part"))
+                    }
+                }
+                "replace" => {
+                    let text = interpolate(get_str(&config, "text"), ctx);
+                    let pattern = interpolate(get_str(&config, "pattern"), ctx);
+                    let replacement = interpolate(get_str(&config, "replacement"), ctx);
+                    if text.is_empty() {
+                        Err("运算块：缺少输入文本".into())
+                    } else if pattern.is_empty() {
+                        Err("运算块：缺少查找内容".into())
+                    } else {
+                        match regex::Regex::new(&pattern) {
+                            Ok(re) => Ok(re.replace_all(&text, replacement.as_str()).to_string()),
+                            Err(e) => Err(format!("正则无效: {}", e)),
+                        }
+                    }
+                }
+                _ => {
+                    let expr = interpolate(get_str(&config, "expr"), ctx);
+                    if expr.is_empty() {
+                        Err("运算块：缺少表达式".into())
+                    } else {
+                        eval_arith_expr(&expr).map(fmt_num)
+                    }
+                }
+            };
+            match result {
+                Ok(text) => {
+                    if !var_name.is_empty() {
+                        ctx.vars.insert(var_name.clone(), Value::String(text.clone()));
+                    }
+                    ctx.last = Some(LastResult { exit_code: 0, stdout: text.clone(), stderr: String::new() });
+                    let detail = if var_name.is_empty() {
+                        text.clone()
+                    } else {
+                        format!("{} = {}", var_name, text)
+                    };
+                    emit("automation-event", &json!({
+                        "type": "step_done", "runId": run_id, "blockId": node_id, "name": node_label,
+                        "exitCode": 0, "vars": ctx.vars, "step": ctx.step, "total": total, "ts": now_ts()
+                    }));
+                    log_step(run_id, emit, steps, node_id, name, &node_label, ctx.step, "ok", started_at, Some(0), &text, &detail, &ctx.cwd, &auth, None, None);
+                }
+                Err(msg) => {
+                    emit("automation-event", &json!({
+                        "type": "step_fail", "runId": run_id, "blockId": node_id, "name": node_label,
+                        "exitCode": -1, "stdoutTail": msg, "step": ctx.step, "total": total, "ts": now_ts()
+                    }));
+                    log_step(run_id, emit, steps, node_id, name, &node_label, ctx.step, "fail", started_at, None, &msg, &msg, &ctx.cwd, &auth, None, None);
+                    if has_out_fail(edges, node_id) {
+                        branch = Some("out-fail".to_string());
+                    } else {
+                        return Err(msg);
+                    }
+                }
+            }
+        }
         "call-automation" => {
             // 调用工作流（子自动化）：运行时把另一个工作积木作为子程序执行；v1 共享父 ctx（变量/工作目录/环境/上一步输出继承并写回）
             let target_id = interpolate(get_str(&config, "automationId"), ctx);
@@ -1886,6 +2309,54 @@ mod tests {
 
     fn mk_ctx(vars: HashMap<String, Value>, last: Option<LastResult>) -> Ctx {
         Ctx { vars, last, step: 0, cwd: String::new(), envs: HashMap::new() }
+    }
+
+    #[test]
+    fn test_eval_arith() {
+        assert_eq!(eval_arith_expr("1+2*3").unwrap(), 7.0);
+        assert_eq!(eval_arith_expr("(1+2)*3").unwrap(), 9.0);
+        assert_eq!(eval_arith_expr("10 % 3").unwrap(), 1.0);
+        assert_eq!(eval_arith_expr("5 - -2").unwrap(), 7.0);
+        assert_eq!(eval_arith_expr(" 2.5 * 2 ").unwrap(), 5.0);
+        assert!(eval_arith_expr("1/0").is_err());
+        assert!(eval_arith_expr("1+").is_err());
+        assert!(eval_arith_expr("").is_err());
+    }
+
+    #[test]
+    fn test_fmt_num() {
+        assert_eq!(fmt_num(13.0), "13");
+        assert_eq!(fmt_num(1.5), "1.5");
+        assert_eq!(fmt_num(-0.0), "0");
+    }
+
+    #[test]
+    fn test_bump_version() {
+        assert_eq!(bump_version("1.0.0", "patch").unwrap(), "1.0.1");
+        assert_eq!(bump_version("1.0.0", "minor").unwrap(), "1.1.0");
+        assert_eq!(bump_version("1.0.0", "major").unwrap(), "2.0.0");
+        assert_eq!(bump_version("v2.3", "patch").unwrap(), "2.3.1");
+        assert_eq!(bump_version("2.3.1-beta", "patch").unwrap(), "2.3.2");
+        assert_eq!(bump_version("1", "minor").unwrap(), "1.1.0");
+        assert!(bump_version("abc", "patch").is_err());
+    }
+
+    #[test]
+    fn test_resolve_path() {
+        assert!(resolve_path("", "C:/x/y.txt").is_absolute());
+        let rel = resolve_path("D:\\code\\PDA_app", "app\\build.gradle");
+        assert_eq!(rel, std::path::Path::new("D:\\code\\PDA_app").join("app\\build.gradle"));
+        assert!(resolve_path("", "/tmp/a").is_absolute());
+    }
+
+    #[test]
+    fn test_has_out_fail() {
+        let edges = vec![
+            json!({"fromBlock":"a","fromPort":"out","toBlock":"b","toPort":"in"}),
+            json!({"fromBlock":"c","fromPort":"out-fail","toBlock":"d","toPort":"in"}),
+        ];
+        assert!(!has_out_fail(&edges, "a"));
+        assert!(has_out_fail(&edges, "c"));
     }
 
     #[test]

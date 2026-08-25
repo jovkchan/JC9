@@ -38,7 +38,7 @@ export const BLOCK_HELP: Record<string, BlockHelp> = {
     type: 'command',
     usage: '在本地执行 shell 命令（默认 PowerShell，可切 CMD / Bash / Python / Node）。工作目录由「工作区」块统一设置（链路 cwd），本块无需配置；「环境变量」设置子进程环境（与流程变量不同）；超时 0 = 不限时（大型编译不设限，需要时手动填秒数）。',
     when: '需要运行构建、脚本、测试、文件操作等任何本地命令时；是终端操作的核心积木。',
-    downstream: '流程 out → 任意带流程 in 的积木；可用 {{last.exitCode}} 接条件判断成败；金色「凭据 in」端口可接入凭据积木注入登录环境变量。',
+    downstream: '流程 out → 任意带流程 in 的积木；可用 {{last.exitCode}} 接条件判断成败；失败时可连红色失败分支（out-fail）走降级路径；金色「凭据 in」端口可接入凭据积木注入登录环境变量。',
     combos: [
       '工作区 → 命令：命令在工作区路径下执行',
       '命令 → 条件：判断 exitCode（== 0 成功）',
@@ -322,6 +322,56 @@ export const BLOCK_HELP: Record<string, BlockHelp> = {
       'Git 分支 → GitLab（创建 MR）',
     ],
   },
+  'read-file': {
+    type: 'read-file',
+    usage: '读取文本文件（UTF-8）内容到变量（可选），同时写入上一块输出 {{last.stdout}}。路径相对 = 工作区（由「工作区」块设置）。',
+    when: '需要把配置文件/脚本/产物清单内容拿进流程做解析、校验、或作为变量传给下游时（如读取 build.gradle / package.json）。',
+    downstream: '流程 out → 任意带流程 in 的积木；内容经变量/{{last.stdout}} 被下游引用；失败（文件不存在/非 UTF-8）走红色失败分支（out-fail，未连线则中止）。',
+    combos: [
+      '工作区 → 读取文件（build.gradle → FILE_CONTENT）→ 输出捕获（提取版本字段）',
+      '读取文件 → 运算（版本递增）→ 写入文件（改版本）',
+    ],
+  },
+  'write-file': {
+    type: 'write-file',
+    usage: '写文本文件（UTF-8 无 BOM），内容支持 {{变量}} 插值；可覆盖或追加。路径相对 = 工作区。',
+    when: '需要生成/修改配置、把变量内容落盘时（如把递增后的版本写回 build.gradle、生成 .env）。',
+    downstream: '流程 out → 任意带流程 in 的积木；失败（目录不存在/无权限）走失败分支。',
+    combos: [
+      '运算（版本+1）→ 写入文件（写回 build.gradle）→ 命令（assembleRelease）',
+      '输出捕获 → 写入文件（生成构建产物清单）',
+    ],
+  },
+  'hash-file': {
+    type: 'hash-file',
+    usage: '计算文件哈希（SHA-256 默认 / SHA-384 / SHA-512），结果写入变量与 {{last.stdout}}。路径相对 = 工作区。',
+    when: '需要 APK/安装包/配置文件指纹用于校验或上传升级系统（如 SHA-256 上传 publish）时，替代手写 Get-FileHash 命令。',
+    downstream: '流程 out → 任意带流程 in 的积木；哈希经变量/{{last.stdout}} 被下游引用（如通知）；失败（文件不存在）走失败分支。',
+    combos: [
+      '命令（assembleRelease）→ 文件哈希（app-release.apk → APK_SHA256）→ 通知（SHA-256: {{APK_SHA256}}）',
+      '读取文件 → 文件哈希（校验完整性）→ 条件',
+    ],
+  },
+  capture: {
+    type: 'capture',
+    usage: '按正则从输入文本（默认上一步输出 {{last.stdout}}）提取捕获组，写入多个变量。规则：每行「捕获组=变量名」，如 1=CODE / 2=NAME / 0=整段匹配；也支持命名组。',
+    when: '需要把命令/文件输出里的具体字段抽成变量（如从 build.gradle 分别提取 versionCode 与 versionName）时。',
+    downstream: '流程 out → 任意带流程 in 的积木；提取结果写入变量被 {{变量}} 引用；无匹配走失败分支。',
+    combos: [
+      '命令 / 读取文件 → 输出捕获（1=CODE 2=NAME）→ 运算（{{CODE}}+1）',
+      '命令 → 输出捕获（状态行）→ 条件（{{变量}} 判断）',
+    ],
+  },
+  expr: {
+    type: 'expr',
+    usage: '数值运算（+ - * / % 与括号，如 {{A}} + 1）、版本号递增（patch/minor/major +1，如 1.0.0 → 1.0.1）或文本替换（正则替换，配合写入文件生成新内容），结果写入变量与 {{last.stdout}}。',
+    when: '需要把变量做算术、对版本号自动递增（发版场景）、或对文本做正则替换（改配置文件版本号）时，替代把计算/替换塞进命令块。',
+    downstream: '流程 out → 任意带流程 in 的积木；结果经变量被下游引用；表达式非法/正则无效/版本号非数字走失败分支。',
+    combos: [
+      '输出捕获（1=CODE 2=NAME）→ 运算（{{CODE}}+1 → NEW_CODE）→ 运算（替换 build.gradle 版本）→ 写入文件',
+      '读取文件（版本）→ 运算（bump 版本 → NEW_NAME）→ 运算（文本替换）→ 写入文件',
+    ],
+  },
 }
 
 /** 规划中 / 缺失积木（对照设计文档 §4.1，随进度补建） */
@@ -334,13 +384,14 @@ export interface PlannedBlock {
 
 export const PLANNED_BLOCKS: PlannedBlock[] = [
   // 「外部触发（MCP）」已实现（F7 2026-08-14）；「调用工作流」已实现（F7 2026-08-14：call-automation 块，共享父 ctx + depth 防环）
-  { section: '平台', name: 'GitLab', note: '服务操作已建；可扩展 查制品/仓库管理 等更多动作', milestone: 'F5' },
+  // 优先级标注（2026-08-25 编排 release.ps1 验证）：P0=脚本拆解直接卡点；P1=复用/扩展价值高；P2=命令块可兜底
+  // 2026-08-25 已实现：文件·读取/写入文件、变量·运算(calc/bump)、变量·输出捕获（read-file/write-file/expr/capture 块）；错误处理部分落地（可失败块新增 out-fail 失败分支端口）
+  { section: '逻辑', name: '错误处理增强', note: 'P1：out-fail 已可走降级分支；可再提供「重试 N 次」等增强' },
+  { section: '结束', name: '失败结束', note: 'P1：流程异常终止（当前结束=成功），与错误处理配合' },
+  { section: '逻辑', name: '调用工作流参数', note: 'P1：子工作流入参映射；正式版/测试版分支高度重复，现靠共享变量手动传参，多变体（UAT/灰度）会爆炸式复制' },
+  { section: '环境', name: '路径解析', note: 'P1：解析 {{var}} / 相对路径；产物路径 artifacts/{{版本}}/ 等拼接' },
+  { section: '变量', name: '变量读取', note: 'P1：在任意位置引用变量（当前靠插值）' },
+  { section: '工具', name: '文件哈希', note: 'P2：SHA-256（release.ps1 输出 SHA-256 供升级系统；现命令块 Get-FileHash 可兜底）' },
+  { section: '平台', name: 'GitLab', note: 'F5：服务操作已建；可扩展 查制品/仓库管理 等更多动作', milestone: 'F5' },
   { section: '平台', name: 'Docker', note: '已建通用操作；可扩展 registry 登录（现由 Harbor 承担）' },
-  { section: '环境', name: '路径解析', note: '解析 {{var}} / 相对路径' },
-
-  { section: '逻辑', name: '错误处理', note: '捕获失败并走降级路径' },
-  { section: '变量', name: '变量读取', note: '在任意位置引用变量（当前靠插值）' },
-  { section: '变量', name: '运算', note: '数值/字符串运算后写回' },
-  { section: '变量', name: '输出捕获', note: '按正则从 stdout 捕获片段到变量' },
-  { section: '结束', name: '失败结束', note: '流程异常终止（当前结束=成功）' },
 ]

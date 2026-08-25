@@ -86,6 +86,36 @@ export function blockSummary(type: string, config: Record<string, unknown>): str
       if (vt && vt !== 'string') rows.push(`类型 ${vt}`)
       return rows
     }
+    case 'read-file': {
+      const rows = one(s(c.path))
+      if (s(c.varName)) rows.push(`→ ${s(c.varName)}`)
+      return rows
+    }
+    case 'write-file': {
+      const rows = one(s(c.path))
+      if (c.append === true) rows.push('追加')
+      return rows
+    }
+    case 'hash-file': {
+      const rows = one(s(c.path))
+      const a = s(c.algorithm)
+      if (a && a !== 'sha256') rows.push(a.toUpperCase())
+      if (s(c.varName)) rows.push(`→ ${s(c.varName)}`)
+      return rows
+    }
+    case 'capture': {
+      const rows = nonEmptyLines(s(c.pattern), 2)
+      rows.push(...nonEmptyLines(s(c.vars), 2).map((e) => `→ ${e}`))
+      return rows.slice(0, MAX_SUMMARY_LINES)
+    }
+    case 'expr': {
+      let rows: string[]
+      if (c.mode === 'bump') rows = one(`版本 ${s(c.version)} ${s(c.part) || 'patch'}+1`)
+      else if (c.mode === 'replace') rows = one(`${s(c.pattern)} → ${s(c.replacement)}`)
+      else rows = one(`= ${s(c.expr)}`)
+      if (s(c.varName)) rows.push(`→ ${s(c.varName)}`)
+      return rows
+    }
     case 'call-automation': {
       const id = s(c.automationId)
       const short = id.length > 16 ? `${id.slice(0, 16)}…` : id

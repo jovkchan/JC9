@@ -7,6 +7,10 @@ function flowIn(id = 'in'): Port {
 function flowOut(id = 'out'): Port {
   return { id, direction: 'out', color: '#8a58ff', dataType: 'flow' }
 }
+/** 失败分支端口（红）：块执行失败时走此端口（未连线则按 onFail 中止/继续） */
+function failOut(): Port {
+  return { id: 'out-fail', direction: 'out', color: '#ff4d4f', dataType: 'flow', multi: true }
+}
 /** 凭据端口（专属金色，dataType='credential'）：凭据块 out → 目标块 in */
 function credPort(dir: 'in' | 'out', id: string): Port {
   return { id, direction: dir, color: '#faad14', dataType: 'credential' }
@@ -63,7 +67,7 @@ export const BLOCK_DEFS: BlockDef[] = [
     label: '命令',
     color: '#8a58ff',
     inputs: [flowIn(), credPort('in', 'cred-in')],
-    outputs: [flowOut()],
+    outputs: [flowOut(), failOut()],
     fields: [
       { key: 'command', label: '命令', type: 'textarea', required: true, placeholder: '例如 npm run build', interpolatable: true },
       { key: 'shell', label: 'Shell', type: 'shell', default: 'powershell' },
@@ -563,6 +567,98 @@ export const BLOCK_DEFS: BlockDef[] = [
     fields: [
       { key: 'credentialId', label: '凭据 ID', type: 'text', required: true, placeholder: '由「配置凭据」写入' },
       { key: 'credentialName', label: '凭据名称', type: 'text', placeholder: '如 生产 GitLab' },
+    ],
+    compatRules: [],
+  },
+  // ── 文件 / 变量增强（2026-08-25 release.ps1 编排）──
+  {
+    type: 'read-file',
+    category: 'file',
+    label: '读取文件',
+    color: '#00b96b',
+    inputs: [flowIn()],
+    outputs: [flowOut(), failOut()],
+    // 读文本文件（UTF-8）到变量/输出；路径相对 = 工作区（release.ps1 读 build.gradle 场景）
+    fields: [
+      { key: 'path', label: '文件路径', type: 'text', required: true, placeholder: '相对路径 = 工作区，如 app\\build.gradle', interpolatable: true, picker: 'file' },
+      { key: 'varName', label: '输出变量', type: 'var', placeholder: '如 FILE_CONTENT，留空只写 stdout' },
+    ],
+    compatRules: [],
+  },
+  {
+    type: 'write-file',
+    category: 'file',
+    label: '写入文件',
+    color: '#00b96b',
+    inputs: [flowIn()],
+    outputs: [flowOut(), failOut()],
+    // 写文本文件（UTF-8 无 BOM）；content 支持 {{var}} 插值
+    fields: [
+      { key: 'path', label: '文件路径', type: 'text', required: true, placeholder: '相对路径 = 工作区', interpolatable: true, picker: 'file' },
+      { key: 'content', label: '内容', type: 'textarea', required: true, placeholder: '要写入的内容，可 {{变量}} 插值', interpolatable: true },
+      { key: 'append', label: '追加模式', type: 'switch', default: false, help: '开 = 追加到末尾；关 = 覆盖' },
+    ],
+    compatRules: [],
+  },
+  {
+    type: 'hash-file',
+    category: 'file',
+    label: '文件哈希',
+    color: '#00b96b',
+    inputs: [flowIn()],
+    outputs: [flowOut(), failOut()],
+    // 计算文件哈希（SHA-256/SHA-1），输出到变量 + {{last.stdout}}；替代手写 Get-FileHash
+    fields: [
+      { key: 'path', label: '文件路径', type: 'text', required: true, placeholder: '相对路径 = 工作区', interpolatable: true, picker: 'file' },
+      { key: 'algorithm', label: '算法', type: 'select', default: 'sha256', options: [
+        { label: 'SHA-256', value: 'sha256' },
+        { label: 'SHA-384', value: 'sha384' },
+        { label: 'SHA-512', value: 'sha512' },
+      ] },
+      { key: 'varName', label: '输出变量', type: 'var', placeholder: '如 APK_SHA256' },
+    ],
+    compatRules: [],
+  },
+  {
+    type: 'capture',
+    category: 'variable',
+    label: '输出捕获',
+    color: '#36cfc9',
+    inputs: [flowIn()],
+    outputs: [flowOut(), failOut()],
+    // 按正则从文本（默认上一步输出）提取捕获组写多个变量；无匹配走失败分支
+    fields: [
+      { key: 'source', label: '输入文本', type: 'text', default: '{{last.stdout}}', placeholder: '默认取上一步输出 {{last.stdout}}', interpolatable: true },
+      { key: 'pattern', label: '正则', type: 'textarea', required: true, placeholder: '含捕获组，如 versionCode\\s+(\\d+)', interpolatable: true },
+      { key: 'vars', label: '捕获组=变量名', type: 'env', required: true, placeholder: '一行一个：1=CODE / 2=NAME / 0=整段匹配 / 命名组=变量' },
+    ],
+    compatRules: [],
+  },
+  {
+    type: 'expr',
+    category: 'variable',
+    label: '运算',
+    color: '#36cfc9',
+    inputs: [flowIn()],
+    outputs: [flowOut(), failOut()],
+    // 数值运算（+ - * / % 括号）/ 版本号递增 / 文本替换；结果写变量 + stdout
+    fields: [
+      { key: 'mode', label: '方式', type: 'select', default: 'calc', options: [
+        { label: '数值运算', value: 'calc' },
+        { label: '版本号递增', value: 'bump' },
+        { label: '文本替换', value: 'replace' },
+      ] },
+      { key: 'expr', label: '表达式', type: 'text', placeholder: 'calc：如 {{oldCode}} + 1 / ({{A}}+{{B}})*2', interpolatable: true },
+      { key: 'version', label: '版本号', type: 'text', placeholder: 'bump：如 {{oldName}} 或 1.0.0', interpolatable: true },
+      { key: 'text', label: '输入文本', type: 'textarea', placeholder: 'replace：要处理的文本，可 {{变量}} 插值', interpolatable: true },
+      { key: 'pattern', label: '查找（正则）', type: 'text', placeholder: 'replace：正则，如 versionCode\\s+\\d+', interpolatable: true },
+      { key: 'replacement', label: '替换为', type: 'text', placeholder: 'replace：可 {{变量}}，如 versionCode {{NEW_CODE}}', interpolatable: true },
+      { key: 'part', label: '递增位', type: 'select', default: 'patch', options: [
+        { label: '补丁 patch', value: 'patch' },
+        { label: '次版本 minor', value: 'minor' },
+        { label: '主版本 major', value: 'major' },
+      ] },
+      { key: 'varName', label: '输出变量', type: 'var', placeholder: '如 NEW_CODE / NEW_NAME' },
     ],
     compatRules: [],
   },
