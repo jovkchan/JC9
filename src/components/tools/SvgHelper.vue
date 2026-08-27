@@ -3,6 +3,12 @@ import { ref, watch, computed } from 'vue'
 import ToolShell from '@/components/ui/ToolShell.vue'
 import JcButton from '@/components/ui/JcButton.vue'
 import JcTextarea from '@/components/ui/JcTextarea.vue'
+import JcInputNumber from '@/components/ui/JcInputNumber.vue'
+import JcInput from '@/components/ui/JcInput.vue'
+import JcSelect from '@/components/ui/JcSelect.vue'
+import { convertSvgToAndroidVector } from './composables/useSvgToAndroidVector'
+import { convertSvgToSfSymbols, type SfSymbolsResult } from './composables/useSvgToSfSymbols'
+import { convertToSvg } from './composables/useVectorXmlToSvg'
 
 const inputSvg = ref(`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 100 100" width="100" height="100">
   <!-- This is a sample comment to be removed -->
@@ -18,6 +24,45 @@ const inputSvg = ref(`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http:
     <path d="M 40.000 45.000 L 60.000 45.000 L 50.000 65.000 Z" fill="#1e3a8a" />
   </g>
 </svg>`)
+
+// 工具模式：SVG 优化 / SVG → Android Vector / SVG → SF Symbols / 反向转 SVG
+const toolMode = ref<'optimize' | 'android' | 'sf' | 'reverse'>('optimize')
+
+// SF Symbols 转换选项与结果
+const sfOptions = ref({ symbolName: 'MySymbol' })
+const sfResult = ref<SfSymbolsResult | null>(null)
+const sfError = ref('')
+
+// 反向转换（Android XML / SF SVG → SVG）
+const reverseOutput = ref('')
+const reverseWarnings = ref<string[]>([])
+const reverseError = ref('')
+const reverseKind = ref<'vector' | 'svg' | 'unknown'>('unknown')
+
+// PNG 导出选项
+const pngOptions = ref({
+  width: 512 as number | null,
+  height: 512 as number | null,
+  bg: 'transparent',
+  bgColor: '#ffffff',
+})
+
+const pngBgOptions = [
+  { label: '透明', value: 'transparent' },
+  { label: '白色', value: '#ffffff' },
+  { label: '黑色', value: '#000000' },
+  { label: '自定义', value: 'custom' },
+]
+
+// Android Vector 转换选项
+const vecOptions = ref({
+  widthDp: 24 as number | null,
+  heightDp: 24 as number | null,
+  precision: 2,
+})
+const vecOutput = ref('')
+const vecWarnings = ref<string[]>([])
+const vecError = ref('')
 
 const outputSvg = ref('')
 const errorMsg = ref('')
@@ -177,9 +222,166 @@ function runOptimize() {
   }
 }
 
-watch([inputSvg, options], () => {
-  runOptimize()
+// —— SVG → Android Vector ——
+function runVectorConvert() {
+  vecError.value = ''
+  vecWarnings.value = []
+  const res = convertSvgToAndroidVector(inputSvg.value, {
+    widthDp: vecOptions.value.widthDp ?? 24,
+    heightDp: vecOptions.value.heightDp ?? 24,
+    precision: vecOptions.value.precision,
+  })
+  vecOutput.value = res.xml
+  vecWarnings.value = res.warnings
+  if (res.error) vecError.value = res.error
+}
+
+function copyVecOutput() {
+  if (!vecOutput.value) return
+  navigator.clipboard.writeText(vecOutput.value)
+}
+
+function downloadVectorXml() {
+  if (!vecOutput.value) return
+  const blob = new Blob([vecOutput.value], { type: 'text/xml' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'vector_drawable.xml'
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+// —— SVG → SF Symbols ——
+function runSfConvert() {
+  sfError.value = ''
+  const res = convertSvgToSfSymbols(inputSvg.value, sfOptions.value.symbolName)
+  sfResult.value = res.error ? null : res
+  if (res.error) sfError.value = res.error
+}
+
+function copySfSvg() {
+  if (!sfResult.value) return
+  navigator.clipboard.writeText(sfResult.value.svg)
+}
+
+async function downloadSymbolset() {
+  const res = sfResult.value
+  if (!res || !res.svg) return
+  const JSZip = (await import('jszip')).default
+  const zip = new JSZip()
+  const folder = zip.folder(`${res.symbolName}.symbolset`)
+  if (folder) {
+    folder.file(res.svgFileName, res.svg)
+    folder.file('Contents.json', res.contentsJson)
+  }
+  const blob = await zip.generateAsync({ type: 'blob' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${res.symbolName}.symbolset.zip`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+// —— 反向转换（Android XML / SF SVG → SVG） ——
+function runReverseConvert() {
+  reverseError.value = ''
+  reverseWarnings.value = []
+  const res = convertToSvg(inputSvg.value)
+  reverseOutput.value = res.svg
+  reverseWarnings.value = res.warnings
+  reverseKind.value = res.kind
+  if (res.error) reverseError.value = res.error
+}
+
+function copyReverse() {
+  if (!reverseOutput.value) return
+  navigator.clipboard.writeText(reverseOutput.value)
+}
+
+function downloadReverseSvg() {
+  if (!reverseOutput.value) return
+  const blob = new Blob([reverseOutput.value], { type: 'image/svg+xml' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'converted.svg'
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+// —— 统一转换分派：按当前模式实时转换 ——
+watch([toolMode, inputSvg, options, vecOptions, sfOptions], () => {
+  if (toolMode.value === 'optimize') runOptimize()
+  else if (toolMode.value === 'android') runVectorConvert()
+  else if (toolMode.value === 'sf') runSfConvert()
+  else if (toolMode.value === 'reverse') runReverseConvert()
 }, { immediate: true, deep: true })
+
+// —— PNG 导出（自定义尺寸） ——
+const pngSourceSvg = computed(() => {
+  if (toolMode.value === 'optimize') return outputSvg.value || inputSvg.value
+  if (toolMode.value === 'reverse') return reverseOutput.value || inputSvg.value
+  return inputSvg.value
+})
+
+const pngSourceLabel = computed(() => {
+  if (toolMode.value === 'optimize') return '优化后 SVG'
+  if (toolMode.value === 'reverse') return reverseKind.value === 'vector' ? '转换出的 SVG' : '输入 SVG'
+  return '输入 SVG'
+})
+
+function doDownloadPng() {
+  const src = pngSourceSvg.value
+  if (!src) {
+    errorMsg.value = '没有可导出的 SVG 源码'
+    return
+  }
+  const w = Math.max(1, Math.min(4096, Math.round(pngOptions.value.width ?? 512)))
+  const h = Math.max(1, Math.min(4096, Math.round(pngOptions.value.height ?? 512)))
+  const bg = pngOptions.value.bg === 'custom' ? pngOptions.value.bgColor : pngOptions.value.bg
+
+  const svgBlob = new Blob([src], { type: 'image/svg+xml;charset=utf-8' })
+  const url = URL.createObjectURL(svgBlob)
+  const img = new Image()
+  img.onload = () => {
+    const canvas = document.createElement('canvas')
+    canvas.width = w
+    canvas.height = h
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    if (bg && bg !== 'transparent') {
+      ctx.fillStyle = bg
+      ctx.fillRect(0, 0, w, h)
+    }
+    ctx.drawImage(img, 0, 0, w, h)
+    canvas.toBlob((blob) => {
+      URL.revokeObjectURL(url)
+      if (!blob) return
+      const pngUrl = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = pngUrl
+      a.download = `icon_${w}x${h}.png`
+      a.click()
+      URL.revokeObjectURL(pngUrl)
+    }, 'image/png')
+  }
+  img.onerror = () => {
+    URL.revokeObjectURL(url)
+    errorMsg.value = 'PNG 导出失败：SVG 无法渲染（可能包含不支持的语法）'
+  }
+  img.src = url
+}
+
+const rightLabel = computed(() => {
+  switch (toolMode.value) {
+    case 'android': return '预览与导出（Vector）'
+    case 'sf': return '预览与导出（SF Symbols）'
+    case 'reverse': return '预览与导出（SVG）'
+    default: return '预览与导出'
+  }
+})
 
 function copyOutput() {
   if (!outputSvg.value) return
@@ -231,7 +433,14 @@ function formatSize(bytes: number): string {
   <ToolShell title="SVG 预览与优化工具" subtitle="粘贴 SVG 代码，实时清理冗余元素和属性并预览" split>
     <template #left-label>优化选项与输入</template>
     <template #left>
-      <div class="options-grid">
+      <div class="mode-switch">
+        <JcButton size="small" :type="toolMode === 'optimize' ? 'primary' : 'default'" @click="toolMode = 'optimize'">SVG 优化</JcButton>
+        <JcButton size="small" :type="toolMode === 'android' ? 'primary' : 'default'" @click="toolMode = 'android'">Android Vector</JcButton>
+        <JcButton size="small" :type="toolMode === 'sf' ? 'primary' : 'default'" @click="toolMode = 'sf'">SF Symbols</JcButton>
+        <JcButton size="small" :type="toolMode === 'reverse' ? 'primary' : 'default'" @click="toolMode = 'reverse'">反向转 SVG</JcButton>
+      </div>
+
+      <div v-if="toolMode === 'optimize'" class="options-grid">
         <label class="opt-label">
           <input type="checkbox" v-model="options.removeComments" />
           <span>移除注释 (&lt;!-- --&gt;)</span>
@@ -258,22 +467,58 @@ function formatSize(bytes: number): string {
         </div>
       </div>
 
+      <div v-else-if="toolMode === 'android'" class="vec-options">
+        <div class="vec-size-row">
+          <label class="vec-field">
+            <span>输出宽 (dp)</span>
+            <JcInputNumber v-model="vecOptions.widthDp" :min="1" :max="512" :step="1" size="small" suffix="dp" />
+          </label>
+          <label class="vec-field">
+            <span>输出高 (dp)</span>
+            <JcInputNumber v-model="vecOptions.heightDp" :min="1" :max="512" :step="1" size="small" suffix="dp" />
+          </label>
+        </div>
+        <div class="precision-slider-wrap">
+          <span class="p-text">pathData 小数精度: {{ vecOptions.precision }} 位</span>
+          <input type="range" v-model.number="vecOptions.precision" min="0" max="4" />
+        </div>
+        <div class="vec-hint">
+          将 <code>&lt;svg&gt;</code> 图标转换为 Android <code>&lt;vector&gt;</code> 可绘制 XML（可直接放入 <code>res/drawable</code>）。支持 path / rect / circle / ellipse / line / polyline / polygon 及分组 transform。
+        </div>
+      </div>
+
+      <div v-else-if="toolMode === 'sf'" class="vec-options">
+        <label class="vec-field">
+          <span>Symbol 名称（symbolset 目录名）</span>
+          <JcInput v-model="sfOptions.symbolName" size="small" placeholder="如 MySymbol / gear" />
+        </label>
+        <div class="vec-hint">
+          转换为 Apple SF Symbols 模板：归一化到 <code>24×24</code> 网格、统一黑色填充（不含描边）。输出 <code>.symbolset</code> 结构（<code>Contents.json</code> + SVG），可打包下载后放入 <code>Assets.xcassets</code>。
+        </div>
+      </div>
+
+      <div v-else class="vec-options">
+        <div class="vec-hint">
+          输入 Android <code>&lt;vector&gt;</code> XML 或 SF Symbols 的 <code>&lt;svg&gt;</code>，自动检测并转换为标准 <code>&lt;svg&gt;</code>。支持 path / group 及 fill / stroke 系列属性。
+        </div>
+      </div>
+
       <div class="editor-wrap">
         <div class="editor-header">
-          <span>输入原始 SVG 源码:</span>
+          <span>输入{{ toolMode === 'reverse' ? ' SVG / Android XML' : '原始 SVG 源码' }}:</span>
           <div class="editor-acts-left">
             <JcButton size="small" @click="fileInput?.click()">打开本地文件</JcButton>
             <JcButton danger size="small" @click="clearAll">清空</JcButton>
           </div>
         </div>
-        <input type="file" ref="fileInput" accept=".svg" style="display: none" @change="handleFileSelect" />
-        <JcTextarea v-model="inputSvg" mono beam glow :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="在这里粘贴 &lt;svg&gt;...&lt;/svg&gt; 代码..." />
+        <input type="file" ref="fileInput" accept=".svg,.xml" style="display: none" @change="handleFileSelect" />
+        <JcTextarea v-model="inputSvg" mono beam glow :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill" placeholder="在这里粘贴 &lt;svg&gt; / &lt;vector&gt; 代码..." />
       </div>
     </template>
 
-    <template #right-label>预览与导出</template>
+    <template #right-label>{{ rightLabel }}</template>
     <template #right>
-      <div class="stats-panel card" v-if="outputSvg">
+      <div class="stats-panel card" v-if="toolMode === 'optimize' && outputSvg">
         <div class="stat-item">
           <span class="label">原始体积:</span>
           <span class="value">{{ formatSize(inputSize) }}</span>
@@ -290,7 +535,7 @@ function formatSize(bytes: number): string {
 
       <div class="preview-panel card">
         <div class="preview-header">
-          <div class="preview-tabs">
+          <div class="preview-tabs" v-if="toolMode === 'optimize'">
             <JcButton size="small" :type="previewMode === 'after' ? 'primary' : 'default'" @click="previewMode = 'after'">优化后预览</JcButton>
             <JcButton size="small" :type="previewMode === 'before' ? 'primary' : 'default'" @click="previewMode = 'before'">优化前预览</JcButton>
           </div>
@@ -303,14 +548,17 @@ function formatSize(bytes: number): string {
 
         <div class="checkerboard-bg">
           <div class="preview-render-area" :style="{ transform: `scale(${previewScale})` }">
-            <div v-if="previewMode === 'after' && outputSvg" v-html="outputSvg"></div>
-            <div v-else-if="previewMode === 'before' && inputSvg" v-html="inputSvg"></div>
-            <div v-else class="preview-empty">等待输入有效的 SVG</div>
+            <div v-if="toolMode === 'optimize' && previewMode === 'after' && outputSvg" v-html="outputSvg"></div>
+            <div v-else-if="toolMode === 'optimize' && previewMode === 'before' && inputSvg" v-html="inputSvg"></div>
+            <div v-else-if="toolMode === 'android' && inputSvg" v-html="inputSvg"></div>
+            <div v-else-if="toolMode === 'sf' && inputSvg" v-html="inputSvg"></div>
+            <div v-else-if="toolMode === 'reverse' && reverseOutput" v-html="reverseOutput"></div>
+            <div v-else class="preview-empty">等待输入有效的 SVG / XML</div>
           </div>
         </div>
       </div>
 
-      <div class="output-panel card" v-if="outputSvg">
+      <div class="output-panel card" v-if="toolMode === 'optimize' && outputSvg">
         <div class="output-header">
           <span>优化后的 SVG 源码:</span>
           <div class="output-acts">
@@ -319,6 +567,106 @@ function formatSize(bytes: number): string {
           </div>
         </div>
         <JcTextarea mono readonly beam glow :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill code-output" :model-value="outputSvg" />
+      </div>
+
+      <div class="output-panel card" v-if="toolMode === 'android' && vecOutput">
+        <div class="output-header">
+          <span>生成的 Android Vector Drawable XML:</span>
+          <div class="output-acts">
+            <JcButton type="primary" size="small" @click="copyVecOutput">复制 XML</JcButton>
+            <JcButton size="small" @click="downloadVectorXml">下载 .xml</JcButton>
+          </div>
+        </div>
+        <JcTextarea mono readonly beam glow :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill code-output" :model-value="vecOutput" />
+      </div>
+
+      <div v-if="toolMode === 'sf' && sfResult" class="output-panel card">
+        <div class="output-header">
+          <span>{{ sfResult.symbolName }}.symbolset 结构:</span>
+          <div class="output-acts">
+            <JcButton type="primary" size="small" @click="downloadSymbolset">下载 .symbolset.zip</JcButton>
+            <JcButton size="small" @click="copySfSvg">复制 SVG</JcButton>
+          </div>
+        </div>
+        <div class="sf-file">
+          <div class="sf-file-label">Contents.json</div>
+          <JcTextarea mono readonly :spellcheck="false" class="jc-fill sf-code" :model-value="sfResult.contentsJson" />
+        </div>
+        <div class="sf-file">
+          <div class="sf-file-label">{{ sfResult.svgFileName }}（24×24 黑色模板）</div>
+          <JcTextarea mono readonly beam glow :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill sf-code" :model-value="sfResult.svg" />
+        </div>
+      </div>
+
+      <div class="output-panel card" v-if="toolMode === 'reverse' && reverseOutput">
+        <div class="output-header">
+          <span>转换出的标准 SVG:</span>
+          <div class="output-acts">
+            <JcButton type="primary" size="small" @click="copyReverse">复制 SVG</JcButton>
+            <JcButton size="small" @click="downloadReverseSvg">下载 .svg</JcButton>
+          </div>
+        </div>
+        <JcTextarea mono readonly beam glow :beam-size-ratio="0.6" :spellcheck="false" class="jc-fill code-output" :model-value="reverseOutput" />
+      </div>
+
+      <!-- PNG 导出：所有模式通用 -->
+      <div class="output-panel card png-panel">
+        <div class="output-header">
+          <span>PNG 导出（自定义尺寸）</span>
+        </div>
+        <div class="vec-size-row png-size-row">
+          <label class="vec-field">
+            <span>宽度 (px)</span>
+            <JcInputNumber v-model="pngOptions.width" :min="1" :max="4096" :step="1" size="small" suffix="px" />
+          </label>
+          <label class="vec-field">
+            <span>高度 (px)</span>
+            <JcInputNumber v-model="pngOptions.height" :min="1" :max="4096" :step="1" size="small" suffix="px" />
+          </label>
+        </div>
+        <div class="vec-size-row png-size-row">
+          <label class="vec-field">
+            <span>背景</span>
+            <JcSelect v-model="pngOptions.bg" :options="pngBgOptions" size="small" style="width: 100%" />
+          </label>
+          <label v-if="pngOptions.bg === 'custom'" class="vec-field">
+            <span>自定义背景色</span>
+            <div class="png-color-wrap"><input type="color" v-model="pngOptions.bgColor" /></div>
+          </label>
+        </div>
+        <div class="png-acts">
+          <JcButton type="primary" size="small" :disabled="!pngSourceSvg" @click="doDownloadPng">下载 PNG</JcButton>
+          <span class="png-note">来源：{{ pngSourceLabel }}{{ pngSourceSvg ? '' : '（无可导出 SVG）' }}</span>
+        </div>
+      </div>
+
+      <div v-if="toolMode === 'android' && vecWarnings.length" class="warn-panel card">
+        <span class="warn-title">转换提示</span>
+        <ul class="warn-list">
+          <li v-for="(w, i) in vecWarnings" :key="i">{{ w }}</li>
+        </ul>
+      </div>
+
+      <div v-if="toolMode === 'reverse' && reverseWarnings.length" class="warn-panel card">
+        <span class="warn-title">转换提示</span>
+        <ul class="warn-list">
+          <li v-for="(w, i) in reverseWarnings" :key="i">{{ w }}</li>
+        </ul>
+      </div>
+
+      <div v-if="toolMode === 'android' && vecError" class="error-panel card">
+        <span class="err-title">转换出错:</span>
+        <span class="err-desc">{{ vecError }}</span>
+      </div>
+
+      <div v-if="toolMode === 'sf' && sfError" class="error-panel card">
+        <span class="err-title">转换出错:</span>
+        <span class="err-desc">{{ sfError }}</span>
+      </div>
+
+      <div v-if="toolMode === 'reverse' && reverseError" class="error-panel card">
+        <span class="err-title">转换出错:</span>
+        <span class="err-desc">{{ reverseError }}</span>
       </div>
 
       <div v-if="errorMsg" class="error-panel card">
@@ -350,6 +698,11 @@ function formatSize(bytes: number): string {
 }
 
 // 左栏选项
+.mode-switch {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
 .options-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -358,6 +711,45 @@ function formatSize(bytes: number): string {
   padding: 12px;
   border-radius: 4px;
   border: 1px solid var(--jc-border-strong);
+}
+
+// Android Vector 选项
+.vec-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--jc-bg-input);
+  padding: 12px;
+  border-radius: 4px;
+  border: 1px solid var(--jc-border-strong);
+}
+.vec-size-row {
+  display: flex;
+  gap: 12px;
+}
+.vec-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  span {
+    font-size: 10px;
+    color: var(--jc-text-secondary);
+  }
+}
+.vec-hint {
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--jc-text-secondary);
+  border-top: 1px dashed var(--jc-border-default);
+  padding-top: 8px;
+  code {
+    color: var(--jc-text-primary);
+    background: var(--jc-bg-hover);
+    padding: 0 3px;
+    border-radius: 3px;
+    font-size: 10px;
+  }
 }
 .opt-label {
   display: flex;
@@ -552,5 +944,74 @@ function formatSize(bytes: number): string {
   .err-title {
     font-weight: bold;
   }
+}
+
+// 转换提示（警告）
+.warn-panel {
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.25);
+  color: var(--jc-text-primary);
+  font-size: 11px;
+  padding: 10px 14px;
+  gap: 6px;
+  .warn-title {
+    font-weight: bold;
+    color: var(--jc-color-warning, #f5a623);
+  }
+  .warn-list {
+    margin: 0;
+    padding-left: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    color: var(--jc-text-secondary);
+  }
+}
+
+// SF Symbols 输出
+.sf-file {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.sf-file-label {
+  font-size: 10px;
+  color: var(--jc-text-secondary);
+  font-family: 'Cascadia Code', Consolas, monospace;
+}
+.sf-code {
+  max-height: 160px;
+}
+
+// PNG 导出面板
+.png-panel {
+  gap: 10px;
+}
+.png-size-row {
+  gap: 10px;
+}
+.png-color-wrap {
+  display: flex;
+  align-items: center;
+  input[type="color"] {
+    width: 100%;
+    height: 24px;
+    padding: 0;
+    border: 1px solid var(--jc-border-strong);
+    border-radius: 4px;
+    background: transparent;
+    cursor: pointer;
+  }
+}
+.png-acts {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-top: 1px dashed var(--jc-border-default);
+  padding-top: 8px;
+}
+.png-note {
+  font-size: 10px;
+  color: var(--jc-text-secondary);
 }
 </style>

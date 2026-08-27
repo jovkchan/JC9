@@ -2085,6 +2085,57 @@ pub fn walk(
                 }
             }
         }
+        "open-dir" => {
+            let raw_path = interpolate(get_str(&config, "path"), ctx);
+            if raw_path.is_empty() {
+                return Err(format!("打开目录块 {}：缺少路径", node_id));
+            }
+            let p = resolve_path(&ctx.cwd, &raw_path);
+            if !p.is_dir() {
+                let msg = format!("目录不存在: {}", p.display());
+                emit("automation-event", &json!({
+                    "type": "step_fail", "runId": run_id, "blockId": node_id, "name": node_label,
+                    "exitCode": -1, "stdoutTail": msg, "step": ctx.step, "total": total, "ts": now_ts()
+                }));
+                log_step(run_id, emit, steps, node_id, name, &node_label, ctx.step, "fail", started_at, None, &msg, &msg, &ctx.cwd, &auth, None, None);
+                if has_out_fail(edges, node_id) {
+                    branch = Some("out-fail".to_string());
+                } else {
+                    return Err(msg);
+                }
+            } else {
+                #[cfg(target_os = "windows")]
+                let res = StdCommand::new("explorer").arg(&p).spawn();
+                #[cfg(target_os = "macos")]
+                let res = StdCommand::new("open").arg(&p).spawn();
+                #[cfg(target_os = "linux")]
+                let res = StdCommand::new("xdg-open").arg(&p).spawn();
+                match res {
+                    Ok(_) => {
+                        let detail = format!("打开目录 {}", p.display());
+                        ctx.last = Some(LastResult { exit_code: 0, stdout: detail.clone(), stderr: String::new() });
+                        emit("automation-event", &json!({
+                            "type": "step_done", "runId": run_id, "blockId": node_id, "name": node_label,
+                            "exitCode": 0, "vars": ctx.vars, "step": ctx.step, "total": total, "ts": now_ts()
+                        }));
+                        log_step(run_id, emit, steps, node_id, name, &node_label, ctx.step, "ok", started_at, Some(0), &detail, &detail, &ctx.cwd, &auth, None, None);
+                    }
+                    Err(e) => {
+                        let msg = format!("打开目录 {} 失败: {}", p.display(), e);
+                        emit("automation-event", &json!({
+                            "type": "step_fail", "runId": run_id, "blockId": node_id, "name": node_label,
+                            "exitCode": -1, "stdoutTail": msg, "step": ctx.step, "total": total, "ts": now_ts()
+                        }));
+                        log_step(run_id, emit, steps, node_id, name, &node_label, ctx.step, "fail", started_at, None, &msg, &msg, &ctx.cwd, &auth, None, None);
+                        if has_out_fail(edges, node_id) {
+                            branch = Some("out-fail".to_string());
+                        } else {
+                            return Err(msg);
+                        }
+                    }
+                }
+            }
+        }
         "capture" => {
             let source = interpolate(get_str(&config, "source"), ctx);
             let pattern = interpolate(get_str(&config, "pattern"), ctx);

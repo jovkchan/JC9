@@ -43,18 +43,35 @@ function onKd(e:KeyboardEvent){
   else if(e.key==='ArrowDown'){e.preventDefault();if(hi<history.length-1){hi++;input.value=history[hi]}else{hi=history.length;input.value=''}}
 }
 
+// ── 明暗主题适配：读取当前 CSS 变量作为 xterm 主题，随 data-theme 实时切换 ──
+function readTermTheme() {
+  const cs = getComputedStyle(document.documentElement)
+  const pick = (name: string, fallback: string) => cs.getPropertyValue(name).trim() || fallback
+  const bg = pick('--jc-term-bg', '#1e1e1e')
+  return {
+    background: bg,
+    foreground: pick('--jc-term-fg', '#ccc'),
+    cursor: pick('--jc-term-cursor', '#ccc'),
+    cursorAccent: bg,
+    selectionBackground: pick('--jc-term-selection', '#264f78'),
+  }
+}
+let themeObs: MutationObserver | null = null
+function applyTermTheme() {
+  if (!term) return
+  term.options.theme = readTermTheme()
+  term.refresh(0, term.rows - 1)
+}
+
 onMounted(async()=>{
   if(!container.value)return
-  const cs = getComputedStyle(document.documentElement)
-  term=new Terminal({cursorBlink:true,convertEol:true,fontSize:13,disableStdin:false,rightClickSelectsWord:false,fontFamily:"'Microsoft YaHei Mono','Cascadia Code','Consolas',monospace",theme:{
-    background: cs.getPropertyValue('--jc-term-bg').trim() || '#1e1e1e',
-    foreground: cs.getPropertyValue('--jc-term-fg').trim() || '#ccc',
-    cursor: cs.getPropertyValue('--jc-color-accent').trim() || '#8a58ff',
-    selectionBackground: cs.getPropertyValue('--jc-term-selection').trim() || '#264f78',
-  }})
+  term=new Terminal({cursorBlink:true,convertEol:true,fontSize:13,disableStdin:false,rightClickSelectsWord:false,fontFamily:"'Microsoft YaHei Mono','Cascadia Code','Consolas',monospace",theme:readTermTheme()})
   fit=new FitAddon();term.loadAddon(fit);term.open(container.value)
   if(props.active)doFit()
   const buf=store.getOutput(props.processId);if(buf.length>0){term.write(new Uint8Array(buf));term.scrollToBottom()}
+  // 监听明暗主题切换（html data-theme），实时更新 xterm 主题（与 PTY 无关，独立优先建立）
+  themeObs=new MutationObserver((muts)=>{if(muts.some((m)=>m.attributeName==='data-theme'))applyTermTheme()})
+  themeObs.observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']})
   ul=await listen<{processId:string;data:number[]}>('pty-output',e=>{if(e.payload.processId!==props.processId)return;if(e.payload.data.length>0){term?.write(new Uint8Array(e.payload.data));term?.scrollToBottom()}})
   ro=new ResizeObserver(()=>doFit());ro.observe(container.value)
   // Direct keyboard -> PTY
@@ -71,7 +88,7 @@ onMounted(async()=>{
 watch(()=>props.active,v=>{if(v){doFit();setTimeout(()=>{term?.focus()},100)}})
 watch(()=>store.clearTermSignal,()=>{term?.scrollToBottom();term?.write('\u001b[2J\u001b[3J\u001b[H');term?.scrollToBottom()})
 watch(()=>store.pendingInput,v=>{if(v){input.value=v;store.pendingInput='';nextTick(()=>inputRef.value?.focus())}})
-onUnmounted(()=>{ul?.();ro?.disconnect();term?.dispose();})
+onUnmounted(()=>{ul?.();ro?.disconnect();themeObs?.disconnect();term?.dispose();})
 </script>
 
 <template>

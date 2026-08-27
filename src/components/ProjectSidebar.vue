@@ -221,7 +221,17 @@ function ctxDelCmd() {
   closeCmdCtx()
 }
 
-const allTools = [
+/** 工具定义：category 用于分组展示，keywords 用于增强搜索命中 */
+interface ToolDef {
+  type: string
+  name: string
+  desc: string
+  category: 'code' | 'network' | 'system'
+  icon: string
+  keywords?: string
+}
+
+const allTools: ToolDef[] = [
   { type: 'json', name: 'JSON 格式化', desc: 'JSON 美化/压缩与校验', category: 'code', icon: 'json' },
   { type: 'regex', name: '正则测试器', desc: '正则表达式实时高亮测试', category: 'code', icon: 'regex' },
   { type: 'base64', name: 'Base64 转换', desc: 'Base64 字符串编码解码', category: 'code', icon: 'base64' },
@@ -250,7 +260,7 @@ const allTools = [
   { type: 'aes-des', name: '对称加解密 (AES/DES)', desc: 'AES/DES 在线加解密与编码转换', category: 'code', icon: 'aes' },
   { type: 'rsa', name: '非对称加密 (RSA)', desc: 'RSA 密钥对生成、加解密与签名验签', category: 'code', icon: 'rsa' },
   { type: 'css', name: 'CSS 单位换算', desc: 'PX、REM、EM、VW、VH 实时联动转换', category: 'code', icon: 'color' },
-  { type: 'svg', name: 'SVG 预览与优化', desc: 'SVG 实时图形渲染预览与源码精简压缩', category: 'code', icon: 'color' },
+  { type: 'svg', name: 'SVG 预览与优化', desc: 'SVG 实时图形渲染预览与源码精简压缩', category: 'code', icon: 'color', keywords: 'android vector xml 矢量图标 转换' },
   { type: 'ssh', name: 'SSH 密钥生成', desc: '生成安全多算法 SSH 密钥对', category: 'system', icon: 'key' },
   { type: 'ssl', name: 'SSL 证书生成', desc: '生成开发测试用自签名 SSL 证书对', category: 'system', icon: 'cert' },
   { type: 'icon-generator', name: '图标生成器', desc: '一键生成多平台/尺寸 ICO/PNG/ICNS 图标包', category: 'code', icon: 'image' }
@@ -261,7 +271,11 @@ const toolSearchQuery = ref('')
 const filteredTools = computed(() => {
   const q = toolSearchQuery.value.trim().toLowerCase()
   if (!q) return allTools
-  return allTools.filter(t => t.name.includes(q) || t.desc.includes(q))
+  return allTools.filter(t =>
+    t.name.toLowerCase().includes(q) ||
+    t.desc.toLowerCase().includes(q) ||
+    (t.keywords && t.keywords.toLowerCase().includes(q))
+  )
 })
 
 const categorizedTools = computed(() => {

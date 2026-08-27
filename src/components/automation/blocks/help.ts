@@ -352,6 +352,16 @@ export const BLOCK_HELP: Record<string, BlockHelp> = {
       '读取文件 → 文件哈希（校验完整性）→ 条件',
     ],
   },
+  'open-dir': {
+    type: 'open-dir',
+    usage: '用系统文件管理器打开一个目录（Windows 资源管理器 / macOS Finder / Linux 默认文件管理器）。路径相对 = 工作区，可 {{变量}} 插值。',
+    when: '构建/编译完成后需要打开产物目录查看结果（如打开 APK 所在目录、打开 dist 目录）时。',
+    downstream: '流程 out → 任意带流程 in 的积木（通常接结束）；失败（目录不存在/无法打开）走失败分支。',
+    combos: [
+      '命令（assembleRelease）→ 文件哈希 → 通知 → 打开目录（APK 目录）→ 结束',
+      '命令（构建完成）→ 打开目录（dist）→ 结束',
+    ],
+  },
   capture: {
     type: 'capture',
     usage: '按正则从输入文本（默认上一步输出 {{last.stdout}}）提取捕获组，写入多个变量。规则：每行「捕获组=变量名」，如 1=CODE / 2=NAME / 0=整段匹配；也支持命名组。',

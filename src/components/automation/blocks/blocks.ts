@@ -620,6 +620,19 @@ export const BLOCK_DEFS: BlockDef[] = [
     compatRules: [],
   },
   {
+    type: 'open-dir',
+    category: 'file',
+    label: '打开目录',
+    color: '#00b96b',
+    inputs: [flowIn()],
+    outputs: [flowOut(), failOut()],
+    // 用系统文件管理器打开目录（explorer/open/xdg-open）；编译完成后打开产物目录
+    fields: [
+      { key: 'path', label: '目录路径', type: 'text', required: true, placeholder: '相对路径 = 工作区，如 app\\build\\outputs\\apk\\release', interpolatable: true, picker: 'dir' },
+    ],
+    compatRules: [],
+  },
+  {
     type: 'capture',
     category: 'variable',
     label: '输出捕获',

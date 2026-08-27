@@ -103,6 +103,8 @@ export function blockSummary(type: string, config: Record<string, unknown>): str
       if (s(c.varName)) rows.push(`→ ${s(c.varName)}`)
       return rows
     }
+    case 'open-dir':
+      return one(s(c.path))
     case 'capture': {
       const rows = nonEmptyLines(s(c.pattern), 2)
       rows.push(...nonEmptyLines(s(c.vars), 2).map((e) => `→ ${e}`))
