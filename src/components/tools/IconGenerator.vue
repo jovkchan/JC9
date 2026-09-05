@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { ref, reactive, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, reactive, watch, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import JSZip from 'jszip'
 import { invoke } from '@tauri-apps/api/core'
+import { convertSvgToAndroidVector } from './composables/useSvgToAndroidVector'
 import { save } from '@tauri-apps/plugin-dialog'
 import ToolShell from '@/components/ui/ToolShell.vue'
 import JcButton from '@/components/ui/JcButton.vue'
 import JcSelect from '@/components/ui/JcSelect.vue'
 import JcInputNumber from '@/components/ui/JcInputNumber.vue'
+import JcSegmented from '@/components/ui/JcSegmented.vue'
 
 const customFormatOptions = [
   { label: 'PNG 格式 (.png)', value: 'png' },
@@ -49,6 +51,17 @@ const imgMeta = reactive({
   mime: '',
   src: '',
 })
+
+// SVG 源文本（上传 SVG 时保留原始文本，用于矢量优先导出）
+const svgSource = ref('')
+const isSvgSource = computed(() => !!svgSource.value.trim())
+
+// 左栏视图切换 Tabs（上传与画布 / 标准预览）
+const leftTabOptions = [
+  { label: '上传与画布', value: 'canvas' },
+  { label: '标准预览', value: 'preview' },
+]
+const leftTab = ref<'canvas' | 'preview'>('canvas')
 
 // 各平台模板勾选状态
 const platforms = reactive({
@@ -97,6 +110,16 @@ function handleFile(file: File) {
   imgMeta.size = file.size
   imgMeta.mime = file.type || 'image/svg+xml'
 
+  const isSvg = file.type === 'image/svg+xml' || file.name.toLowerCase().endsWith('.svg')
+  if (isSvg) {
+    // SVG：另读一份文本源码，供矢量优先导出（VectorDrawable / Adaptive 矢量前景）
+    const textReader = new FileReader()
+    textReader.onload = (e) => { svgSource.value = e.target?.result as string }
+    textReader.readAsText(file)
+  } else {
+    svgSource.value = ''
+  }
+
   const reader = new FileReader()
   reader.onload = (e) => {
     const src = e.target?.result as string
@@ -112,6 +135,9 @@ function handleFile(file: File) {
       await nextTick()
       // 初始居中并适应裁剪区
       resetCropState()
+      // Android 12+ / iOS 预览（canvas 已挂载）
+      drawAndroid12Previews()
+      drawIosPreviews()
     }
     img.src = src
   }
@@ -138,6 +164,19 @@ function resetAdjustments() {
   options.saturate = 100
   options.brightness = 100
   options.contrast = 100
+}
+
+function clearAll() {
+  uploadedImage.value = null
+  uploadedFile.value = null
+  imgMeta.name = ''
+  imgMeta.width = 0
+  imgMeta.height = 0
+  imgMeta.size = 0
+  imgMeta.mime = ''
+  imgMeta.src = ''
+  svgSource.value = ''
+  resetAdjustments()
 }
 
 function onFileSelect(e: Event) {
@@ -395,9 +434,213 @@ function drawRoundRectPolyfill(ctx: CanvasRenderingContext2D, x: number, y: numb
   ctx.closePath()
 }
 
+// ================= Android 12+ 标准预览 =================
+const PREVIEW_CELL = 72
+const themedColorOptions = [
+  { label: '靛蓝', value: '#5b5bd6' },
+  { label: '翠绿', value: '#1a7f4b' },
+  { label: '琥珀', value: '#c98a00' },
+  { label: '玫红', value: '#c23a6b' },
+]
+const themedColor = ref(themedColorOptions[0].value)
+
+const a12Circle = ref<HTMLCanvasElement | null>(null)
+const a12Rounded = ref<HTMLCanvasElement | null>(null)
+const a12Square = ref<HTMLCanvasElement | null>(null)
+const a12Themed = ref<HTMLCanvasElement | null>(null)
+const a12Splash = ref<HTMLCanvasElement | null>(null)
+const a12Sizes = ref<HTMLCanvasElement | null>(null)
+
+function drawAndroid12Previews() {
+  if (!uploadedImage.value) return
+  const base = getBaseTransparentCanvas()
+  const size = PREVIEW_CELL
+
+  // 三种自适应蒙版形状
+  const drawMask = (canvas: HTMLCanvasElement | null, mask: 'circle' | 'rounded' | 'square') => {
+    if (!canvas) return
+    canvas.width = size
+    canvas.height = size
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.clearRect(0, 0, size, size)
+    ctx.fillStyle = options.isTransparent ? '#2a2a32' : options.bgColor
+    ctx.save()
+    if (mask === 'circle') {
+      ctx.beginPath(); ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2); ctx.clip()
+    } else if (mask === 'rounded') {
+      ctx.beginPath(); ctx.roundRect ? ctx.roundRect(0, 0, size, size, size * 0.22) : drawRoundRectPolyfill(ctx, 0, 0, size, size, size * 0.22); ctx.clip()
+    } else {
+      ctx.rect(0, 0, size, size)
+    }
+    const resized = getResizedCanvas(base, size, size)
+    ctx.drawImage(resized, 0, 0, size, size)
+    ctx.restore()
+    // 蒙版描边
+    ctx.strokeStyle = 'rgba(255,255,255,0.14)'
+    ctx.lineWidth = 1
+    if (mask === 'circle') { ctx.beginPath(); ctx.arc(size / 2, size / 2, size / 2 - 0.5, 0, Math.PI * 2); ctx.stroke() }
+    else if (mask === 'rounded') { ctx.beginPath(); ctx.roundRect ? ctx.roundRect(0.5, 0.5, size - 1, size - 1, size * 0.22) : drawRoundRectPolyfill(ctx, 0.5, 0.5, size - 1, size - 1, size * 0.22); ctx.stroke() }
+    else { ctx.strokeRect(0.5, 0.5, size - 1, size - 1) }
+  }
+  drawMask(a12Circle.value, 'circle')
+  drawMask(a12Rounded.value, 'rounded')
+  drawMask(a12Square.value, 'square')
+
+  // 主题图标（Material You）：深色面板 + 图形染主题色
+  if (a12Themed.value) {
+    const c = a12Themed.value
+    c.width = size; c.height = size
+    const ctx = c.getContext('2d')
+    if (ctx) {
+      ctx.clearRect(0, 0, size, size)
+      ctx.fillStyle = '#26262e'
+      ctx.beginPath(); ctx.roundRect ? ctx.roundRect(0, 0, size, size, size * 0.22) : drawRoundRectPolyfill(ctx, 0, 0, size, size, size * 0.22); ctx.fill()
+      const mono = document.createElement('canvas')
+      mono.width = size; mono.height = size
+      const mctx = mono.getContext('2d')!
+      const resized = getResizedCanvas(base, Math.round(size * 0.66), Math.round(size * 0.66))
+      const ox = (size - Math.round(size * 0.66)) / 2
+      const oy = ox
+      mctx.drawImage(resized, ox, oy)
+      mctx.globalCompositeOperation = 'source-in'
+      mctx.fillStyle = themedColor.value
+      mctx.fillRect(0, 0, size, size)
+      ctx.drawImage(mono, 0, 0)
+    }
+  }
+
+  // 启动屏（Splash Screen）：背景色 + 居中 66% 图标
+  if (a12Splash.value) {
+    const c = a12Splash.value
+    c.width = size; c.height = size
+    const ctx = c.getContext('2d')
+    if (ctx) {
+      ctx.clearRect(0, 0, size, size)
+      ctx.fillStyle = options.isTransparent ? themedColor.value : options.bgColor
+      ctx.fillRect(0, 0, size, size)
+      const resized = getResizedCanvas(base, Math.round(size * 0.66), Math.round(size * 0.66))
+      const ox = (size - Math.round(size * 0.66)) / 2
+      ctx.drawImage(resized, ox, ox)
+    }
+  }
+
+  // 多尺寸对比（mdpi 48 / xhdpi 96 / xxxhdpi 192 视觉比例）
+  if (a12Sizes.value) {
+    const c = a12Sizes.value
+    c.width = 96; c.height = size
+    const ctx = c.getContext('2d')
+    if (ctx) {
+      ctx.clearRect(0, 0, c.width, c.height)
+      const cells = [
+        { d: 20, x: 15 },
+        { d: 30, x: 46 },
+        { d: 42, x: 79 },
+      ]
+      const y = size / 2
+      for (const cell of cells) {
+        ctx.save()
+        ctx.beginPath()
+        ctx.arc(cell.x, y, cell.d / 2, 0, Math.PI * 2)
+        ctx.clip()
+        ctx.fillStyle = options.isTransparent ? '#2a2a32' : options.bgColor
+        ctx.fillRect(cell.x - cell.d / 2, y - cell.d / 2, cell.d, cell.d)
+        const r = getResizedCanvas(base, cell.d, cell.d)
+        ctx.drawImage(r, cell.x - cell.d / 2, y - cell.d / 2, cell.d, cell.d)
+        ctx.restore()
+      }
+    }
+  }
+}
+
+// ================= iOS / macOS 预览 =================
+const iosMain = ref<HTMLCanvasElement | null>(null)
+const iosSizes = ref<HTMLCanvasElement | null>(null)
+const iosHome = ref<HTMLCanvasElement | null>(null)
+
+function drawIosPreviews() {
+  if (!uploadedImage.value) return
+  // iOS 图标必须不透明（App Store 要求），背景色填充
+  const bg = options.isTransparent ? '#ffffff' : options.bgColor
+  const img = getBaseCroppedCanvas(true, bg)
+
+  const drawIcon = (ctx: CanvasRenderingContext2D, cx: number, cy: number, d: number, radiusRatio = 0.225) => {
+    ctx.save()
+    ctx.beginPath()
+    if (ctx.roundRect) ctx.roundRect(cx - d / 2, cy - d / 2, d, d, d * radiusRatio)
+    else drawRoundRectPolyfill(ctx, cx - d / 2, cy - d / 2, d, d, d * radiusRatio)
+    ctx.clip()
+    ctx.fillStyle = bg
+    ctx.fillRect(cx - d / 2, cy - d / 2, d, d)
+    const r = getResizedCanvas(img, Math.round(d), Math.round(d))
+    ctx.drawImage(r, cx - d / 2, cy - d / 2, d, d)
+    ctx.restore()
+    // 描边光晕
+    ctx.strokeStyle = 'rgba(255,255,255,0.2)'
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    if (ctx.roundRect) ctx.roundRect(cx - d / 2 + 0.5, cy - d / 2 + 0.5, d - 1, d - 1, d * radiusRatio)
+    else drawRoundRectPolyfill(ctx, cx - d / 2 + 0.5, cy - d / 2 + 0.5, d - 1, d - 1, d * radiusRatio)
+    ctx.stroke()
+  }
+
+  // iOS 主图标
+  if (iosMain.value) {
+    const c = iosMain.value
+    c.width = 84; c.height = 84
+    const ctx = c.getContext('2d')
+    if (ctx) { ctx.clearRect(0, 0, 84, 84); drawIcon(ctx, 42, 42, 84) }
+  }
+
+  // 多尺寸对比（40 / 80 / 120 / 180，缩放显示）
+  if (iosSizes.value) {
+    const c = iosSizes.value
+    const sizes = [40, 80, 120, 180]
+    const sc = 0.4
+    c.width = 168; c.height = 90
+    const ctx = c.getContext('2d')
+    if (ctx) {
+      ctx.clearRect(0, 0, c.width, c.height)
+      const total = sizes.reduce((a, s) => a + s * sc, 0) + (sizes.length - 1) * 10
+      let x = (c.width - total) / 2 + (sizes[0] * sc) / 2
+      const y = c.height / 2
+      for (const s of sizes) {
+        drawIcon(ctx, x, y, s * sc)
+        x += s * sc + 10
+      }
+    }
+  }
+
+  // iPhone 主屏模拟
+  if (iosHome.value) {
+    const c = iosHome.value
+    c.width = 108; c.height = 108
+    const ctx = c.getContext('2d')
+    if (ctx) {
+      ctx.clearRect(0, 0, c.width, c.height)
+      ctx.fillStyle = '#0e0e14'
+      ctx.fillRect(0, 0, c.width, c.height)
+      drawIcon(ctx, c.width / 2, 46, 52)
+      ctx.fillStyle = 'rgba(255,255,255,0.85)'
+      ctx.font = '10px system-ui, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.fillText('应用', c.width / 2, 88)
+    }
+  }
+}
+
 // 监听控制项改变时自动重绘画布
-watch([options, uploadedImage], () => {
+watch([options, uploadedImage, themedColor], () => {
   drawPreview()
+  drawAndroid12Previews()
+  drawIosPreviews()
+})
+
+// 切换左栏 Tab 后等待 canvas 挂载再重绘预览
+watch(leftTab, async () => {
+  await nextTick()
+  drawAndroid12Previews()
+  drawIosPreviews()
 })
 
 // ================= 核心图像生成逻辑 =================
@@ -492,6 +735,122 @@ async function getExportImageBuffer(targetW: number, targetH: number, mimeType =
       }
       reader.readAsArrayBuffer(blob)
     }, mimeType, mimeType === 'image/jpeg' ? 0.92 : undefined)
+  })
+}
+
+// ================= SVG 矢量优先导出辅助 =================
+
+/** 将 SVG 内容缩放包裹到自适应图标安全区（默认 66% 居中），供前景矢量使用 */
+function scaleSvgToSafeZone(svg: string, safeRatio = 0.66): string {
+  const vbMatch = svg.match(/viewBox\s*=\s*["']([^"']+)["']/i)
+  if (!vbMatch) return svg
+  const parts = vbMatch[1].trim().split(/[\s,]+/).map(Number)
+  if (parts.length !== 4 || parts.some((n) => isNaN(n))) return svg
+  const [, , w, h] = parts
+  if (!w || !h) return svg
+  const tx = w * (1 - safeRatio) / 2
+  const ty = h * (1 - safeRatio) / 2
+  const openIdx = svg.indexOf('>')
+  if (openIdx < 0) return svg
+  const head = svg.slice(0, openIdx + 1)
+  const tail = svg.slice(openIdx + 1).replace(/<\/svg>\s*$/i, '')
+  return `${head}<g transform="translate(${tx} ${ty}) scale(${safeRatio})">${tail}</g></svg>`
+}
+
+/**
+ * 将用户在画布上调整的缩放/位移，精确换算成 SVG 的 viewBox 裁剪窗口。
+ *
+ * 位图导出通过 getBaseCroppedCanvas 已应用 scale/offset（所见即所得），但矢量导出
+ * 此前直接用原始 SVG 转换，未跟随用户调整。此函数把预览画布的裁剪区窗口映射到
+ * SVG 坐标系：窗口边长(图片像素) = CROP_SIZE / scale，窗口中心 = 图片中心 - offset/scale。
+ */
+function applySvgUserViewBox(svg: string): string {
+  const img = uploadedImage.value
+  if (!img || !svg) return svg
+  const vbMatch = svg.match(/viewBox\s*=\s*["']([^"']+)["']/i)
+  if (!vbMatch) return svg
+  const parts = vbMatch[1].trim().split(/[\s,]+/).map(Number)
+  if (parts.length !== 4 || parts.some((n) => isNaN(n))) return svg
+  const [vx, vy, vw, vh] = parts
+  if (!vw || !vh) return svg
+
+  const scale = options.scale || 1
+  // 裁剪窗口边长（图片像素）；offset 从预览像素换算回图片像素
+  const winPx = CROP_SIZE / scale
+  const cxPx = img.width / 2 - options.offsetX / scale
+  const cyPx = img.height / 2 - options.offsetY / scale
+  // 映射到 SVG 坐标系
+  const winSvgX = (winPx / img.width) * vw
+  const winSvgY = (winPx / img.height) * vh
+  const winSvg = Math.min(winSvgX, winSvgY)
+  const cxSvg = vx + (cxPx / img.width) * vw
+  const cySvg = vy + (cyPx / img.height) * vh
+  const r = (n: number) => Number(n.toFixed(3))
+  return svg.replace(vbMatch[0], `viewBox="${r(cxSvg - winSvg / 2)} ${r(cySvg - winSvg / 2)} ${r(winSvg)} ${r(winSvg)}"`)
+}
+
+/** SVG → Android VectorDrawable；monochrome=true 时统一为黑色（保留 alpha），用于主题图标 */
+function svgToVectorXml(svg: string, widthDp: number, heightDp: number, monochrome = false): string | null {
+  const res = convertSvgToAndroidVector(svg, { widthDp, heightDp, precision: 2 })
+  if (res.error || !res.xml) return null
+  if (!monochrome) return res.xml
+  // 所有填充/描边统一为黑色，保留原始 alpha（主题图标由系统按形状染色）
+  return res.xml
+    .replace(/(android:(?:fill|stroke)Color)="#([0-9a-fA-F]{8})"/g, (_m, key: string, hex: string) => `${key}="#${hex.slice(0, 2)}000000"`)
+    .replace(/(android:(?:fill|stroke)Color)="#([0-9a-fA-F]{6})"/g, '$1="#FF000000"')
+}
+
+/** 构建 1024 透明底工作画布（不含用户背景色，供前景/主题/启动屏使用） */
+function getBaseTransparentCanvas(): HTMLCanvasElement {
+  const img = uploadedImage.value
+  if (!img) throw new Error('未载入图片')
+  const exportCanvas = document.createElement('canvas')
+  exportCanvas.width = 1024
+  exportCanvas.height = 1024
+  const ctx = exportCanvas.getContext('2d')!
+  ctx.save()
+  ctx.filter = `brightness(${options.brightness}%) contrast(${options.contrast}%) saturate(${options.saturate}%) hue-rotate(${options.hueRotate}deg)`
+  const ratio = 1024 / CROP_SIZE
+  const renderW = img.width * options.scale * ratio
+  const renderH = img.height * options.scale * ratio
+  const renderX = 1024 / 2 + options.offsetX * ratio - renderW / 2
+  const renderY = 1024 / 2 + options.offsetY * ratio - renderH / 2
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+  ctx.drawImage(img, renderX, renderY, renderW, renderH)
+  ctx.filter = 'none'
+  ctx.restore()
+  if (options.sharpen > 0) applySharpen(exportCanvas, options.sharpen)
+  return exportCanvas
+}
+
+/** 导出带安全区(默认 66%)的前景 PNG；monochrome=true 时以图形 alpha 蒙版填充纯黑 */
+async function getSafeForegroundBuffer(targetW: number, targetH: number, safeRatio = 0.66, monochrome = false): Promise<Uint8Array> {
+  const base = getBaseTransparentCanvas()
+  const canvas = document.createElement('canvas')
+  canvas.width = targetW
+  canvas.height = targetH
+  const ctx = canvas.getContext('2d')!
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+  const dw = targetW * safeRatio
+  const dh = targetH * safeRatio
+  const dx = (targetW - dw) / 2
+  const dy = (targetH - dh) / 2
+  const resized = getResizedCanvas(base, Math.round(dw), Math.round(dh))
+  ctx.drawImage(resized, dx, dy)
+  if (monochrome) {
+    ctx.globalCompositeOperation = 'source-in'
+    ctx.fillStyle = '#000000'
+    ctx.fillRect(0, 0, targetW, targetH)
+  }
+  return await new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) { reject(new Error('前景图导出失败')); return }
+      const reader = new FileReader()
+      reader.onload = () => resolve(new Uint8Array(reader.result as ArrayBuffer))
+      reader.readAsArrayBuffer(blob)
+    }, 'image/png')
   })
 }
 
@@ -730,43 +1089,121 @@ async function generateAllIcons() {
       }
       iosFolder.file('Contents.json', JSON.stringify(contentsJson, null, 2))
 
+      // macOS AppIcon（Mac 应用图标标准序列，强制不透明填充）
+      const macFolder = zip.folder('ios/macOS.appiconset')!
+      const macSpecs = [
+        { size: 16, name: 'icon_16x16.png', spec: '16x16', scale: '1x' },
+        { size: 32, name: 'icon_16x16@2x.png', spec: '16x16', scale: '2x' },
+        { size: 32, name: 'icon_32x32.png', spec: '32x32', scale: '1x' },
+        { size: 64, name: 'icon_32x32@2x.png', spec: '32x32', scale: '2x' },
+        { size: 128, name: 'icon_128x128.png', spec: '128x128', scale: '1x' },
+        { size: 256, name: 'icon_128x128@2x.png', spec: '128x128', scale: '2x' },
+        { size: 256, name: 'icon_256x256.png', spec: '256x256', scale: '1x' },
+        { size: 512, name: 'icon_256x256@2x.png', spec: '256x256', scale: '2x' },
+        { size: 512, name: 'icon_512x512.png', spec: '512x512', scale: '1x' },
+        { size: 1024, name: 'icon_512x512@2x.png', spec: '512x512', scale: '2x' },
+      ]
+      for (const spec of macSpecs) {
+        const buf = await getExportImageBuffer(spec.size, spec.size, 'image/png', true, forceBg)
+        macFolder.file(spec.name, buf)
+      }
+      macFolder.file('Contents.json', JSON.stringify({
+        images: macSpecs.map((s) => ({ idiom: 'mac', size: s.spec, scale: s.scale, filename: s.name })),
+        info: { author: 'xcode', version: 1 }
+      }, null, 2))
+
       genProgress.value = 75
     }
 
-    // 4. Android 结构化 Mipmap PNG
+    // 4. Android 全套图标资源（多密度 / Adaptive / Android 12+ 主题与启动屏）
     if (platforms.android) {
-      genStatusText.value = '正在打包 Android 密度图标组...'
-      const androidFolder = zip.folder('android/res')!
+      genStatusText.value = '正在打包 Android 全套图标资源...'
+      const androidFolder = zip.folder('android')!
+      const resFolder = androidFolder.folder('res')!
 
-      const androidSpecs = [
-        { density: 'mipmap-mdpi', size: 48 },
-        { density: 'mipmap-hdpi', size: 72 },
-        { density: 'mipmap-xhdpi', size: 96 },
-        { density: 'mipmap-xxhdpi', size: 144 },
-        { density: 'mipmap-xxxhdpi', size: 192 }
+      const densities = [
+        { dir: 'mipmap-mdpi', size: 48 },
+        { dir: 'mipmap-hdpi', size: 72 },
+        { dir: 'mipmap-xhdpi', size: 96 },
+        { dir: 'mipmap-xxhdpi', size: 144 },
+        { dir: 'mipmap-xxxhdpi', size: 192 }
       ]
+      const bgColor = options.isTransparent ? '#ffffff' : options.bgColor
 
-      for (const spec of androidSpecs) {
-        // 导出普通的集成式 ic_launcher 图标
+      // 集成式 launcher（旧设备 fallback，含背景色）
+      for (const spec of densities) {
         const buf = await getExportImageBuffer(spec.size, spec.size)
-        androidFolder.file(`${spec.density}/ic_launcher.png`, buf)
-
-        // 导出 Adaptive 适应性图标所需要的前景图（保留透明通道）与背景图（用户设置的不透明色）
-        const fgBuf = await getExportImageBuffer(spec.size, spec.size)
-        const forceBg = options.isTransparent ? '#ffffff' : options.bgColor
-        const bgBuf = await getExportImageBuffer(spec.size, spec.size, 'image/png', true, forceBg)
-
-        androidFolder.file(`${spec.density}/ic_launcher_foreground.png`, fgBuf)
-        androidFolder.file(`${spec.density}/ic_launcher_background.png`, bgBuf)
+        resFolder.file(`${spec.dir}/ic_launcher.png`, buf)
       }
 
-      // anydpi-v26/ic_launcher.xml adaptive 矢量关联文件
-      const adaptiveXml = `<?xml version="1.0" encoding="utf-8"?>
-<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <background android:drawable="@mipmap/ic_launcher_background" />
-    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
-</adaptive-icon>`
-      androidFolder.file('mipmap-anydpi-v26/ic_launcher.xml', adaptiveXml)
+      resFolder.file('values/colors.xml', `<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <color name="ic_launcher_background">${bgColor}</color>\n</resources>\n`)
+
+      const adaptiveXml = (mono: boolean, fg: string, monoRef = '') => `<?xml version="1.0" encoding="utf-8"?>\n<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">\n    <background android:drawable="@color/ic_launcher_background" />\n    <foreground android:drawable="${fg}" />\n${mono ? `    <monochrome android:drawable="${monoRef}" />\n` : ''}</adaptive-icon>`
+
+      if (isSvgSource.value) {
+        // ===== 矢量优先（SVG 源）：Adaptive 前/背景全部使用 VectorDrawable =====
+        // 应用用户在画布上调整的缩放/位移（裁剪窗口），做到所见即所得
+        const userViewSvg = applySvgUserViewBox(svgSource.value)
+        const fgVector = svgToVectorXml(scaleSvgToSafeZone(userViewSvg), 108, 108, false)
+        const monoVector = svgToVectorXml(userViewSvg, 108, 108, true)
+        if (fgVector) {
+          resFolder.file('drawable/ic_launcher_foreground.xml', fgVector)
+          resFolder.file('drawable/splash_icon.xml', fgVector)
+        }
+        if (monoVector) {
+          resFolder.file('drawable/ic_launcher_monochrome.xml', monoVector)
+        }
+        resFolder.file('mipmap-anydpi-v26/ic_launcher.xml', adaptiveXml(false, '@drawable/ic_launcher_foreground'))
+        resFolder.file('mipmap-anydpi-v26/ic_launcher_round.xml', adaptiveXml(false, '@drawable/ic_launcher_foreground'))
+        resFolder.file('mipmap-anydpi-v33/ic_launcher.xml', adaptiveXml(true, '@drawable/ic_launcher_foreground', '@drawable/ic_launcher_monochrome'))
+        resFolder.file('mipmap-anydpi-v33/ic_launcher_round.xml', adaptiveXml(true, '@drawable/ic_launcher_foreground', '@drawable/ic_launcher_monochrome'))
+      } else {
+        // ===== 位图全覆盖（PNG 源）=====
+        for (const spec of densities) {
+          const fg = await getSafeForegroundBuffer(spec.size, spec.size, 0.66, false)
+          resFolder.file(`${spec.dir}/ic_launcher_foreground.png`, fg)
+          const mono = await getSafeForegroundBuffer(spec.size, spec.size, 0.66, true)
+          resFolder.file(`${spec.dir}/ic_launcher_monochrome.png`, mono)
+        }
+        resFolder.file('mipmap-anydpi-v26/ic_launcher.xml', adaptiveXml(false, '@mipmap/ic_launcher_foreground'))
+        resFolder.file('mipmap-anydpi-v26/ic_launcher_round.xml', adaptiveXml(false, '@mipmap/ic_launcher_foreground'))
+        resFolder.file('mipmap-anydpi-v33/ic_launcher.xml', adaptiveXml(true, '@mipmap/ic_launcher_foreground', '@mipmap/ic_launcher_monochrome'))
+        resFolder.file('mipmap-anydpi-v33/ic_launcher_round.xml', adaptiveXml(true, '@mipmap/ic_launcher_foreground', '@mipmap/ic_launcher_monochrome'))
+        // Android 12+ 启动屏图标（288px，66% 安全区，nodpi 避免密度缩放）
+        const splashBuf = await getSafeForegroundBuffer(288, 288, 0.66, false)
+        resFolder.file('drawable-nodpi/splash_icon.png', splashBuf)
+      }
+
+      // Splash Screen 主题示例（原生 API 31+ 与 AndroidX 兼容库）
+      const splashTheme = `<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <style name="Theme.App.Splash" parent="Theme.SplashScreen">\n        <item name="windowSplashScreenBackground">${bgColor}</item>\n        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_icon</item>\n        <item name="postSplashScreenTheme">@style/Theme.App</item>\n    </style>\n</resources>`
+      resFolder.file('values/styles.xml', splashTheme)
+      resFolder.file('values-v31/styles.xml', splashTheme)
+
+      // 接入说明
+      androidFolder.file('INSTALL.txt', [
+        'Android 图标资源包 使用说明',
+        '============================',
+        '',
+        '【放入工程】',
+        '1. 将 res/ 目录内容合并到 app/src/main/res/ 下',
+        '2. AndroidManifest.xml 中引用：',
+        '   <application android:icon="@mipmap/ic_launcher"',
+        '                  android:roundIcon="@mipmap/ic_launcher_round" ...>',
+        '',
+        '【Android 8.0+ (API 26+) Adaptive Icon】',
+        '- mipmap-anydpi-v26/ 已启用自适应图标',
+        '- 背景使用 values/colors.xml 的 ic_launcher_background 颜色',
+        '- 前景按 66% 安全区留白（矢量源使用 drawable/ic_launcher_foreground.xml）',
+        '',
+        '【Android 12/13+ (API 31+) 主题图标 (Themed Icon)】',
+        '- mipmap-anydpi-v33/ 已加入 <monochrome> 引用，自动适配动态主题',
+        '- 矢量源: drawable/ic_launcher_monochrome.xml | 位图源: mipmap-*/ic_launcher_monochrome.png',
+        '',
+        '【Android 12+ (API 31+) 启动屏 (Splash Screen)】',
+        '- 使用 values/styles.xml（或 values-v31/styles.xml）中的 Theme.App.Splash',
+        '- 在 AndroidManifest 中将 application/activity 主题设为 @style/Theme.App.Splash',
+        '- 图标: SVG 源 drawable/splash_icon.xml（矢量）/ PNG 源 drawable-nodpi/splash_icon.png',
+      ].join('\n'))
 
       genProgress.value = 90
     }
@@ -853,8 +1290,14 @@ onUnmounted(() => {
   <ToolShell title="图标生成器" split>
     <template #left-label>上传与画布裁剪编辑</template>
     <template #left>
-      <!-- 左栏：上传区与画布裁剪编辑 -->
+      <!-- 左栏：上传与画布 / 标准预览 Tabs -->
       <div class="edit-pane">
+        <div class="left-tabs-row">
+          <JcSegmented :options="leftTabOptions" v-model="leftTab" block />
+        </div>
+
+        <!-- Tab: 上传与画布 -->
+        <div v-if="leftTab === 'canvas'" class="edit-tab-canvas">
         <!-- 未上传状态 -->
         <div 
           v-if="!uploadedImage"
@@ -877,8 +1320,9 @@ onUnmounted(() => {
         <div v-else class="crop-workspace">
           <div class="workspace-header">
             <span class="meta-name" :title="imgMeta.name">{{ imgMeta.name }}</span>
+            <span v-if="isSvgSource" class="vec-badge">矢量优先</span>
             <span class="meta-specs">{{ imgMeta.width }} x {{ imgMeta.height }} Px</span>
-            <JcButton size="small" danger @click="uploadedImage = null; uploadedFile = null; imgMeta.src = ''; resetAdjustments()">清除</JcButton>
+            <JcButton size="small" danger @click="clearAll">清除</JcButton>
           </div>
 
           <!-- 鼠标与滚轮操控画布 -->
@@ -911,6 +1355,74 @@ onUnmounted(() => {
               <input type="range" v-model.number="options.offsetY" min="-500" max="500" step="1" />
               <span class="slider-value">{{ options.offsetY }}px</span>
             </div>
+          </div>
+        </div>
+        </div>
+
+        <!-- Tab: 标准预览 -->
+        <div v-else class="edit-tab-preview">
+          <div v-if="!uploadedImage" class="preview-empty">
+            请先在上传与画布中导入图片 / SVG，再查看标准预览
+          </div>
+          <div v-else class="preview-scroll">
+            <!-- Android 12+ 标准预览 -->
+            <div class="preview-section">
+              <div class="preview-section-title">
+                Android 12+ 标准预览
+                <span v-if="isSvgSource" class="vec-badge">矢量优先</span>
+              </div>
+              <div class="a12-grid">
+                <div class="a12-cell">
+                  <canvas ref="a12Circle" class="a12-canvas"></canvas>
+                  <span>圆形 Mask</span>
+                </div>
+                <div class="a12-cell">
+                  <canvas ref="a12Rounded" class="a12-canvas"></canvas>
+                  <span>圆角 Mask</span>
+                </div>
+                <div class="a12-cell">
+                  <canvas ref="a12Square" class="a12-canvas"></canvas>
+                  <span>方形 Mask</span>
+                </div>
+                <div class="a12-cell">
+                  <canvas ref="a12Themed" class="a12-canvas"></canvas>
+                  <span>主题图标</span>
+                </div>
+                <div class="a12-cell">
+                  <canvas ref="a12Splash" class="a12-canvas"></canvas>
+                  <span>启动屏</span>
+                </div>
+                <div class="a12-cell">
+                  <canvas ref="a12Sizes" class="a12-canvas a12-sizes-canvas"></canvas>
+                  <span>48/96/192 尺寸</span>
+                </div>
+              </div>
+              <div class="themed-color-row">
+                <label>主题色</label>
+                <button v-for="c in themedColorOptions" :key="c.value" class="themed-dot" :class="{ on: themedColor === c.value }" :style="{ background: c.value }" :title="c.label" @click="themedColor = c.value"></button>
+              </div>
+            </div>
+
+            <!-- iOS / macOS 预览 -->
+            <div class="preview-section">
+              <div class="preview-section-title">iOS / macOS 预览</div>
+              <div class="a12-grid">
+                <div class="a12-cell">
+                  <canvas ref="iosMain" class="a12-canvas"></canvas>
+                  <span>iOS 主图标</span>
+                </div>
+                <div class="a12-cell">
+                  <canvas ref="iosSizes" class="a12-canvas ios-sizes-canvas"></canvas>
+                  <span>40/80/120/180</span>
+                </div>
+                <div class="a12-cell">
+                  <canvas ref="iosHome" class="a12-canvas"></canvas>
+                  <span>主屏模拟</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="preview-tip">预览实时反映上传图、缩放/位移、调色与去模糊设置</div>
           </div>
         </div>
       </div>
@@ -1107,7 +1619,75 @@ onUnmounted(() => {
   flex: 1;
   min-width: 0;
   height: 100%;
+}
+
+/* 左栏视图切换 Tabs */
+.left-tabs-row {
+  flex-shrink: 0;
+  margin-bottom: 10px;
+}
+
+.edit-tab-canvas {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.edit-tab-preview {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.preview-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-right: 2px;
+}
+
+.preview-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
   justify-content: center;
+  text-align: center;
+  font-size: 12px;
+  color: var(--jc-text-secondary);
+  border: 1px dashed var(--jc-border-strong);
+  border-radius: 6px;
+  padding: 24px;
+}
+
+.preview-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--jc-text-highlight);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-left: 2.5px solid var(--jc-color-accent);
+  padding-left: 6px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.preview-tip {
+  font-size: 9.5px;
+  color: var(--jc-text-secondary);
+  text-align: center;
+  padding: 2px 0 6px;
+}
+
+.ios-sizes-canvas {
+  width: 168px;
+  height: 90px;
 }
 
 .flex-fill {
@@ -1279,9 +1859,13 @@ onUnmounted(() => {
 .config-pane {
   display: flex;
   flex-direction: column;
-  flex: 0 0 320px;
-  height: 100%;
+  /* 右栏在 .tool-shell__pane（纵向 flex）中：用 width 固定宽度，flex:1 撑满高度避免下方留白 */
+  width: 340px;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
 }
 
 .config-group {
@@ -1289,12 +1873,14 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 8px;
   margin-bottom: 12px;
+  /* 关键：任何分组都不允许被 flex 压缩，由外层整体滚动，避免面板被挤压消失 */
   flex-shrink: 0;
-  
+
   &.flex-fill-y {
-    flex: 1;
+    /* 只增长吸收剩余空间、永不收缩，导出预设组填满且不塌陷 */
+    flex: 1 0 auto;
     min-height: 0;
-    margin-bottom: 0;
+    margin-bottom: 12px;
   }
 }
 
@@ -1455,11 +2041,9 @@ onUnmounted(() => {
 
 .presets-list {
   flex: 1;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding-right: 2px;
 }
 
 /* Custom Checkbox CSS */
@@ -1644,5 +2228,95 @@ onUnmounted(() => {
   height: 100%;
   background: var(--jc-color-accent);
   transition: width 0.15s ease-out;
+}
+
+/* ================= SVG 矢量徽标 ================= */
+.vec-badge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  color: #0f172a;
+  background: linear-gradient(135deg, #38bdf8, #818cf8);
+  padding: 1px 6px;
+  border-radius: 8px;
+  letter-spacing: 0.3px;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+/* ================= Android 12+ 标准预览 ================= */
+.a12-preview-note {
+  font-size: 9.5px;
+  color: var(--jc-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.a12-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.a12-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  background: var(--jc-bg-app);
+  border: 1px solid var(--jc-border-strong);
+  border-radius: 4px;
+  padding: 5px 2px 3px;
+  overflow: hidden;
+
+  span {
+    font-size: 8.5px;
+    color: var(--jc-text-secondary);
+    white-space: nowrap;
+  }
+}
+
+.a12-canvas {
+  width: 72px;
+  height: 72px;
+  background: #121216;
+  border-radius: 3px;
+  display: block;
+}
+
+.a12-sizes-canvas {
+  width: 96px;
+  height: 72px;
+}
+
+.themed-color-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  label {
+    font-size: 9.5px;
+    color: var(--jc-text-secondary);
+  }
+}
+
+.themed-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s;
+  padding: 0;
+
+  &:hover {
+    transform: scale(1.15);
+  }
+  &.on {
+    border-color: #fff;
+    box-shadow: 0 0 0 2px var(--jc-color-accent);
+  }
 }
 </style>
